@@ -7,6 +7,11 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
 
 let mainWindow: BrowserWindow | null = null;
 let hudWindow: BrowserWindow | null = null;
+let minimizeToTrayEnabled = false;
+
+export function setMinimizeToTray(enabled: boolean): void {
+  minimizeToTrayEnabled = enabled;
+}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -37,9 +42,16 @@ export function createMainWindow(): BrowserWindow {
   });
 
   mainWindow.on('close', (e) => {
-    // Hide to tray instead of quitting
+    // Hide to tray instead of quitting (existing behavior)
     if (mainWindow && !(mainWindow as unknown as { _forceQuit?: boolean })._forceQuit) {
       e.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
+  mainWindow.on('minimize', () => {
+    if (minimizeToTrayEnabled && mainWindow) {
+      // The window has been minimized; hide it to remove from taskbar.
       mainWindow.hide();
     }
   });

@@ -83,6 +83,8 @@ export interface Settings {
   hudPosition: { x: number; y: number } | null;
   recording: RecordingSettings;
   transcription: TranscriptionSettings;
+  confirmRecordingEnable: boolean;
+  minimizeToTray: boolean;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -170,6 +172,8 @@ export const DEFAULT_SETTINGS: Settings = {
     language: 'ja',
     modelDownloaded: {},
   },
+  confirmRecordingEnable: true,
+  minimizeToTray: false,
 };
 
 export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: string }> = [

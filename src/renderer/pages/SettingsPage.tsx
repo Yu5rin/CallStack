@@ -62,7 +62,11 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
   const handleToggleRecording = (checked: boolean) => {
     if (checked) {
-      setShowRecordingWarning(true);
+      if (draft.confirmRecordingEnable) {
+        setShowRecordingWarning(true);
+      } else {
+        updateRecording({ enabled: true });
+      }
     } else {
       updateRecording({ enabled: false });
     }
@@ -136,6 +140,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               onChange={(e) => handleToggleRecording(e.target.checked)}
             />
             録音を有効にする
+          </label>
+        </Row>
+        <Row label="有効化時の同意確認">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.confirmRecordingEnable}
+              onChange={(e) => update({ confirmRecordingEnable: e.target.checked })}
+            />
+            録音を有効化する時に確認モーダルを表示する
           </label>
         </Row>
         <Row label="音声ソース">
@@ -235,6 +249,23 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             })}
           />
         </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">ウィンドウ</h3>
+        <Row label="最小化の動作">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.minimizeToTray}
+              onChange={(e) => update({ minimizeToTray: e.target.checked })}
+            />
+            最小化時にタスクトレイに格納する
+          </label>
+          <span className="ml-2 text-xs text-slate-500">
+            オフなら通常通りタスクバーへ最小化されます
+          </span>
+        </Row>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

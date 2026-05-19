@@ -17,6 +17,7 @@ import {
   broadcast,
   getHudWindow,
   markForceQuit,
+  setMinimizeToTray,
 } from './window';
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
 import { exportCsv, parseCsv } from './csv';
@@ -227,6 +228,7 @@ function setupIpc(): void {
   ipcMain.handle('settings:update', (_e, next: Settings) => {
     store.setSettings(next);
     reRegisterShortcuts();
+    setMinimizeToTray(next.minimizeToTray);
     broadcast('app-event', { type: 'settings:updated', settings: next });
     return next;
   });
@@ -522,6 +524,7 @@ async function main() {
   updateTray({ active: false }, trayHandlers);
 
   reRegisterShortcuts();
+  setMinimizeToTray(store.getSettings().minimizeToTray);
   createMainWindow();
   scheduleDailyCleanup(store, broadcast);
 
