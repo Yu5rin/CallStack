@@ -1,0 +1,75 @@
+import { promises as fs, createWriteStream, WriteStream } from 'node:fs';
+import path from 'node:path';
+import { getDirs } from './paths';
+import { convertWebmToMp3 } from './ffmpeg';
+
+interface Session {
+  callId: string;
+  tmpPath: string;
+  stream: WriteStream;
+  bytes: number;
+  closed: Promise<void>;
+}
+
+const sessions = new Map<string, Session>();
+
+export async function appendChunk(callId: string, buf: Buffer): Promise<void> {
+  let s = sessions.get(callId);
+  if (!s) {
+    const { tmpRecordings } = getDirs();
+    const tmpPath = path.join(tmpRecordings, `${callId}.webm`);
+    const stream = createWriteStream(tmpPath, { flags: 'a' });
+    const closed = new Promise<void>((resolve, reject) => {
+      stream.on('close', () => resolve());
+      stream.on('error', reject);
+    });
+    s = { callId, tmpPath, stream, bytes: 0, closed };
+    sessions.set(callId, s);
+  }
+  await new Promise<void>((resolve, reject) => {
+    s!.stream.write(buf, (err) => err ? reject(err) : resolve());
+  });
+  s.bytes += buf.length;
+}
+
+export async function abort(callId: string): Promise<void> {
+  const s = sessions.get(callId);
+  if (!s) return;
+  await new Promise<void>((resolve) => s.stream.end(() => resolve()));
+  await fs.unlink(s.tmpPath).catch(() => {});
+  sessions.delete(callId);
+}
+
+export interface FinalizeResult {
+  path: string;            // relative to recordings dir, e.g. 'abc.mp3'
+  absPath: string;
+  bytes: number;
+  durationSec: number;
+}
+
+export async function finalize(callId: string, mp3Bitrate: number): Promise<FinalizeResult | null> {
+  const s = sessions.get(callId);
+  if (!s) return null;
+  await new Promise<void>((resolve) => s.stream.end(() => resolve()));
+  await s.closed.catch(() => {});
+  sessions.delete(callId);
+
+  if (s.bytes === 0) {
+    await fs.unlink(s.tmpPath).catch(() => {});
+    return null;
+  }
+
+  const { recordings } = getDirs();
+  const rel = `${callId}.mp3`;
+  const abs = path.join(recordings, rel);
+  const { durationSec } = await convertWebmToMp3(s.tmpPath, abs, mp3Bitrate);
+  const stat = await fs.stat(abs);
+  await fs.unlink(s.tmpPath).catch(() => {});
+  return { path: rel, absPath: abs, bytes: stat.size, durationSec };
+}
+
+export async function deleteRecording(relPath: string): Promise<void> {
+  const { recordings } = getDirs();
+  const abs = path.join(recordings, relPath);
+  await fs.unlink(abs).catch(() => {});
+}

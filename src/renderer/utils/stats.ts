@@ -110,6 +110,51 @@ export function computeByTag(calls: CallRecord[], tagColors: Record<string, stri
   return [...map.values()].sort((a, b) => b.totalSec - a.totalSec);
 }
 
+export interface ContactBucket {
+  name: string;
+  count: number;
+  totalSec: number;
+  avgSec: number;
+  lastCallAt: string;
+  topTag: string | null;
+}
+
+export function computeByContact(calls: CallRecord[]): ContactBucket[] {
+  const map = new Map<string, { name: string; count: number; totalSec: number; last: string; tagCounts: Map<string, number> }>();
+  for (const c of calls) {
+    if (!c.contactName || !c.endTime || c.durationSec === null) continue;
+    const cur = map.get(c.contactName) ?? {
+      name: c.contactName,
+      count: 0,
+      totalSec: 0,
+      last: c.startTime,
+      tagCounts: new Map<string, number>(),
+    };
+    cur.count += 1;
+    cur.totalSec += c.durationSec;
+    if (c.startTime > cur.last) cur.last = c.startTime;
+    if (c.tag) cur.tagCounts.set(c.tag, (cur.tagCounts.get(c.tag) ?? 0) + 1);
+    map.set(c.contactName, cur);
+  }
+  return [...map.values()]
+    .map((b) => {
+      let topTag: string | null = null;
+      let topCount = 0;
+      for (const [t, n] of b.tagCounts) {
+        if (n > topCount) { topTag = t; topCount = n; }
+      }
+      return {
+        name: b.name,
+        count: b.count,
+        totalSec: b.totalSec,
+        avgSec: Math.round(b.totalSec / b.count),
+        lastCallAt: b.last,
+        topTag,
+      };
+    })
+    .sort((a, b) => b.totalSec - a.totalSec);
+}
+
 export function computeHourHistogram(calls: CallRecord[]): Array<{ hour: number; count: number; totalSec: number }> {
   const arr = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0, totalSec: 0 }));
   for (const c of calls) {

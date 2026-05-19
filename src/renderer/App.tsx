@@ -13,9 +13,15 @@ type Page = 'list' | 'stats' | 'settings';
 
 export function App() {
   const [page, setPage] = useState<Page>('list');
+  const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
+
+  const navigateToContact = (name: string) => {
+    setInitialContactFilter(name);
+    setPage('list');
+  };
 
   const soundOn = useRef(true);
   soundOn.current = settings?.soundFeedback ?? true;
@@ -71,8 +77,17 @@ export function App() {
       </header>
 
       <main className="flex-1 overflow-auto">
-        {page === 'list' && <CallListPage calls={calls} settings={settings} />}
-        {page === 'stats' && <StatsPage calls={calls} settings={settings} />}
+        {page === 'list' && (
+          <CallListPage
+            calls={calls}
+            settings={settings}
+            initialContactFilter={initialContactFilter}
+            onConsumeInitialFilter={() => setInitialContactFilter(null)}
+          />
+        )}
+        {page === 'stats' && (
+          <StatsPage calls={calls} settings={settings} onSelectContact={navigateToContact} />
+        )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
     </div>

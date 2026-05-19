@@ -5,6 +5,7 @@ export interface ShortcutHandlers {
   start: () => void;
   end: () => void;
   toggle: () => void;
+  toggleHold: () => void;
 }
 
 export function registerShortcuts(shortcuts: ShortcutSettings, handlers: ShortcutHandlers): string[] {
@@ -14,6 +15,7 @@ export function registerShortcuts(shortcuts: ShortcutSettings, handlers: Shortcu
     [shortcuts.startCall, handlers.start, 'startCall'],
     [shortcuts.endCall, handlers.end, 'endCall'],
     [shortcuts.toggleWindow, handlers.toggle, 'toggleWindow'],
+    [shortcuts.toggleHold, handlers.toggleHold, 'toggleHold'],
   ];
   for (const [accel, handler, label] of attempts) {
     if (!accel) continue;

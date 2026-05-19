@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { CallRecord, Settings, DEFAULT_SETTINGS } from '../shared/types';
+import { CallRecord, HoldSegment, Settings, DEFAULT_SETTINGS } from '../shared/types';
 
 interface DataFile {
   version: number;
@@ -37,10 +37,21 @@ export class Store {
         calls: Array.isArray(parsed.calls) ? parsed.calls : [],
         settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
       };
-      // Ensure shortcuts object is fully populated
+      // Ensure nested objects are fully populated (handle older versions)
       this.data.settings.shortcuts = {
         ...DEFAULT_SETTINGS.shortcuts,
         ...(parsed.settings?.shortcuts ?? {}),
+      };
+      this.data.settings.recording = {
+        ...DEFAULT_SETTINGS.recording,
+        ...(parsed.settings?.recording ?? {}),
+      };
+      this.data.settings.transcription = {
+        ...DEFAULT_SETTINGS.transcription,
+        ...(parsed.settings?.transcription ?? {}),
+        modelDownloaded: {
+          ...(parsed.settings?.transcription?.modelDownloaded ?? {}),
+        },
       };
     } catch (err: unknown) {
       const e = err as NodeJS.ErrnoException;
@@ -93,6 +104,85 @@ export class Store {
       return true;
     }
     return false;
+  }
+
+  /** Returns the call by id (or null). */
+  getCall(id: string): CallRecord | null {
+    return this.data.calls.find((c) => c.id === id) ?? null;
+  }
+
+  /** Bulk upsert by id. Returns counts. */
+  upsertMany(records: CallRecord[]): { inserted: number; updated: number } {
+    let inserted = 0;
+    let updated = 0;
+    for (const r of records) {
+      const idx = this.data.calls.findIndex((c) => c.id === r.id);
+      if (idx >= 0) {
+        this.data.calls[idx] = { ...this.data.calls[idx], ...r };
+        updated += 1;
+      } else {
+        this.data.calls.push(r);
+        inserted += 1;
+      }
+    }
+    this.scheduleWrite();
+    return { inserted, updated };
+  }
+
+  /** Begin a hold segment on the currently active call. Returns true if started. */
+  startHold(): { record: CallRecord | null; started: boolean } {
+    const active = this.getActiveCall();
+    if (!active) return { record: null, started: false };
+    const holds: HoldSegment[] = active.holds ? active.holds.slice() : [];
+    if (holds.length && holds[holds.length - 1].end === null) {
+      return { record: active, started: false };
+    }
+    holds.push({ start: new Date().toISOString(), end: null, sec: 0 });
+    const updated = this.updateCall(active.id, { holds });
+    return { record: updated, started: true };
+  }
+
+  /** End the current hold segment. Returns true if a segment was closed. */
+  endHold(): { record: CallRecord | null; ended: boolean } {
+    const active = this.getActiveCall();
+    if (!active || !active.holds || !active.holds.length) return { record: active, ended: false };
+    const holds = active.holds.slice();
+    const last = holds[holds.length - 1];
+    if (last.end !== null) return { record: active, ended: false };
+    const end = new Date().toISOString();
+    const sec = Math.max(0, Math.round((new Date(end).getTime() - new Date(last.start).getTime()) / 1000));
+    holds[holds.length - 1] = { ...last, end, sec };
+    const holdSec = holds.reduce((a, h) => a + (h.sec ?? 0), 0);
+    const updated = this.updateCall(active.id, { holds, holdSec });
+    return { record: updated, ended: true };
+  }
+
+  /** Returns true if active call has an open hold segment. */
+  isHolding(): boolean {
+    const a = this.getActiveCall();
+    if (!a || !a.holds || !a.holds.length) return false;
+    return a.holds[a.holds.length - 1].end === null;
+  }
+
+  /** For tick events: live hold seconds including any in-progress segment. */
+  getLiveHoldSec(): number {
+    const a = this.getActiveCall();
+    if (!a || !a.holds || !a.holds.length) return 0;
+    let total = 0;
+    for (const h of a.holds) {
+      if (h.end) total += h.sec;
+      else total += Math.max(0, Math.round((Date.now() - new Date(h.start).getTime()) / 1000));
+    }
+    return total;
+  }
+
+  /** Create a pre-import backup with a custom suffix. */
+  async backupNow(suffix: string): Promise<string> {
+    await fs.mkdir(this.backupDir, { recursive: true });
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const target = path.join(this.backupDir, `data-${stamp}-${suffix}.json`);
+    await fs.writeFile(target, JSON.stringify(this.data, null, 2), 'utf-8');
+    return target;
   }
 
   setSettings(settings: Settings): void {

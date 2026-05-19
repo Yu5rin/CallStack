@@ -36,11 +36,11 @@ export function createTray(handlers: TrayHandlers): Tray {
   return tray;
 }
 
-export function updateTray(state: { active: boolean; elapsedSec?: number }, handlers: TrayHandlers): void {
+export function updateTray(state: { active: boolean; elapsedSec?: number; holding?: boolean }, handlers: TrayHandlers): void {
   if (!tray) return;
   tray.setImage(buildIcon(state.active));
   const tip = state.active
-    ? `TelTimeStack — 通話中 ${formatHMS(state.elapsedSec ?? 0)}`
+    ? `TelTimeStack — ${state.holding ? '保留中' : '通話中'} ${formatHMS(state.elapsedSec ?? 0)}`
     : 'TelTimeStack — 待機中';
   tray.setToolTip(tip);
   tray.setContextMenu(buildMenu(state.active, handlers));

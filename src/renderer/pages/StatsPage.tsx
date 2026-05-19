@@ -1,13 +1,19 @@
 import { useMemo } from 'react';
 import { CallRecord, Settings } from '../../shared/types';
-import { computeOverview, computeDaily, computeByTag, computeHourHistogram } from '../utils/stats';
-import { formatHMS, formatHMShort } from '../utils/format';
+import { computeOverview, computeDaily, computeByTag, computeHourHistogram, computeByContact } from '../utils/stats';
+import { formatHMS, formatHMShort, formatDateTime } from '../utils/format';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 
-export function StatsPage({ calls, settings }: { calls: CallRecord[]; settings: Settings }) {
+interface Props {
+  calls: CallRecord[];
+  settings: Settings;
+  onSelectContact?: (name: string) => void;
+}
+
+export function StatsPage({ calls, settings, onSelectContact }: Props) {
   const overview = useMemo(() => computeOverview(calls), [calls]);
   const tagColors = useMemo(() => {
     const m: Record<string, string> = {};
@@ -17,15 +23,17 @@ export function StatsPage({ calls, settings }: { calls: CallRecord[]; settings: 
   const daily = useMemo(() => computeDaily(calls, 30), [calls]);
   const byTag = useMemo(() => computeByTag(calls, tagColors), [calls, tagColors]);
   const hourly = useMemo(() => computeHourHistogram(calls), [calls]);
+  const byContact = useMemo(() => computeByContact(calls), [calls]);
 
   const dailyChart = daily.map((d) => ({
-    date: d.date.slice(5), // MM-DD
+    date: d.date.slice(5),
     minutes: Math.round((d.totalSec / 60) * 10) / 10,
     count: d.count,
   }));
 
   const tagPie = byTag.map((b) => ({ name: b.tag, value: b.totalSec, color: b.color }));
   const hourChart = hourly.map((h) => ({ hour: `${h.hour}時`, count: h.count }));
+  const top10Contacts = byContact.slice(0, 10).map((b) => ({ name: b.name, minutes: Math.round(b.totalSec / 60) }));
 
   return (
     <div className="space-y-6 p-6">
@@ -119,6 +127,56 @@ export function StatsPage({ calls, settings }: { calls: CallRecord[]; settings: 
                 <td className="py-2 text-right tabular-nums">{b.count}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(Math.round(b.totalSec / b.count))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">連絡先別サマリー（上位 TOP10 通話時間）</h3>
+        {top10Contacts.length === 0 ? (
+          <div className="flex h-32 items-center justify-center text-sm text-slate-400">連絡先名が設定された記録がありません</div>
+        ) : (
+          <div className="h-56">
+            <ResponsiveContainer>
+              <BarChart data={top10Contacts} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
+                <Tooltip formatter={(v: number | string) => [`${v} 分`, '通話時間']} />
+                <Bar dataKey="minutes" fill="#a855f7" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <table className="mt-4 w-full text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="py-2">連絡先</th>
+              <th className="py-2 text-right">件数</th>
+              <th className="py-2 text-right">合計</th>
+              <th className="py-2 text-right">平均</th>
+              <th className="py-2">トップタグ</th>
+              <th className="py-2">最終</th>
+            </tr>
+          </thead>
+          <tbody>
+            {byContact.length === 0 && (
+              <tr><td colSpan={6} className="py-4 text-center text-slate-400">データなし</td></tr>
+            )}
+            {byContact.map((b) => (
+              <tr
+                key={b.name}
+                onClick={() => onSelectContact?.(b.name)}
+                className="cursor-pointer border-t border-slate-100 hover:bg-brand-50"
+              >
+                <td className="py-2 font-medium text-brand-700">{b.name}</td>
+                <td className="py-2 text-right tabular-nums">{b.count}</td>
+                <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
+                <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.avgSec)}</td>
+                <td className="py-2 text-xs">{b.topTag ?? '—'}</td>
+                <td className="py-2 text-xs text-slate-600">{formatDateTime(b.lastCallAt)}</td>
               </tr>
             ))}
           </tbody>

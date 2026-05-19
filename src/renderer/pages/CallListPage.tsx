@@ -1,20 +1,43 @@
-import { useMemo, useState } from 'react';
-import { CallRecord, Settings, CsvExportOptions } from '../../shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import { CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../shared/types';
 import { CallEditDialog } from '../components/CallEditDialog';
 import { formatDateTime, formatHMS } from '../utils/format';
 
-export function CallListPage({ calls, settings }: { calls: CallRecord[]; settings: Settings }) {
+interface Props {
+  calls: CallRecord[];
+  settings: Settings;
+  initialContactFilter?: string | null;
+  onConsumeInitialFilter?: () => void;
+}
+
+export function CallListPage({ calls, settings, initialContactFilter, onConsumeInitialFilter }: Props) {
   const [editing, setEditing] = useState<CallRecord | null>(null);
   const [query, setQuery] = useState('');
   const [filterTag, setFilterTag] = useState<string>('');
+  const [filterContact, setFilterContact] = useState<string>('');
   const [showUntagged, setShowUntagged] = useState(false);
   const [exportRange, setExportRange] = useState<CsvExportOptions['range']>('all');
+  const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
+
+  // Receive cross-page contact filter
+  useEffect(() => {
+    if (initialContactFilter) {
+      setFilterContact(initialContactFilter);
+      onConsumeInitialFilter?.();
+    }
+  }, [initialContactFilter, onConsumeInitialFilter]);
 
   const tagColor = useMemo(() => {
     const m: Record<string, string> = {};
     for (const t of settings.tags) m[t.name] = t.color;
     return m;
   }, [settings.tags]);
+
+  const allContacts = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of calls) if (c.contactName) set.add(c.contactName);
+    return [...set].sort();
+  }, [calls]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -24,29 +47,33 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
       .filter((c) => {
         if (showUntagged && c.tag) return false;
         if (filterTag && c.tag !== filterTag) return false;
+        if (filterContact && c.contactName !== filterContact) return false;
         if (!q) return true;
         const hay = [
           c.memo,
           c.contactName ?? '',
           c.phoneNumber ?? '',
           c.tag ?? '',
+          c.transcript?.text ?? '',
         ].join(' ').toLowerCase();
         return hay.includes(q);
       });
-  }, [calls, query, filterTag, showUntagged]);
+  }, [calls, query, filterTag, filterContact, showUntagged]);
 
   const handleExport = async () => {
     const r = await window.api.csv.export({ range: exportRange });
-    if (!r.canceled) {
-      alert(`${r.count} 件を ${r.path} にエクスポートしました`);
-    }
+    if (!r.canceled) alert(`${r.count} 件を ${r.path} にエクスポートしました`);
+  };
+
+  const handleImport = async () => {
+    const r = await window.api.csv.import();
+    if (r.canceled) return;
+    setImportResult(r.result);
   };
 
   const handleWeeklyReport = async () => {
     const r = await window.api.report.weekly();
-    if (!r.canceled) {
-      alert(`週次レポートを ${r.path} に保存しました`);
-    }
+    if (!r.canceled) alert(`週次レポートを ${r.path} に保存しました`);
   };
 
   const handleAddManual = async () => {
@@ -64,7 +91,7 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="検索（メモ・連絡先・電話番号）"
+          placeholder="検索（メモ・連絡先・電話・文字起こし）"
           className="flex-1 min-w-[240px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none"
         />
         <select
@@ -77,6 +104,16 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
             <option key={t.name} value={t.name}>{t.name}</option>
           ))}
         </select>
+        <select
+          value={filterContact}
+          onChange={(e) => setFilterContact(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+        >
+          <option value="">すべての連絡先</option>
+          {allContacts.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
@@ -85,12 +122,18 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
           />
           未タグのみ ({untaggedCount})
         </label>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <button
             onClick={handleAddManual}
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             手動追加
+          </button>
+          <button
+            onClick={handleImport}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            CSV インポート
           </button>
           <select
             value={exportRange}
@@ -120,51 +163,72 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">開始時刻</th>
-              <th className="px-4 py-3">終了時刻</th>
-              <th className="px-4 py-3 text-right">通話時間</th>
+              <th className="px-4 py-3">開始</th>
+              <th className="px-4 py-3">終了</th>
+              <th className="px-4 py-3 text-right">通話</th>
+              <th className="px-4 py-3 text-right">保留</th>
+              <th className="px-4 py-3 text-right">純通話</th>
               <th className="px-4 py-3">タグ</th>
               <th className="px-4 py-3">連絡先</th>
-              <th className="px-4 py-3">メモ</th>
+              <th className="px-4 py-3 w-10 text-center">録音</th>
+              <th className="px-4 py-3">メモ / 文字起こし</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
-                  まだ記録がありません。{settings.shortcuts.startCall} で通話を開始しましょう。
+                <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
+                  記録がありません。{settings.shortcuts.startCall} で通話を開始しましょう。
                 </td>
               </tr>
             )}
-            {filtered.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => setEditing(c)}
-                className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-              >
-                <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700">{formatDateTime(c.startTime)}</td>
-                <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700">
-                  {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600">通話中…</span>}
-                </td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900">
-                  {c.durationSec === null ? '—' : formatHMS(c.durationSec)}
-                </td>
-                <td className="px-4 py-3">
-                  {c.tag ? (
-                    <span
-                      className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                      style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
-                    >
-                      {c.tag}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-slate-400">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-slate-700">{c.contactName || '—'}</td>
-                <td className="px-4 py-3 text-slate-700 truncate max-w-xs">{c.memo || '—'}</td>
-              </tr>
-            ))}
+            {filtered.map((c) => {
+              const hold = c.holdSec ?? 0;
+              const talk = c.durationSec === null ? null : Math.max(0, c.durationSec - hold);
+              return (
+                <tr
+                  key={c.id}
+                  onClick={() => setEditing(c)}
+                  className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                >
+                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700">{formatDateTime(c.startTime)}</td>
+                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700">
+                    {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600">通話中…</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900">
+                    {c.durationSec === null ? '—' : formatHMS(c.durationSec)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-amber-600">
+                    {hold ? formatHMS(hold) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900">
+                    {talk === null ? '—' : formatHMS(talk)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {c.tag ? (
+                      <span
+                        className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                        style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
+                      >
+                        {c.tag}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">{c.contactName || '—'}</td>
+                  <td className="px-4 py-3 text-center text-base">
+                    {c.audio && <span title="録音あり">🎤</span>}
+                    {c.transcript && <span title="文字起こし済">📝</span>}
+                    {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
+                    {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 max-w-xs truncate">
+                    {c.memo || c.transcript?.text || '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -175,6 +239,35 @@ export function CallListPage({ calls, settings }: { calls: CallRecord[]; setting
           settings={settings}
           onClose={() => setEditing(null)}
         />
+      )}
+
+      {importResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setImportResult(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-lg font-bold">CSV インポート完了</h3>
+            <ul className="space-y-1 text-sm text-slate-800">
+              <li>✅ 新規追加: <span className="font-semibold">{importResult.inserted}</span></li>
+              <li>🔄 更新: <span className="font-semibold">{importResult.updated}</span></li>
+              <li>⏭ スキップ: <span className="font-semibold">{importResult.skipped}</span></li>
+              <li>⚠️ エラー: <span className="font-semibold">{importResult.errors.length}</span></li>
+            </ul>
+            {importResult.errors.length > 0 && (
+              <div className="mt-3 max-h-40 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-xs">
+                {importResult.errors.map((e, i) => (
+                  <div key={i}>行 {e.row}: {e.message}</div>
+                ))}
+              </div>
+            )}
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setImportResult(null)}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
