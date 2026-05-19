@@ -67,7 +67,8 @@
           "arch": ["x64"]
         }
       ],
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
