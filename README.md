@@ -96,14 +96,35 @@ npm run build
 - 型チェック → `dist/`（UI）と `dist-electron/`（main・preload）が生成されます
 - まだ `.exe` にはなりません（次のステップで作ります）
 
-### 5. Windows 用 `.exe` インストーラの作成
+### 5. 配布用パッケージの作成
+
+#### 方法A: ZIP 配布（既定・インストール不要）
 
 ```powershell
 npm run dist:win
 ```
 
-- 完了後、`release/0.1.0/` フォルダに `TelTimeStack Setup 0.1.0.exe` が出力されます
-- そのインストーラをダブルクリックしてインストールすれば、スタートメニューから起動できます
+- 完了後、`release\0.1.0\TelTimeStack-0.1.0-win-x64.zip` が出力されます
+- 配布された ZIP を解凍 → `TelTimeStack.exe` をダブルクリックで起動できます（インストール不要）
+- 設定や記録は通常どおり `%APPDATA%\TelTimeStack\` に保存されます
+
+#### 方法B: ポータブル `.exe` 1ファイル
+
+```powershell
+npm run dist:portable
+```
+
+- `release\0.1.0\` に単一の `.exe` ファイルが出力されます
+- USB メモリで持ち運ぶ用途などに便利
+
+#### 方法C: インストーラ（NSIS）
+
+```powershell
+npm run dist:installer
+```
+
+- `release\0.1.0\TelTimeStack Setup 0.1.0.exe` が出力されます
+- インストール先を指定するインストーラ形式
 
 ---
 
@@ -172,7 +193,9 @@ npm install
 | `npm run dev` | 開発起動（ホットリロードあり） |
 | `npm run typecheck` | TypeScript 型チェックのみ |
 | `npm run build` | プロダクションビルド（`dist/` と `dist-electron/`） |
-| `npm run dist:win` | Windows 用 `.exe`（NSIS）を `release/` に出力 |
+| `npm run dist:win` | Windows 用 **ZIP** を `release/` に出力（既定・インストール不要） |
+| `npm run dist:portable` | 単一の **ポータブル `.exe`** を出力 |
+| `npm run dist:installer` | **NSIS インストーラ**（`Setup .exe`）を出力 |
 
 ## 技術スタック
 
