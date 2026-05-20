@@ -20,6 +20,24 @@ export class WhisperMissingError extends Error {
   }
 }
 
+export async function checkSetup(model: WhisperModel): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!(await isModelDownloaded(model))) {
+    return { ok: false, error: `モデル '${model}' が未ダウンロードです。設定画面からダウンロードしてください。` };
+  }
+  try {
+    await resolveWhisperBin();
+  } catch (err) {
+    if (err instanceof WhisperMissingError) {
+      return {
+        ok: false,
+        error: `whisper.cpp の実行ファイルが見つかりません。\n${err.binaryPath}\nREADME「文字起こしの準備」を参照してください。`,
+      };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
+  return { ok: true };
+}
+
 async function resolveWhisperBin(): Promise<string> {
   const { whisperBin } = getDirs();
   try {

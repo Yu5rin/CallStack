@@ -25,7 +25,7 @@ import { notify } from './notifications';
 import { ensureAppDirs } from './paths';
 import { registerAppProtocol, registerAppProtocolPrivilege } from './protocol';
 import * as recording from './recording';
-import { enqueue as enqueueTranscription, setQueueHandlers, WhisperMissingError } from './transcription';
+import { enqueue as enqueueTranscription, setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup } from './transcription';
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 
@@ -349,8 +349,19 @@ function setupIpc(): void {
 
   // ============ Transcription ============
   ipcMain.handle('transcription:start', async (_e, callId: string) => {
+    const rec = store.getCall(callId);
+    if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
+    if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
+    const s = store.getSettings();
+    const setup = await checkTranscriptionSetup(s.transcription.model);
+    if (!setup.ok) return setup;
     queueTranscription(callId);
-    return true;
+    return { ok: true };
+  });
+
+  ipcMain.handle('transcription:check-setup', async () => {
+    const s = store.getSettings();
+    return checkTranscriptionSetup(s.transcription.model);
   });
 
   ipcMain.handle('transcription:download-model', async (_e, model: WhisperModel) => {

@@ -4,6 +4,46 @@ import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
 
+function SetupCheck() {
+  const [status, setStatus] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const run = async () => {
+    setChecking(true);
+    try {
+      setStatus(await window.api.transcription.checkSetup());
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    run();
+  }, []);
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="text-xs font-medium text-slate-700">セットアップ状態</div>
+        <button
+          onClick={run}
+          disabled={checking}
+          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50"
+        >
+          再チェック
+        </button>
+      </div>
+      {status === null && <div className="text-xs text-slate-500">確認中…</div>}
+      {status && status.ok && (
+        <div className="text-xs text-emerald-700">✅ 文字起こしの準備が整っています。</div>
+      )}
+      {status && !status.ok && (
+        <div className="whitespace-pre-wrap text-xs text-red-700">⚠️ {status.error}</div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPage({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => Promise<void> }) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [dirty, setDirty] = useState(false);
@@ -238,6 +278,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             <option value="en">英語</option>
           </select>
         </Row>
+        <SetupCheck />
         <div className="mt-3">
           <div className="mb-2 text-xs font-medium text-slate-600">モデル</div>
           <ModelManager

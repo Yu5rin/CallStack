@@ -50,7 +50,10 @@ const api = {
     abort: (callId: string): Promise<boolean> => ipcRenderer.invoke('recording:abort', callId),
   },
   transcription: {
-    start: (callId: string): Promise<boolean> => ipcRenderer.invoke('transcription:start', callId),
+    start: (callId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('transcription:start', callId),
+    checkSetup: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('transcription:check-setup'),
     downloadModel: (model: WhisperModel): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('transcription:download-model', model),
     modelStatus: (model: WhisperModel): Promise<{ downloaded: boolean; path: string }> =>

@@ -80,11 +80,21 @@ export function CallEditDialog({
     onClose();
   };
 
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+
   const handleTranscribe = async () => {
     setTranscribing(true);
-    await window.api.transcription.start(current.id);
-    // 状態は app-event 経由で更新される
-    setTimeout(() => setTranscribing(false), 500);
+    setTranscribeError(null);
+    try {
+      const result = await window.api.transcription.start(current.id);
+      if (!result.ok) {
+        setTranscribeError(result.error);
+      }
+    } catch (err) {
+      setTranscribeError((err as Error).message);
+    } finally {
+      setTimeout(() => setTranscribing(false), 500);
+    }
   };
 
   const audioSrc = current.audio ? `app://recordings/${current.audio.path}` : null;
@@ -222,6 +232,11 @@ export function CallEditDialog({
               {current.transcriptStatus === 'error' && current.transcriptError && (
                 <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap">
                   {current.transcriptError}
+                </div>
+              )}
+              {transcribeError && (
+                <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap">
+                  {transcribeError}
                 </div>
               )}
               <TranscriptView
