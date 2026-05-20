@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'リリースに使うタグ名 (例: v0.2.0)'
-        required: true
+        description: 'リリースに使うタグ名 (例: v0.2.0)。空欄なら package.json の version を使用'
+        required: false
 
 jobs:
   build-windows:
@@ -23,6 +23,28 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+
+      - name: Resolve release tag
+        id: tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $raw = $env:GITHUB_REF_NAME
+          } else {
+            $raw = $env:INPUT_TAG
+            if ([string]::IsNullOrWhiteSpace($raw)) {
+              $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+              $raw = "v$($pkg.version)"
+            }
+          }
+          $clean = $raw.Trim()
+          if ($clean -notmatch '^v\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$') {
+            Write-Error "Invalid tag '$clean'. Expected vMAJOR.MINOR.PATCH (e.g. v0.2.3)."
+            exit 1
+          }
+          echo "value=$clean" >> $env:GITHUB_OUTPUT
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
 
       - name: Install dependencies
         run: npm ci
@@ -54,14 +76,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: TelTimeStack ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: TelTimeStack ${{ steps.tag.outputs.value }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: ${{ steps.locate.outputs.zip_path }}
           body: |
-            ## TelTimeStack ${{ github.event.inputs.tag || github.ref_name }}
+            ## TelTimeStack ${{ steps.tag.outputs.value }}
 
             ### インストール方法
             1. 下の Assets から `TelTimeStack-*-win-x64.zip` をダウンロード
