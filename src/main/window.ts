@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, screen, app } from 'electron';
 import path from 'node:path';
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
@@ -41,12 +41,9 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  mainWindow.on('close', (e) => {
-    // Hide to tray instead of quitting (existing behavior)
-    if (mainWindow && !(mainWindow as unknown as { _forceQuit?: boolean })._forceQuit) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
+  mainWindow.on('close', () => {
+    markForceQuit();
+    app.quit();
   });
 
   mainWindow.on('minimize', () => {

@@ -222,6 +222,9 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                     {c.transcript && <span title="文字起こし済">📝</span>}
                     {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
                     {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}
+                    {c.transcriptStatus === 'error' && (
+                      <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-700 max-w-xs truncate">
                     {c.memo || c.transcript?.text || '—'}

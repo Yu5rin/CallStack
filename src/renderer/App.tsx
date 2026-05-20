@@ -69,12 +69,13 @@ export function App() {
             </span>
           )}
           {recorder.error && (
-            <span
-              className="max-w-[14rem] truncate rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200"
-              title={recorder.error}
+            <button
+              onClick={recorder.clearError}
+              className="max-w-[14rem] truncate rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+              title={`${recorder.error}\n(クリックで閉じる)`}
             >
-              録音エラー: {recorder.error}
-            </span>
+              録音エラー: {recorder.error} ✕
+            </button>
           )}
           {active ? (
             <button
