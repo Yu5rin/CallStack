@@ -108,8 +108,21 @@ function runWhisper(bin: string, model: string, wav: string, outBase: string, la
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
     proc.on('error', reject);
     proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`whisper exited ${code}: ${stderr.slice(-500)}`));
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      // STATUS_DLL_NOT_FOUND (0xC0000135) — whisper-cli.exe lacks DLL deps
+      if (code === 0xC0000135 || code === -1073741515 || code === 3221225781) {
+        reject(new Error(
+          'whisper-cli.exe が依存 DLL を読み込めません (STATUS_DLL_NOT_FOUND, 0xC0000135)。\n' +
+          'whisper.cpp の Windows release zip (例: whisper-bin-x64.zip) を解凍した\n' +
+          '中身を丸ごと resources\\whisper\\ にコピーしてください。\n' +
+          'whisper.dll / ggml*.dll などが exe と同じフォルダに必要です。',
+        ));
+        return;
+      }
+      reject(new Error(`whisper exited ${code}: ${stderr.slice(-500)}`));
     });
   });
 }
