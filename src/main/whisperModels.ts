@@ -1,6 +1,6 @@
 import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
-import { get as httpGet } from 'node:https';
+import { net } from 'electron';
 import { WhisperModel } from '../shared/types';
 import { getDirs } from './paths';
 
@@ -21,7 +21,7 @@ export function getModelPath(model: WhisperModel): string {
 export async function isModelDownloaded(model: WhisperModel): Promise<boolean> {
   try {
     const stat = await fs.stat(getModelPath(model));
-    return stat.size > 1024 * 1024; // > 1MB sanity check
+    return stat.size > 1024 * 1024;
   } catch {
     return false;
   }
@@ -40,32 +40,64 @@ export async function downloadModel(
   const tmp = target + '.part';
   const url = `${HF_BASE}/${MODEL_FILES[model]}`;
 
+  await fs.mkdir(path.dirname(target), { recursive: true });
+
   await new Promise<void>((resolve, reject) => {
     const fetchWithRedirect = (u: string, depth = 0) => {
-      if (depth > 5) return reject(new Error('Too many redirects'));
-      const req = httpGet(u, (res) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume();
-          fetchWithRedirect(new URL(res.headers.location, u).toString(), depth + 1);
+      if (depth > 5) {
+        reject(new Error('Too many redirects'));
+        return;
+      }
+      const req = net.request({
+        url: u,
+        method: 'GET',
+        redirect: 'manual',
+      });
+
+      req.on('response', (res) => {
+        const status = res.statusCode;
+        if (status >= 300 && status < 400) {
+          const loc = res.headers['location'];
+          const locStr = Array.isArray(loc) ? loc[0] : loc;
+          if (!locStr) {
+            reject(new Error(`Redirect ${status} without Location header`));
+            return;
+          }
+          res.on('data', () => {});
+          res.on('end', () => {
+            fetchWithRedirect(new URL(locStr, u).toString(), depth + 1);
+          });
           return;
         }
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}`));
-          res.resume();
+        if (status !== 200) {
+          reject(new Error(`HTTP ${status}`));
+          res.on('data', () => {});
           return;
         }
-        const total = res.headers['content-length'] ? Number(res.headers['content-length']) : null;
+        const lenHdr = res.headers['content-length'];
+        const lenStr = Array.isArray(lenHdr) ? lenHdr[0] : lenHdr;
+        const total = lenStr ? Number(lenStr) : null;
         let received = 0;
         const out = createWriteStream(tmp);
         res.on('data', (chunk: Buffer) => {
           received += chunk.length;
           onProgress({ receivedBytes: received, totalBytes: total });
+          out.write(chunk);
         });
-        res.pipe(out);
-        out.on('finish', () => out.close(() => resolve()));
-        out.on('error', reject);
+        res.on('end', () => {
+          out.end(() => resolve());
+        });
+        res.on('error', (err: Error) => {
+          out.destroy();
+          reject(err);
+        });
+        out.on('error', (err) => {
+          reject(err);
+        });
       });
-      req.on('error', reject);
+
+      req.on('error', (err) => reject(err));
+      req.end();
     };
     fetchWithRedirect(url);
   });
