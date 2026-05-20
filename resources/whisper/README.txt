@@ -1,25 +1,43 @@
 このフォルダに whisper.cpp の Windows ビルドを配置してください。
 
-手順:
-1. https://github.com/ggerganov/whisper.cpp/releases から
-   最新の Windows ビルドを取得（例: whisper-bin-x64.zip）
-2. zip を解凍し、その「中身を丸ごと」このフォルダにコピー
-   - whisper-cli.exe
-   - whisper.dll
-   - ggml.dll / ggml-base.dll / ggml-cpu.dll  など
-   ※ exe 単体だけだと STATUS_DLL_NOT_FOUND (0xC0000135) で失敗します
-3. 実行ファイル名が main.exe の古いビルドの場合は whisper-cli.exe にリネーム
+== 手順 ==
 
-ファイル例:
-  resources/whisper/whisper-cli.exe
-  resources/whisper/whisper.dll
-  resources/whisper/ggml.dll
-  resources/whisper/ggml-base.dll
-  resources/whisper/ggml-cpu.dll
+1. https://github.com/ggerganov/whisper.cpp/releases にアクセス
+2. お使いの環境に合う Windows 用 zip を1つダウンロード
+   - 一般的: whisper-blas-bin-x64.zip （CPU + BLAS、まず最初に試す）
+   - 旧バージョン: whisper-bin-x64.zip
+   - NVIDIA GPU: whisper-cublas-XX.X.X-bin-x64.zip （CUDA ランタイム必須）
+   ※ x64 が無い古い PC のみ Win32 版を使用
+3. zip を解凍し、「解凍された全ファイル」をこのフォルダに置く
+4. 実行ファイル名を確認:
+   - ファイル名が whisper-cli.exe ならそのまま
+   - ファイル名が main.exe（古いビルド）の場合は whisper-cli.exe に
+     リネーム
 
-開発時にこのフォルダ以外の場所に置きたい場合は環境変数
+== 必要なファイル例 ==
+
+resources/whisper/ に下記が並んでいれば OK（バージョン差で名前は微増減）:
+
+  whisper-cli.exe        ← 必須（実行ファイル本体）
+  whisper.dll
+  ggml.dll
+  ggml-base.dll
+  ggml-cpu.dll
+  ggml-cpu-haswell.dll   （任意、ある場合のみ）
+  libopenblas.dll        （BLAS 版の場合）
+
+注意: exe 単体だけだと起動時に「STATUS_DLL_NOT_FOUND (0xC0000135)」で
+失敗します。zip の中身は丸ごとコピーしてください。
+
+== モデルファイル ==
+
+ggml-*.bin はアプリの設定画面「文字起こし」→「モデル」から
+ダウンロードできます（%APPDATA%/TelTimeStack/models/ に保存）。
+
+== 開発者向けの上書きパス ==
+
+このフォルダ以外に置きたい場合は環境変数で上書き可能:
+
   TELTIMESTACK_WHISPER_BIN=C:\path\to\whisper-cli.exe
-を設定すると優先されます（同フォルダの DLL もそちらから読まれます）。
 
-モデルファイル（ggml-*.bin）は設定画面の「文字起こし」セクションから
-自動でダウンロードできます（%APPDATA%/TelTimeStack/models/ に保存）。
+（同フォルダにある DLL も同時にそこから読まれます）
