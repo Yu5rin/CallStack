@@ -512,6 +512,15 @@ function setupMediaPermissions(): void {
 }
 
 async function main() {
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+    return;
+  }
+  app.on('second-instance', () => {
+    showMainWindow();
+  });
+
   await app.whenReady();
   await ensureAppDirs();
   await store.init();

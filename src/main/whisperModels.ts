@@ -43,63 +43,54 @@ export async function downloadModel(
   await fs.mkdir(path.dirname(target), { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
-    const fetchWithRedirect = (u: string, depth = 0) => {
-      if (depth > 5) {
-        reject(new Error('Too many redirects'));
+    const req = net.request({
+      url,
+      method: 'GET',
+      redirect: 'follow',
+    });
+
+    req.on('redirect', (_status, _method, redirectUrl) => {
+      req.followRedirect();
+      void redirectUrl;
+    });
+
+    req.on('response', (res) => {
+      const status = res.statusCode;
+      if (status !== 200) {
+        reject(new Error(`HTTP ${status}`));
+        res.on('data', () => {});
         return;
       }
-      const req = net.request({
-        url: u,
-        method: 'GET',
-        redirect: 'manual',
-      });
+      const lenHdr = res.headers['content-length'];
+      const lenStr = Array.isArray(lenHdr) ? lenHdr[0] : lenHdr;
+      const total = lenStr ? Number(lenStr) : null;
+      let received = 0;
+      const out = createWriteStream(tmp);
+      let failed = false;
 
-      req.on('response', (res) => {
-        const status = res.statusCode;
-        if (status >= 300 && status < 400) {
-          const loc = res.headers['location'];
-          const locStr = Array.isArray(loc) ? loc[0] : loc;
-          if (!locStr) {
-            reject(new Error(`Redirect ${status} without Location header`));
-            return;
-          }
-          res.on('data', () => {});
-          res.on('end', () => {
-            fetchWithRedirect(new URL(locStr, u).toString(), depth + 1);
-          });
-          return;
-        }
-        if (status !== 200) {
-          reject(new Error(`HTTP ${status}`));
-          res.on('data', () => {});
-          return;
-        }
-        const lenHdr = res.headers['content-length'];
-        const lenStr = Array.isArray(lenHdr) ? lenHdr[0] : lenHdr;
-        const total = lenStr ? Number(lenStr) : null;
-        let received = 0;
-        const out = createWriteStream(tmp);
-        res.on('data', (chunk: Buffer) => {
-          received += chunk.length;
-          onProgress({ receivedBytes: received, totalBytes: total });
-          out.write(chunk);
-        });
-        res.on('end', () => {
-          out.end(() => resolve());
-        });
-        res.on('error', (err: Error) => {
-          out.destroy();
-          reject(err);
-        });
-        out.on('error', (err) => {
-          reject(err);
-        });
+      res.on('data', (chunk: Buffer) => {
+        if (failed) return;
+        received += chunk.length;
+        onProgress({ receivedBytes: received, totalBytes: total });
+        out.write(chunk);
       });
+      res.on('end', () => {
+        if (failed) return;
+        out.end(() => resolve());
+      });
+      res.on('error', (err: Error) => {
+        failed = true;
+        out.destroy();
+        reject(err);
+      });
+      out.on('error', (err) => {
+        failed = true;
+        reject(err);
+      });
+    });
 
-      req.on('error', (err) => reject(err));
-      req.end();
-    };
-    fetchWithRedirect(url);
+    req.on('error', (err) => reject(err));
+    req.end();
   });
 
   await fs.rename(tmp, target);
