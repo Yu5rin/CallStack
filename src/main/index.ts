@@ -22,7 +22,7 @@ import {
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
 import { exportCsv, parseCsv } from './csv';
 import { notify } from './notifications';
-import { ensureAppDirs } from './paths';
+import { ensureAppDirs, getDirs } from './paths';
 import { registerAppProtocol, registerAppProtocolPrivilege } from './protocol';
 import * as recording from './recording';
 import { enqueue as enqueueTranscription, setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup } from './transcription';
@@ -415,7 +415,7 @@ function setupIpc(): void {
 function queueTranscription(callId: string): void {
   const rec = store.getCall(callId);
   if (!rec || !rec.audio) return;
-  const { recordings } = require('./paths').getDirs() as { recordings: string };
+  const { recordings } = getDirs();
   const abs = path.join(recordings, rec.audio.path);
   const s = store.getSettings();
   const updated = store.updateCall(callId, { transcriptStatus: 'queued', transcriptError: undefined });
