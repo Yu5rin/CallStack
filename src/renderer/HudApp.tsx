@@ -1,17 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
-import { RecordingManager } from './recorder/RecordingManager';
-import { LevelMeter } from './recorder/LevelMeter';
 import { AppEvent, Settings } from '../shared/types';
 
 export function HudApp() {
   const { active, elapsedSec, holding, holdSec } = useActiveCall();
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [level, setLevel] = useState(0);
-  const [recError, setRecError] = useState<string | null>(null);
-  const managerRef = useRef<RecordingManager | null>(null);
 
   useEffect(() => {
     window.api.settings.get().then(setSettings);
@@ -21,36 +15,7 @@ export function HudApp() {
     return () => off();
   }, []);
 
-  // Start / stop recording based on active call + settings
-  useEffect(() => {
-    if (!settings) return;
-    const rec = settings.recording;
-
-    if (active && rec.enabled && !managerRef.current) {
-      const mgr = new RecordingManager();
-      managerRef.current = mgr;
-      setRecError(null);
-      mgr.start({
-        callId: active.id,
-        source: rec.source,
-        micDeviceId: rec.micDeviceId,
-        onLevel: (v) => setLevel(v),
-        onError: (err) => setRecError(err.message),
-      }).then(() => setRecording(true))
-        .catch((err) => {
-          setRecError(err.message);
-          managerRef.current = null;
-        });
-    }
-
-    if (!active && managerRef.current) {
-      const mgr = managerRef.current;
-      managerRef.current = null;
-      setRecording(false);
-      setLevel(0);
-      mgr.stop().catch((err) => setRecError(err.message));
-    }
-  }, [active?.id, settings?.recording.enabled, settings?.recording.source, settings?.recording.micDeviceId]);
+  const recording = !!(active && settings?.recording.enabled);
 
   const handleEnd = async () => {
     await window.api.hud.end();
@@ -84,11 +49,7 @@ export function HudApp() {
           </div>
           <div className="flex items-center gap-2">
             <div className="font-mono text-2xl font-bold tabular-nums">{formatHMS(elapsedSec)}</div>
-            {recording && <LevelMeter level={level} className="ml-1" />}
           </div>
-          {recError && (
-            <div className="truncate text-[10px] text-red-300" title={recError}>録音エラー: {recError}</div>
-          )}
         </div>
         <div className="hud-no-drag flex flex-col gap-1">
           <button

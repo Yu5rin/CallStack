@@ -8,6 +8,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { formatHMS } from './utils/format';
 import { beep } from './utils/beep';
 import { AppEvent } from '../shared/types';
+import { useRecorder } from './recorder/useRecorder';
+import { LevelMeter } from './recorder/LevelMeter';
 
 type Page = 'list' | 'stats' | 'settings';
 
@@ -17,6 +19,7 @@ export function App() {
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
+  const recorder = useRecorder(active, settings);
 
   const navigateToContact = (name: string) => {
     setInitialContactFilter(name);
@@ -57,6 +60,21 @@ export function App() {
             </span>
           ) : (
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">待機中</span>
+          )}
+          {recorder.recording && (
+            <span className="flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
+              REC
+              <LevelMeter level={recorder.level} />
+            </span>
+          )}
+          {recorder.error && (
+            <span
+              className="max-w-[14rem] truncate rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200"
+              title={recorder.error}
+            >
+              録音エラー: {recorder.error}
+            </span>
           )}
           {active ? (
             <button
