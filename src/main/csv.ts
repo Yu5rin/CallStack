@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { CallRecord, CsvExportOptions } from '../shared/types';
+import { localIso } from './localTime';
 
 const BOM = '﻿';
 const CRLF = '\r\n';
@@ -77,8 +78,8 @@ export function buildCsv(calls: CallRecord[]): string {
     const talk = (c.durationSec ?? 0) - hold;
     const row = {
       id: c.id,
-      startTime: c.startTime,
-      endTime: c.endTime ?? '',
+      startTime: localIso(c.startTime),
+      endTime: c.endTime ? localIso(c.endTime) : '',
       durationSec: c.durationSec ?? '',
       durationHMS: formatHMS(c.durationSec),
       holdSec: hold,

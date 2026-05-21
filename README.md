@@ -110,7 +110,7 @@ npm run build
 npm run dist:win
 ```
 
-- 完了後、`release\0.1.0\TelTimeStack-0.1.0-win-x64.zip` が出力されます
+- 完了後、`release\<version>\TelTimeStack-<version>-win-x64.zip` が出力されます
 - 配布された ZIP を解凍 → `TelTimeStack.exe` をダブルクリックで起動できます（インストール不要）
 - 設定や記録は通常どおり `%APPDATA%\TelTimeStack\` に保存されます
 
@@ -120,7 +120,7 @@ npm run dist:win
 npm run dist:portable
 ```
 
-- `release\0.1.0\` に単一の `.exe` ファイルが出力されます
+- `release\<version>\` に単一の `.exe` ファイルが出力されます
 - USB メモリで持ち運ぶ用途などに便利
 
 #### 方法C: インストーラ（NSIS）
@@ -129,7 +129,7 @@ npm run dist:portable
 npm run dist:installer
 ```
 
-- `release\0.1.0\TelTimeStack Setup 0.1.0.exe` が出力されます
+- `release\<version>\TelTimeStack Setup <version>.exe` が出力されます
 - インストール先を指定するインストーラ形式
 
 ---

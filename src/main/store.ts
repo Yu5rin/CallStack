@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { localDateStamp } from './localTime';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { CallRecord, HoldSegment, Settings, DEFAULT_SETTINGS } from '../shared/types';
@@ -179,7 +180,7 @@ export class Store {
   /** Create a pre-import backup with a custom suffix. */
   async backupNow(suffix: string): Promise<string> {
     await fs.mkdir(this.backupDir, { recursive: true });
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = localDateStamp(new Date());
     const target = path.join(this.backupDir, `data-${stamp}-${suffix}.json`);
     await fs.writeFile(target, JSON.stringify(this.data, null, 2), 'utf-8');
     return target;
@@ -211,7 +212,7 @@ export class Store {
   private async backup(): Promise<void> {
     try {
       await fs.mkdir(this.backupDir, { recursive: true });
-      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const stamp = localDateStamp(new Date());
       const target = path.join(this.backupDir, `data-${stamp}.json`);
       try {
         await fs.access(target);

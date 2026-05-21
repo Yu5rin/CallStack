@@ -28,6 +28,7 @@ import * as recording from './recording';
 import { enqueue as enqueueTranscription, setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup } from './transcription';
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
+import { localDate } from './localTime';
 
 registerAppProtocolPrivilege();
 
@@ -140,7 +141,7 @@ function formatHMS(sec: number): string {
 async function chooseAndExport(): Promise<{ count: number; path: string } | null> {
   const result = await dialog.showSaveDialog({
     title: 'CSV をエクスポート',
-    defaultPath: `teltimestack-${new Date().toISOString().slice(0, 10)}.csv`,
+    defaultPath: `teltimestack-${localDate(new Date())}.csv`,
     filters: [{ name: 'CSV', extensions: ['csv'] }],
   });
   if (result.canceled || !result.filePath) return null;
@@ -236,7 +237,7 @@ function setupIpc(): void {
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
     const result = await dialog.showSaveDialog({
       title: 'CSV をエクスポート',
-      defaultPath: `teltimestack-${new Date().toISOString().slice(0, 10)}.csv`,
+      defaultPath: `teltimestack-${localDate(new Date())}.csv`,
       filters: [{ name: 'CSV', extensions: ['csv'] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true } as const;
@@ -487,7 +488,7 @@ function buildWeeklyReport(calls: CallRecord[]): string {
   const lines: string[] = [];
   lines.push(`# 週次レポート ${weekStamp()}`);
   lines.push('');
-  lines.push(`期間: ${monday.toISOString().slice(0, 10)} 〜 ${new Date(sunday.getTime() - 1).toISOString().slice(0, 10)}`);
+  lines.push(`期間: ${localDate(monday)} 〜 ${localDate(new Date(sunday.getTime() - 1))}`);
   lines.push('');
   lines.push('## サマリー');
   lines.push(`- 通話数: ${target.length}`);
