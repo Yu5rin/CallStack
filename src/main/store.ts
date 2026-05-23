@@ -186,6 +186,22 @@ export class Store {
     return target;
   }
 
+  /** Replace in-memory data from a previously exported JSON. Used by manual restore. */
+  async restoreFromJson(json: unknown): Promise<{ calls: number }> {
+    if (!json || typeof json !== 'object') throw new Error('JSON ファイルの形式が不正です');
+    const parsed = json as Partial<DataFile>;
+    if (!Array.isArray(parsed.calls)) throw new Error('calls 配列が見つかりません');
+    // Take a snapshot of the current data before replacing.
+    await this.backupNow('pre-restore');
+    this.data = {
+      version: FILE_VERSION,
+      calls: parsed.calls as CallRecord[],
+      settings: parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : this.data.settings,
+    };
+    await this.flush();
+    return { calls: this.data.calls.length };
+  }
+
   setSettings(settings: Settings): void {
     this.data.settings = settings;
     this.scheduleWrite();

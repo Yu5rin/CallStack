@@ -19,6 +19,8 @@ import {
   getHudWindow,
   markForceQuit,
   setMinimizeToTray,
+  setHudSize,
+  nextHudSize,
 } from './window';
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
 import { exportCsv, parseCsv } from './csv';
@@ -90,7 +92,7 @@ function startCall(): CallRecord | null {
   store.addCall(rec);
   longCallAlertFired = false;
   const settings = store.getSettings();
-  createHudWindow(settings.hudPosition);
+  createHudWindow(settings.hudPosition, settings.hudSize);
   updateTray({ active: true, elapsedSec: 0 }, trayHandlers);
   startTickLoop();
   broadcast('app-event', { type: 'call:started', record: rec });
@@ -241,9 +243,11 @@ function setupIpc(): void {
 
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:update', (_e, next: Settings) => {
+    const prev = store.getSettings();
     store.setSettings(next);
     reRegisterShortcuts();
     setMinimizeToTray(next.minimizeToTray);
+    if (prev.hudSize !== next.hudSize) setHudSize(next.hudSize);
     broadcast('app-event', { type: 'settings:updated', settings: next });
     return next;
   });
@@ -312,6 +316,22 @@ function setupIpc(): void {
   ipcMain.handle('hud:save-position', (_e, pos: { x: number; y: number }) => {
     const s = store.getSettings();
     store.setSettings({ ...s, hudPosition: pos });
+  });
+  ipcMain.handle('hud:cycle-size', () => {
+    const s = store.getSettings();
+    const next = nextHudSize(s.hudSize);
+    const updated = { ...s, hudSize: next };
+    store.setSettings(updated);
+    setHudSize(next);
+    broadcast('app-event', { type: 'settings:updated', settings: updated });
+    return next;
+  });
+  ipcMain.handle('hud:assign-tag', (_e, tag: string | null) => {
+    const active = getActive();
+    if (!active) return null;
+    const updated = store.updateCall(active.id, { tag });
+    if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
+    return updated;
   });
 
   ipcMain.handle('hud:get-position', () => {
@@ -424,6 +444,33 @@ function setupIpc(): void {
   // controls whether the request is allowed via setPermissionRequestHandler.
   ipcMain.handle('retention:run-now', async () => {
     return cleanupExpiredRecordings(store, broadcast);
+  });
+
+  // ============ Backup / Restore ============
+  ipcMain.handle('backup:create', async () => {
+    return store.backupNow('manual');
+  });
+
+  ipcMain.handle('backup:restore', async (): Promise<
+    { canceled: true } | { canceled: false; calls: number; backupPath: string }
+  > => {
+    const result = await dialog.showOpenDialog({
+      title: 'バックアップ JSON を選択',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+    const raw = await fs.readFile(result.filePaths[0], 'utf-8');
+    const json = JSON.parse(raw);
+    const { calls } = await store.restoreFromJson(json);
+    const backupPath = path.join(
+      app.getPath('userData'),
+      'backups',
+      `data-${localDate(new Date()).replace(/-/g, '')}-pre-restore.json`,
+    );
+    broadcast('app-event', { type: 'settings:updated', settings: store.getSettings() });
+    broadcast('app-event', { type: 'data:restored' });
+    return { canceled: false, calls, backupPath };
   });
 }
 
@@ -604,7 +651,7 @@ async function main() {
 
   // Restart tick + HUD if there's a stale active call from previous run
   if (getActive()) {
-    createHudWindow(store.getSettings().hudPosition);
+    createHudWindow(store.getSettings().hudPosition, store.getSettings().hudSize);
     updateTray({ active: true, elapsedSec: 0 }, trayHandlers);
     startTickLoop();
   }

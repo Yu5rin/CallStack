@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
-  CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel,
+  CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize,
 } from '../shared/types';
 
 const api = {
@@ -41,6 +41,9 @@ const api = {
       ipcRenderer.invoke('hud:save-position', pos),
     getPosition: (): Promise<{ x: number; y: number } | null> =>
       ipcRenderer.invoke('hud:get-position'),
+    cycleSize: (): Promise<HudSize> => ipcRenderer.invoke('hud:cycle-size'),
+    assignTag: (tag: string | null): Promise<CallRecord | null> =>
+      ipcRenderer.invoke('hud:assign-tag', tag),
   },
   recording: {
     appendChunk: (callId: string, buf: ArrayBuffer): Promise<boolean> =>
@@ -61,6 +64,12 @@ const api = {
   },
   retention: {
     runNow: (): Promise<number> => ipcRenderer.invoke('retention:run-now'),
+  },
+  backup: {
+    create: (): Promise<string> => ipcRenderer.invoke('backup:create'),
+    restore: (): Promise<
+      { canceled: true } | { canceled: false; calls: number; backupPath: string }
+    > => ipcRenderer.invoke('backup:restore'),
   },
   onEvent: (cb: (e: AppEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AppEvent) => cb(payload);

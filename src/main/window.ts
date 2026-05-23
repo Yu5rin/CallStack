@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, app } from 'electron';
 import path from 'node:path';
+import type { HudSize } from '../shared/types';
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const DIST_DIR = path.join(__dirname, '..', '..', 'dist');
@@ -8,6 +9,18 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
 let mainWindow: BrowserWindow | null = null;
 let hudWindow: BrowserWindow | null = null;
 let minimizeToTrayEnabled = false;
+
+export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
+  mini:    { width: 180, height: 32 },
+  compact: { width: 260, height: 56 },
+  full:    { width: 340, height: 96 },
+};
+
+const HUD_SIZE_ORDER: HudSize[] = ['mini', 'compact', 'full'];
+
+export function nextHudSize(s: HudSize): HudSize {
+  return HUD_SIZE_ORDER[(HUD_SIZE_ORDER.indexOf(s) + 1) % HUD_SIZE_ORDER.length];
+}
 
 export function setMinimizeToTray(enabled: boolean): void {
   minimizeToTrayEnabled = enabled;
@@ -96,15 +109,17 @@ export function markForceQuit(): void {
   if (mainWindow) (mainWindow as unknown as { _forceQuit?: boolean })._forceQuit = true;
 }
 
-export function createHudWindow(position: { x: number; y: number } | null): BrowserWindow {
+export function createHudWindow(
+  position: { x: number; y: number } | null,
+  size: HudSize = 'compact',
+): BrowserWindow {
   if (hudWindow && !hudWindow.isDestroyed()) {
     hudWindow.show();
     return hudWindow;
   }
   const display = screen.getPrimaryDisplay();
   const { workArea } = display;
-  const width = 340;
-  const height = 96;
+  const { width, height } = HUD_SIZES[size];
   const defaultX = workArea.x + workArea.width - width - 20;
   const defaultY = workArea.y + 20;
 
@@ -142,6 +157,19 @@ export function createHudWindow(position: { x: number; y: number } | null): Brow
   }
 
   return hudWindow;
+}
+
+/**
+ * Apply a new size to the existing HUD without moving it off-screen.
+ * Anchors on the right edge so right-aligned default layout stays put.
+ */
+export function setHudSize(size: HudSize): void {
+  if (!hudWindow || hudWindow.isDestroyed()) return;
+  const [oldX, oldY] = hudWindow.getPosition();
+  const [oldW] = hudWindow.getSize();
+  const { width, height } = HUD_SIZES[size];
+  const newX = oldX + (oldW - width);
+  hudWindow.setBounds({ x: newX, y: oldY, width, height });
 }
 
 export function closeHudWindow(): void {

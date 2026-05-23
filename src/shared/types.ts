@@ -62,6 +62,9 @@ export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 
+export type HudSize = 'mini' | 'compact' | 'full';
+export type HudOpacity = 0.5 | 0.75 | 1.0;
+
 export interface RecordingSettings {
   enabled: boolean;
   source: 'mic' | 'mic+system';
@@ -90,6 +93,8 @@ export interface Settings {
   minimizeToTray: boolean;
   confirmCallDelete: boolean;
   theme: ThemePref;
+  hudSize: HudSize;
+  hudOpacity: HudOpacity;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -122,6 +127,7 @@ export type ModelDownloadEvent = {
   error?: string;
 };
 export type NavigateEvent = { type: 'navigate'; page: 'list' | 'stats' | 'settings' };
+export type DataRestoredEvent = { type: 'data:restored' };
 
 export type AppEvent =
   | CallStartedEvent
@@ -134,7 +140,8 @@ export type AppEvent =
   | RecordingFinalizedEvent
   | TranscriptionStatusEvent
   | ModelDownloadEvent
-  | NavigateEvent;
+  | NavigateEvent
+  | DataRestoredEvent;
 
 export interface CsvExportOptions {
   range: 'all' | 'thisWeek' | 'thisMonth' | 'custom';
@@ -184,6 +191,8 @@ export const DEFAULT_SETTINGS: Settings = {
   minimizeToTray: false,
   confirmCallDelete: true,
   theme: 'system',
+  hudSize: 'compact',
+  hudOpacity: 1.0,
 };
 
 export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: string }> = [

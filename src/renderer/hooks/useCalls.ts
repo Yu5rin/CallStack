@@ -35,6 +35,8 @@ export function useCalls() {
         });
       } else if (e.type === 'call:deleted') {
         setCalls((prev) => prev.filter((c) => c.id !== e.id));
+      } else if (e.type === 'data:restored') {
+        void reload();
       }
     });
     return () => {
