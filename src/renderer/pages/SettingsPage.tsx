@@ -116,7 +116,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">外観</h3>
         <Row label="テーマ">
           <div className="flex gap-3 text-sm">
-            {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+            {(['system', 'light', 'dark', 'black'] as ThemePref[]).map((t) => (
               <label key={t} className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-300">
                 <input
                   type="radio"
@@ -124,7 +124,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                   checked={draft.theme === t}
                   onChange={() => update({ theme: t })}
                 />
-                {t === 'system' ? 'システムに合わせる' : t === 'light' ? 'ライト' : 'ダーク'}
+                {t === 'system' ? 'システムに合わせる' : t === 'light' ? 'ライト' : t === 'dark' ? 'ダーク' : '黒'}
               </label>
             ))}
           </div>

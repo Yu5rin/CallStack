@@ -6,6 +6,10 @@ html, body, #root, #hud-root {
   height: 100%;
 }
 
+#hud-root {
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', system-ui, sans-serif;
@@ -19,3 +23,12 @@ body {
 .hud-no-drag {
   -webkit-app-region: no-drag;
 }
+
+html.black body { background-color: #000; }
+html.black .dark\:bg-slate-950 { background-color: #000; }
+html.black .dark\:bg-slate-900 { background-color: #000; }
+html.black .dark\:bg-slate-800 { background-color: #0a0a0a; }
+html.black .dark\:bg-slate-700 { background-color: #141414; }
+html.black .dark\:border-slate-800 { border-color: #1a1a1a; }
+html.black .dark\:border-slate-700 { border-color: #2a2a2a; }
+

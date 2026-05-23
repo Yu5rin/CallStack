@@ -12,7 +12,9 @@ export function useTheme(pref: ThemePref | undefined): void {
             ? 'dark'
             : 'light'
           : pref;
-      root.classList.toggle('dark', effective === 'dark');
+      const isDarkLike = effective === 'dark' || effective === 'black';
+      root.classList.toggle('dark', isDarkLike);
+      root.classList.toggle('black', effective === 'black');
     };
     apply();
     if (pref === 'system') {

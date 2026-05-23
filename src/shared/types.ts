@@ -64,7 +64,7 @@ export interface ShortcutSettings {
 
 export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium';
 
-export type ThemePref = 'system' | 'light' | 'dark';
+export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 
 export type HudSize = 'mini' | 'compact' | 'full';
 export type HudOpacity = 0.5 | 0.75 | 1.0;
