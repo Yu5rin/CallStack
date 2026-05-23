@@ -99,6 +99,7 @@ export interface Settings {
   theme: ThemePref;
   hudSize: HudSize;
   hudOpacity: HudOpacity;
+  transcriptSeekOffsetSec: number;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -201,6 +202,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   hudSize: 'compact',
   hudOpacity: 1.0,
+  transcriptSeekOffsetSec: 1.0,
 };
 
 export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: string }> = [

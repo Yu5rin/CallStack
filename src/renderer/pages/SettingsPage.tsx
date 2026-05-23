@@ -414,6 +414,20 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             オフにすると Delete キーや削除ボタンで即削除されます
           </span>
         </Row>
+        <Row label="文字起こしクリック巻き戻し">
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={10}
+              step={0.1}
+              value={draft.transcriptSeekOffsetSec}
+              onChange={(e) => update({ transcriptSeekOffsetSec: Math.round(Number(e.target.value) * 10) / 10 })}
+              className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+            <span className="text-sm text-slate-600 dark:text-slate-400">秒前から再生（0 = クリック位置から）</span>
+          </div>
+        </Row>
       </section>
 
       {showRecordingWarning && (

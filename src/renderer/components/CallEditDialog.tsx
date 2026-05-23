@@ -310,7 +310,7 @@ export function CallEditDialog({
                 <div className="max-h-56 overflow-auto">
                   <TranscriptView
                     transcript={current.transcript}
-                    onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - 1))}
+                    onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
                   />
                 </div>
               </div>
