@@ -41,7 +41,7 @@ export interface TrayState {
 export function createTray(handlers: TrayHandlers): Tray {
   if (tray) return tray;
   tray = new Tray(buildIcon(false));
-  tray.setToolTip('TelTimeStack — 待機中');
+  tray.setToolTip('CallStack — 待機中');
   tray.setContextMenu(buildMenu({ active: false }, handlers));
   tray.on('click', () => handlers.onOpen());
   return tray;
@@ -50,7 +50,7 @@ export function createTray(handlers: TrayHandlers): Tray {
 export function updateTray(state: TrayState, handlers: TrayHandlers): void {
   if (!tray) return;
   tray.setImage(buildIcon(state.active));
-  const parts: string[] = ['TelTimeStack'];
+  const parts: string[] = ['CallStack'];
   if (state.active) {
     parts.push(`${state.holding ? '保留中' : '通話中'} ${formatHMS(state.elapsedSec ?? 0)}`);
     if (state.recording) parts.push('録音中');

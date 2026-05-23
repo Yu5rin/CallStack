@@ -1,10 +1,10 @@
 {
-  "name": "teltimestack",
+  "name": "callstack",
   "version": "1.3.0",
   "description": "電話通話時間記録デスクトップアプリ（グローバルショートカット・累積CSV・統計ダッシュボード）",
   "main": "dist-electron/main/index.js",
   "private": true,
-  "author": "TelTimeStack",
+  "author": "CallStack",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -39,8 +39,8 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.teltimestack.app",
-    "productName": "TelTimeStack",
+    "appId": "com.callstack.app",
+    "productName": "CallStack",
     "directories": {
       "output": "release/${version}"
     },

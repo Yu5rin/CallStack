@@ -90,7 +90,7 @@ function stopTickLoop() {
 
 function startCall(): CallRecord | null {
   if (getActive()) {
-    notify('TelTimeStack', '進行中の通話があります。先に終了してください。');
+    notify('CallStack', '進行中の通話があります。先に終了してください。');
     return null;
   }
   const now = new Date().toISOString();
@@ -162,7 +162,7 @@ function formatHMS(sec: number): string {
 async function chooseAndExport(): Promise<{ count: number; path: string } | null> {
   const result = await dialog.showSaveDialog({
     title: 'CSV をエクスポート',
-    defaultPath: `teltimestack-${localDate(new Date())}.csv`,
+    defaultPath: `callstack-${localDate(new Date())}.csv`,
     filters: [{ name: 'CSV', extensions: ['csv'] }],
   });
   if (result.canceled || !result.filePath) return null;
@@ -288,7 +288,7 @@ function setupIpc(): void {
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
     const result = await dialog.showSaveDialog({
       title: 'CSV をエクスポート',
-      defaultPath: `teltimestack-${localDate(new Date())}.csv`,
+      defaultPath: `callstack-${localDate(new Date())}.csv`,
       filters: [{ name: 'CSV', extensions: ['csv'] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true } as const;
@@ -658,11 +658,11 @@ function setupDisplayCapture(): void {
 
 async function main() {
   // Establish the Windows AppUserModelID and product name BEFORE any window is
-  // created, so the taskbar / notifications / jump lists show "TelTimeStack"
+  // created, so the taskbar / notifications / jump lists show "CallStack"
   // instead of the generic "Electron".
-  app.setName('TelTimeStack');
+  app.setName('CallStack');
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.teltimestack.app');
+    app.setAppUserModelId('com.callstack.app');
   }
 
   const gotTheLock = app.requestSingleInstanceLock();

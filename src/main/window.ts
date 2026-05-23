@@ -45,7 +45,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    title: 'TelTimeStack',
+    title: 'CallStack',
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,

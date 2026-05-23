@@ -1,4 +1,4 @@
-# TelTimeStack
+# CallStack
 
 電話の通話時間をキーボードショートカットで記録するWindows向けデスクトップアプリ。
 
@@ -44,7 +44,7 @@ Node.js が未インストールなら https://nodejs.org/ja から LTS 版を�
 
 ## セットアップ手順（はじめての方向け）
 
-> ⚠️ **すべてのコマンドは「TelTimeStack フォルダの中」で実行します。**
+> ⚠️ **すべてのコマンドは「CallStack フォルダの中」で実行します。**
 > まず `cd` でこのプロジェクトのフォルダに移動してから npm コマンドを実行してください。
 
 ### 1. リポジトリをクローン（または既存フォルダへ移動）
@@ -54,14 +54,14 @@ PowerShell またはコマンドプロンプトを開き、好きな作業フォ
 ```powershell
 # 例: ホーム配下に置く場合
 cd $HOME
-git clone https://github.com/Yu5rin/TelTimeStack.git
-cd TelTimeStack
+git clone https://github.com/Yu5rin/CallStack.git
+cd CallStack
 ```
 
-すでに `TelTimeStack` フォルダがあるなら、そのフォルダに `cd` してください：
+すでに `CallStack` フォルダがあるなら、そのフォルダに `cd` してください：
 
 ```powershell
-cd C:\path\to\TelTimeStack
+cd C:\path\to\CallStack
 ```
 
 ブランチが必要なら：
@@ -73,7 +73,7 @@ git checkout claude/call-tracking-app-aF1y4
 
 ### 2. 依存パッケージのインストール
 
-**`package.json` があるフォルダ（= `TelTimeStack` 直下）** で：
+**`package.json` があるフォルダ（= `CallStack` 直下）** で：
 
 ```powershell
 npm install
@@ -110,9 +110,9 @@ npm run build
 npm run dist:win
 ```
 
-- 完了後、`release\<version>\TelTimeStack-<version>-win-x64.zip` が出力されます
-- 配布された ZIP を解凍 → `TelTimeStack.exe` をダブルクリックで起動できます（インストール不要）
-- 設定や記録は通常どおり `%APPDATA%\TelTimeStack\` に保存されます
+- 完了後、`release\<version>\CallStack-<version>-win-x64.zip` が出力されます
+- 配布された ZIP を解凍 → `CallStack.exe` をダブルクリックで起動できます（インストール不要）
+- 設定や記録は通常どおり `%APPDATA%\CallStack\` に保存されます
 
 #### 方法B: ポータブル `.exe` 1ファイル
 
@@ -129,7 +129,7 @@ npm run dist:portable
 npm run dist:installer
 ```
 
-- `release\<version>\TelTimeStack Setup <version>.exe` が出力されます
+- `release\<version>\CallStack Setup <version>.exe` が出力されます
 - インストール先を指定するインストーラ形式
 
 ---
@@ -149,12 +149,12 @@ npm run dist:installer
 
 | 内容 | パス |
 |------|------|
-| 設定・通話記録 | `%APPDATA%\TelTimeStack\data.json` |
-| 自動バックアップ | `%APPDATA%\TelTimeStack\backups\data-YYYYMMDD.json`（最新30日分） |
-| 録音ファイル | `%APPDATA%\TelTimeStack\recordings\{id}.mp3` |
-| Whisper モデル | `%APPDATA%\TelTimeStack\models\ggml-{size}.bin` |
+| 設定・通話記録 | `%APPDATA%\CallStack\data.json` |
+| 自動バックアップ | `%APPDATA%\CallStack\backups\data-YYYYMMDD.json`（最新30日分） |
+| 録音ファイル | `%APPDATA%\CallStack\recordings\{id}.mp3` |
+| Whisper モデル | `%APPDATA%\CallStack\models\ggml-{size}.bin` |
 
-エクスプローラーのアドレスバーに `%APPDATA%\TelTimeStack` と入れれば直接開けます。
+エクスプローラーのアドレスバーに `%APPDATA%\CallStack` と入れれば直接開けます。
 
 ## 録音について
 
@@ -194,7 +194,7 @@ npm run dist:installer
 | **small**  | **約 466 MB** | **バランス・推奨（日本語実用レベル）** |
 | medium | 約 1.5 GB | 高精度（CPU でも動作可、時間はかかる） |
 
-ダウンロードしたモデルは `%APPDATA%\TelTimeStack\models\` に保存されます。
+ダウンロードしたモデルは `%APPDATA%\CallStack\models\` に保存されます。
 
 ### 3. 動作確認
 
@@ -207,7 +207,7 @@ npm run dist:installer
 Node.js がインストールされていません。https://nodejs.org/ja から LTS 版をインストールし、ターミナルを開き直してください。
 
 ### `npm ERR! code ENOENT` / `package.json not found`
-`package.json` のないフォルダで実行しています。`cd C:\path\to\TelTimeStack` でプロジェクトフォルダに移動してから再実行してください。`dir` で `package.json` が見えることを確認しましょう。
+`package.json` のないフォルダで実行しています。`cd C:\path\to\CallStack` でプロジェクトフォルダに移動してから再実行してください。`dir` で `package.json` が見えることを確認しましょう。
 
 ### `npm install` の途中で `Electron failed to install correctly` / ダウンロード失敗
 社内ネットワーク・プロキシで Electron バイナリの取得に失敗するケース。以下のいずれかを試してください：
