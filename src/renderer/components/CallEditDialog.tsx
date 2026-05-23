@@ -11,10 +11,12 @@ const inputClass =
 export function CallEditDialog({
   call,
   settings,
+  allCalls,
   onClose,
 }: {
   call: CallRecord;
   settings: Settings;
+  allCalls: CallRecord[];
   onClose: () => void;
 }) {
   const [current, setCurrent] = useState(call);
@@ -59,6 +61,35 @@ export function CallEditDialog({
     return Math.max(0, Math.round((e - s) / 1000));
   }, [startTime, endTime]);
   const holdTotal = current.holdSec ?? 0;
+
+  const contactSuggestions = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of allCalls) if (c.contactName) s.add(c.contactName);
+    return Array.from(s).sort();
+  }, [allCalls]);
+  const phoneSuggestions = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of allCalls) if (c.phoneNumber) s.add(c.phoneNumber);
+    return Array.from(s).sort();
+  }, [allCalls]);
+  /** phone -> most-recent contact name with that number */
+  const phoneToContact = useMemo(() => {
+    const map = new Map<string, { name: string; at: number }>();
+    for (const c of allCalls) {
+      if (!c.phoneNumber || !c.contactName) continue;
+      const at = new Date(c.startTime).getTime();
+      const prev = map.get(c.phoneNumber);
+      if (!prev || prev.at < at) map.set(c.phoneNumber, { name: c.contactName, at });
+    }
+    return map;
+  }, [allCalls]);
+
+  /** Look up the contact for the entered phone number when the user leaves the field. */
+  const onPhoneBlur = () => {
+    if (!phoneNumber || contactName) return;
+    const hit = phoneToContact.get(phoneNumber);
+    if (hit) setContactName(hit.name);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -119,17 +150,30 @@ export function CallEditDialog({
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
+              list="contact-name-suggestions"
               className={inputClass}
               placeholder="例: 山田太郎"
             />
+            <datalist id="contact-name-suggestions">
+              {contactSuggestions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
           </Field>
           <Field label="電話番号">
             <input
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
+              onBlur={onPhoneBlur}
+              list="phone-number-suggestions"
               className={inputClass}
               placeholder="例: 090-1234-5678"
             />
+            <datalist id="phone-number-suggestions">
+              {phoneSuggestions.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
           </Field>
         </div>
 

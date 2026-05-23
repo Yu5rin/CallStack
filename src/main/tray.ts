@@ -35,6 +35,7 @@ export interface TrayState {
   elapsedSec?: number;
   holding?: boolean;
   recording?: boolean;
+  today?: { count: number; totalSec: number };
 }
 
 export function createTray(handlers: TrayHandlers): Tray {
@@ -56,8 +57,19 @@ export function updateTray(state: TrayState, handlers: TrayHandlers): void {
   } else {
     parts.push('待機中');
   }
+  if (state.today && state.today.count > 0) {
+    parts.push(`今日 ${state.today.count}件 ${formatHMSShort(state.today.totalSec)}`);
+  }
   tray.setToolTip(parts.join(' — '));
   tray.setContextMenu(buildMenu(state, handlers));
+}
+
+function formatHMSShort(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+  return `${m}m`;
 }
 
 export function destroyTray(): void {

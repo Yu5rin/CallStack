@@ -44,6 +44,20 @@ function getActive(): CallRecord | null {
   return store.getActiveCall();
 }
 
+function todayStats(): { count: number; totalSec: number } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  let count = 0;
+  let totalSec = 0;
+  for (const c of store.getCalls()) {
+    if (!c.endTime) continue;
+    if (new Date(c.startTime).getTime() < start) continue;
+    count++;
+    totalSec += c.durationSec ?? 0;
+  }
+  return { count, totalSec };
+}
+
 function startTickLoop() {
   if (tickInterval) return;
   tickInterval = setInterval(() => {
@@ -54,7 +68,7 @@ function startTickLoop() {
     const holdSec = store.getLiveHoldSec();
     broadcast('app-event', { type: 'tick', activeId: active.id, elapsedSec, holding, holdSec });
     updateTray(
-      { active: true, elapsedSec, holding, recording: store.getSettings().recording.enabled },
+      { active: true, elapsedSec, holding, recording: store.getSettings().recording.enabled, today: todayStats() },
       trayHandlers,
     );
 
@@ -93,7 +107,7 @@ function startCall(): CallRecord | null {
   longCallAlertFired = false;
   const settings = store.getSettings();
   createHudWindow(settings.hudPosition, settings.hudSize);
-  updateTray({ active: true, elapsedSec: 0 }, trayHandlers);
+  updateTray({ active: true, elapsedSec: 0, today: todayStats() }, trayHandlers);
   startTickLoop();
   broadcast('app-event', { type: 'call:started', record: rec });
   return rec;
@@ -117,7 +131,7 @@ async function endCall(): Promise<CallRecord | null> {
   // so we just broadcast and let it call recording:finalize.
   stopTickLoop();
   closeHudWindow();
-  updateTray({ active: false }, trayHandlers);
+  updateTray({ active: false, today: todayStats() }, trayHandlers);
   if (updated) {
     broadcast('app-event', { type: 'call:ended', record: updated });
     notify('通話を記録しました', `${formatHMS(durationSec)} — クリックで詳細編集`, () => showMainWindow());
@@ -173,7 +187,7 @@ const trayHandlers: TrayHandlers = {
     const next = { ...cur, theme };
     store.setSettings(next);
     broadcast('app-event', { type: 'settings:updated', settings: next });
-    updateTray({ active: !!getActive() }, trayHandlers);
+    updateTray({ active: !!getActive(), today: todayStats() }, trayHandlers);
   },
   getTheme: () => store.getSettings().theme,
 };
@@ -634,7 +648,7 @@ async function main() {
   registerAppProtocol();
 
   createTray(trayHandlers);
-  updateTray({ active: false }, trayHandlers);
+  updateTray({ active: false, today: todayStats() }, trayHandlers);
 
   reRegisterShortcuts();
   setMinimizeToTray(store.getSettings().minimizeToTray);
@@ -652,7 +666,7 @@ async function main() {
   // Restart tick + HUD if there's a stale active call from previous run
   if (getActive()) {
     createHudWindow(store.getSettings().hudPosition, store.getSettings().hudSize);
-    updateTray({ active: true, elapsedSec: 0 }, trayHandlers);
+    updateTray({ active: true, elapsedSec: 0, today: todayStats() }, trayHandlers);
     startTickLoop();
   }
 }

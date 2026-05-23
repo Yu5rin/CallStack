@@ -274,6 +274,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
         <CallEditDialog
           call={editing}
           settings={settings}
+          allCalls={calls}
           onClose={() => setEditing(null)}
         />
       )}

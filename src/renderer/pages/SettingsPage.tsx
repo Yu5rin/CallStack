@@ -331,6 +331,45 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             オフなら通常通りタスクバーに最小化されます (×ボタンは常にアプリ終了)
           </span>
         </Row>
+        <Row label="HUD のサイズ">
+          <div className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
+            {(['mini', 'compact', 'full'] as const).map((s) => (
+              <label key={s} className="inline-flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={draft.hudSize === s}
+                  onChange={() => update({ hudSize: s })}
+                />
+                {s === 'mini' ? 'ミニ (180×32)' : s === 'compact' ? 'コンパクト (260×56)' : 'フル (340×96)'}
+              </label>
+            ))}
+          </div>
+          <span className="ml-2 block text-xs text-slate-500 dark:text-slate-400">
+            HUD 右上のアイコンでもサイズを循環できます
+          </span>
+        </Row>
+        <Row label="HUD の透明度">
+          <div className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
+            {([1.0, 0.75, 0.5] as const).map((o) => (
+              <label key={o} className="inline-flex items-center gap-1">
+                <input
+                  type="radio"
+                  checked={draft.hudOpacity === o}
+                  onChange={() => update({ hudOpacity: o })}
+                />
+                {Math.round(o * 100)}%
+              </label>
+            ))}
+          </div>
+        </Row>
+      </section>
+
+      <section className={sectionClass}>
+        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">データのバックアップ</h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。
+        </p>
+        <BackupRestoreRow />
       </section>
 
       <section className={sectionClass}>
@@ -413,6 +452,73 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BackupRestoreRow() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const backup = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const path = await window.api.backup.create();
+      setMessage(`バックアップを保存しました: ${path}`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restore = async () => {
+    if (!window.confirm('JSON ファイルから復元します。現在のデータは復元前に自動バックアップされます。続行しますか？')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await window.api.backup.restore();
+      if (r.canceled) {
+        setMessage(null);
+      } else {
+        setMessage(`復元しました (${r.calls} 件)。直前のデータは ${r.backupPath} にあります。`);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <button
+          onClick={backup}
+          disabled={busy}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+        >
+          今すぐバックアップ
+        </button>
+        <button
+          onClick={restore}
+          disabled={busy}
+          className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-700 dark:bg-slate-800 dark:hover:bg-red-950 disabled:opacity-50"
+        >
+          JSON から復元…
+        </button>
+      </div>
+      {message && (
+        <div className="break-all rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+          {message}
+        </div>
+      )}
+      {error && (
+        <div className="break-all rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {error}
         </div>
       )}
     </div>
