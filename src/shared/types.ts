@@ -55,9 +55,12 @@ export interface ShortcutSettings {
   endCall: string;
   toggleWindow: string;
   toggleHold: string;
+  openSettings: string;
 }
 
 export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium';
+
+export type ThemePref = 'system' | 'light' | 'dark';
 
 export interface RecordingSettings {
   enabled: boolean;
@@ -85,6 +88,8 @@ export interface Settings {
   transcription: TranscriptionSettings;
   confirmRecordingEnable: boolean;
   minimizeToTray: boolean;
+  confirmCallDelete: boolean;
+  theme: ThemePref;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -116,6 +121,7 @@ export type ModelDownloadEvent = {
   done: boolean;
   error?: string;
 };
+export type NavigateEvent = { type: 'navigate'; page: 'list' | 'stats' | 'settings' };
 
 export type AppEvent =
   | CallStartedEvent
@@ -127,7 +133,8 @@ export type AppEvent =
   | HoldChangedEvent
   | RecordingFinalizedEvent
   | TranscriptionStatusEvent
-  | ModelDownloadEvent;
+  | ModelDownloadEvent
+  | NavigateEvent;
 
 export interface CsvExportOptions {
   range: 'all' | 'thisWeek' | 'thisMonth' | 'custom';
@@ -148,6 +155,7 @@ export const DEFAULT_SETTINGS: Settings = {
     endCall: 'Control+Shift+E',
     toggleWindow: 'Control+Shift+T',
     toggleHold: 'Control+Shift+H',
+    openSettings: 'Control+Shift+,',
   },
   tags: [
     { name: '営業',   color: '#367aff' },
@@ -174,6 +182,8 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   confirmRecordingEnable: true,
   minimizeToTray: false,
+  confirmCallDelete: true,
+  theme: 'system',
 };
 
 export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: string }> = [

@@ -4,6 +4,7 @@ export interface StartOptions {
   micDeviceId: string | null;
   onLevel?: (rms: number) => void;
   onError?: (err: Error) => void;
+  onWarning?: (msg: string) => void;
 }
 
 const CHUNK_MS = 5000;
@@ -117,9 +118,22 @@ export class RecordingManager {
       sys = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
       // Drop video track – we only need audio
       sys.getVideoTracks().forEach((t) => t.stop());
+      if (sys.getAudioTracks().length === 0) {
+        sys = null;
+        opts.onWarning?.(
+          'システム音声トラックを取得できませんでした。マイクのみで録音します。'
+          + 'Windows 以外の環境では loopback 取得が制限される場合があります。',
+        );
+      }
     } catch (err) {
-      // Fallback: continue with mic only and warn
       console.warn('[recorder] system audio capture failed, falling back to mic only:', err);
+      opts.onWarning?.(
+        `システム音声のキャプチャに失敗しました（マイクのみで録音します）: ${(err as Error).message}`,
+      );
+      this.mixStreams = [mic];
+      return mic;
+    }
+    if (!sys) {
       this.mixStreams = [mic];
       return mic;
     }

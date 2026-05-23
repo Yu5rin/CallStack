@@ -47,8 +47,8 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700">過去30日の通話時間（分）</h3>
+        <div className="lg:col-span-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">過去30日の通話時間（分）</h3>
           <div className="h-64">
             <ResponsiveContainer>
               <BarChart data={dailyChart}>
@@ -62,8 +62,8 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700">タグ別構成（時間）</h3>
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">タグ別構成（時間）</h3>
           <div className="h-64">
             {tagPie.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-slate-400">データなし</div>
@@ -84,8 +84,8 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">時間帯別の発生件数</h3>
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">時間帯別の発生件数</h3>
         <div className="h-56">
           <ResponsiveContainer>
             <BarChart data={hourChart}>
@@ -99,10 +99,10 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">タグ別の詳細</h3>
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">タグ別の詳細</h3>
         <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+          <thead className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
               <th className="py-2">タグ</th>
               <th className="py-2 text-right">件数</th>
@@ -115,7 +115,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
               <tr><td colSpan={4} className="py-4 text-center text-slate-400">データなし</td></tr>
             )}
             {byTag.map((b) => (
-              <tr key={b.tag} className="border-t border-slate-100">
+              <tr key={b.tag} className="border-t border-slate-100 dark:border-slate-800">
                 <td className="py-2">
                   <span
                     className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
@@ -133,8 +133,8 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         </table>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">連絡先別サマリー（上位 TOP10 通話時間）</h3>
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">連絡先別サマリー（上位 TOP10 通話時間）</h3>
         {top10Contacts.length === 0 ? (
           <div className="flex h-32 items-center justify-center text-sm text-slate-400">連絡先名が設定された記録がありません</div>
         ) : (
@@ -151,7 +151,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </div>
         )}
         <table className="mt-4 w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+          <thead className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
               <th className="py-2">連絡先</th>
               <th className="py-2 text-right">件数</th>
@@ -169,14 +169,14 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
               <tr
                 key={b.name}
                 onClick={() => onSelectContact?.(b.name)}
-                className="cursor-pointer border-t border-slate-100 hover:bg-brand-50"
+                className="cursor-pointer border-t border-slate-100 hover:bg-brand-50 dark:border-slate-800 dark:hover:bg-brand-900/40"
               >
-                <td className="py-2 font-medium text-brand-700">{b.name}</td>
+                <td className="py-2 font-medium text-brand-700 dark:text-brand-300">{b.name}</td>
                 <td className="py-2 text-right tabular-nums">{b.count}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.avgSec)}</td>
                 <td className="py-2 text-xs">{b.topTag ?? '—'}</td>
-                <td className="py-2 text-xs text-slate-600">{formatDateTime(b.lastCallAt)}</td>
+                <td className="py-2 text-xs text-slate-600 dark:text-slate-400">{formatDateTime(b.lastCallAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -188,10 +188,10 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
 
 function StatCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900">
-        {value}{unit && <span className="ml-1 text-sm font-medium text-slate-500">{unit}</span>}
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
+        {value}{unit && <span className="ml-1 text-sm font-medium text-slate-500 dark:text-slate-400">{unit}</span>}
       </div>
     </div>
   );

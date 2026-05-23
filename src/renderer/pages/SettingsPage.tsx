@@ -1,8 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Settings, TagDef, WhisperModel } from '../../shared/types';
+import { Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
+
+const sectionClass =
+  'rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900';
+const inputClass =
+  'rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
+const ghostBtn =
+  'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
 
 function SetupCheck() {
   const [status, setStatus] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
@@ -22,23 +29,23 @@ function SetupCheck() {
   }, []);
 
   return (
-    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
       <div className="mb-1 flex items-center justify-between">
-        <div className="text-xs font-medium text-slate-700">セットアップ状態</div>
+        <div className="text-xs font-medium text-slate-700 dark:text-slate-300">セットアップ状態</div>
         <button
           onClick={run}
           disabled={checking}
-          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50"
+          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           再チェック
         </button>
       </div>
       {status === null && <div className="text-xs text-slate-500">確認中…</div>}
       {status && status.ok && (
-        <div className="text-xs text-emerald-700">✅ 文字起こしの準備が整っています。</div>
+        <div className="text-xs text-emerald-700 dark:text-emerald-300">✅ 文字起こしの準備が整っています。</div>
       )}
       {status && !status.ok && (
-        <div className="whitespace-pre-wrap text-xs text-red-700">⚠️ {status.error}</div>
+        <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">⚠️ {status.error}</div>
       )}
     </div>
   );
@@ -114,9 +121,28 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
   return (
     <div className="space-y-6 p-6">
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-1 text-base font-semibold text-slate-900">グローバルショートカット</h3>
-        <p className="mb-4 text-xs text-slate-500">
+      <section className={sectionClass}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">外観</h3>
+        <Row label="テーマ">
+          <div className="flex gap-3 text-sm">
+            {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+              <label key={t} className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-300">
+                <input
+                  type="radio"
+                  name="theme"
+                  checked={draft.theme === t}
+                  onChange={() => update({ theme: t })}
+                />
+                {t === 'system' ? 'システムに合わせる' : t === 'light' ? 'ライト' : 'ダーク'}
+              </label>
+            ))}
+          </div>
+        </Row>
+      </section>
+
+      <section className={sectionClass}>
+        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">グローバルショートカット</h3>
+        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
           システム全体で有効。フォーカス中の入力欄にキーを押すと記録できます。
         </p>
         <div className="space-y-3">
@@ -132,18 +158,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <Row label="メイン窓を表示/隠す">
             <ShortcutInput value={draft.shortcuts.toggleWindow} onChange={(v) => updateShortcut('toggleWindow', v)} />
           </Row>
+          <Row label="設定画面を開く">
+            <ShortcutInput value={draft.shortcuts.openSettings} onChange={(v) => updateShortcut('openSettings', v)} />
+          </Row>
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className={sectionClass}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-900">タグ</h3>
-          <button
-            onClick={addTag}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
-          >
-            ＋ タグを追加
-          </button>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">タグ</h3>
+          <button onClick={addTag} className={ghostBtn}>＋ タグを追加</button>
         </div>
         <div className="space-y-2">
           {draft.tags.map((t, i) => (
@@ -152,16 +176,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 type="color"
                 value={t.color}
                 onChange={(e) => updateTag(i, { color: e.target.value })}
-                className="h-9 w-9 cursor-pointer rounded border border-slate-300"
+                className="h-9 w-9 cursor-pointer rounded border border-slate-300 dark:border-slate-700"
               />
               <input
                 value={t.name}
                 onChange={(e) => updateTag(i, { name: e.target.value })}
-                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className={`flex-1 ${inputClass}`}
               />
               <button
                 onClick={() => removeTag(i)}
-                className="rounded-md border border-red-300 bg-white px-2 py-1.5 text-xs text-red-700 hover:bg-red-50"
+                className="rounded-md border border-red-300 bg-white px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
               >
                 削除
               </button>
@@ -170,10 +194,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">録音</h3>
+      <section className={sectionClass}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">録音</h3>
         <Row label="通話と同時に録音">
-          <label className="inline-flex items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.recording.enabled}
@@ -183,7 +207,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </label>
         </Row>
         <Row label="有効化時の同意確認">
-          <label className="inline-flex items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.confirmRecordingEnable}
@@ -193,7 +217,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </label>
         </Row>
         <Row label="音声ソース">
-          <div className="flex gap-3 text-sm">
+          <div className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
             <label className="inline-flex items-center gap-1">
               <input
                 type="radio"
@@ -210,7 +234,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 onChange={() => updateRecording({ source: 'mic+system' })}
                 disabled={!draft.recording.enabled}
               />
-              マイク + システム音声
+              マイク + システム音声 (PC で流れている音も録音)
             </label>
           </div>
         </Row>
@@ -224,17 +248,17 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <select
             value={draft.recording.mp3Bitrate}
             onChange={(e) => updateRecording({ mp3Bitrate: Number(e.target.value) as 64 | 96 | 128 | 192 })}
-            className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className={`w-32 ${inputClass}`}
             disabled={!draft.recording.enabled}
           >
             {[64, 96, 128, 192].map((b) => (
               <option key={b} value={b}>{b} kbps</option>
             ))}
           </select>
-          <span className="ml-2 text-xs text-slate-500">96kbps で約 700KB/分</span>
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">96kbps で約 700KB/分</span>
         </Row>
         <Row label="自動文字起こし">
-          <label className="inline-flex items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.recording.autoTranscribe}
@@ -254,16 +278,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
               updateRecording({ retentionDays: v });
             }}
-            className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className={`w-32 ${inputClass}`}
             disabled={!draft.recording.enabled}
           />
-          <span className="ml-2 text-xs text-slate-500">空欄で無制限。期限切れの音声のみ削除（記録は残ります）</span>
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">空欄で無制限。期限切れの音声のみ削除（記録は残ります）</span>
         </Row>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-1 text-base font-semibold text-slate-900">文字起こし (whisper.cpp ローカル)</h3>
-        <p className="mb-3 text-xs text-slate-500">
+      <section className={sectionClass}>
+        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">文字起こし (whisper.cpp ローカル)</h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           すべてオフラインで動作します。初回利用時にモデルファイルをダウンロードしてください。
           whisper.cpp 実行ファイルは README「文字起こしの準備」に従ってセットアップしてください。
         </p>
@@ -271,7 +295,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <select
             value={draft.transcription.language}
             onChange={(e) => updateTranscription({ language: e.target.value as 'auto' | 'ja' | 'en' })}
-            className="w-40 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className={`w-40 ${inputClass}`}
           >
             <option value="auto">自動判定</option>
             <option value="ja">日本語</option>
@@ -280,7 +304,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         </Row>
         <SetupCheck />
         <div className="mt-3">
-          <div className="mb-2 text-xs font-medium text-slate-600">モデル</div>
+          <div className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-300">モデル</div>
           <ModelManager
             selected={draft.transcription.model}
             onSelect={(m: WhisperModel) => updateTranscription({ model: m })}
@@ -292,10 +316,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">ウィンドウ</h3>
+      <section className={sectionClass}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">ウィンドウ</h3>
         <Row label="最小化の動作">
-          <label className="inline-flex items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.minimizeToTray}
@@ -303,14 +327,14 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             />
             最小化時にタスクトレイに格納する
           </label>
-          <span className="ml-2 text-xs text-slate-500">
-            オフなら通常通りタスクバーへ最小化されます
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+            オフなら通常通りタスクバーに最小化されます (×ボタンは常にアプリ終了)
           </span>
         </Row>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-base font-semibold text-slate-900">その他</h3>
+      <section className={sectionClass}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">その他</h3>
         <Row label="長電話アラート（分）">
           <input
             type="number"
@@ -321,12 +345,12 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
               update({ longCallAlertMin: v });
             }}
-            className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className={`w-32 ${inputClass}`}
           />
-          <span className="ml-2 text-xs text-slate-500">空欄で無効化</span>
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">空欄で無効化</span>
         </Row>
         <Row label="音声フィードバック">
-          <label className="inline-flex items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.soundFeedback}
@@ -335,10 +359,23 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             開始/終了時にビープ音
           </label>
         </Row>
+        <Row label="記録削除時の確認">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={draft.confirmCallDelete}
+              onChange={(e) => update({ confirmCallDelete: e.target.checked })}
+            />
+            削除前に確認モーダルを表示する
+          </label>
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+            オフにすると Delete キーや削除ボタンで即削除されます
+          </span>
+        </Row>
       </section>
 
-      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t bg-slate-50/80 py-3 backdrop-blur">
-        {savedAt && !dirty && <span className="text-xs text-emerald-600">保存しました</span>}
+      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50/80 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
+        {savedAt && !dirty && <span className="text-xs text-emerald-600 dark:text-emerald-400">保存しました</span>}
         <button
           onClick={handleSave}
           disabled={!dirty}
@@ -350,9 +387,9 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {showRecordingWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
-            <h3 className="mb-2 text-lg font-bold text-slate-900">⚠️ 録音に関する重要な注意</h3>
-            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
+            <h3 className="mb-2 text-lg font-bold text-slate-900 dark:text-slate-100">⚠️ 録音に関する重要な注意</h3>
+            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-300">
               <li>通話の録音には<strong>相手の同意が必要</strong>な場合があります（地域・業務上のルールを確認してください）</li>
               <li>録音ファイルはこの PC 内にのみ保存され、外部に送信されません</li>
               <li>機密情報を扱う際は適切なアクセス制御を行ってください</li>
@@ -361,7 +398,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowRecordingWarning(false)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 キャンセル
               </button>
@@ -385,7 +422,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-center gap-4">
-      <div className="w-44 text-sm text-slate-700">{label}</div>
+      <div className="w-44 text-sm text-slate-700 dark:text-slate-300">{label}</div>
       <div className="flex-1">{children}</div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session, WebContents } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, WebContents, desktopCapturer } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
@@ -12,6 +12,7 @@ import {
   createMainWindow,
   toggleMainWindow,
   showMainWindow,
+  showMainWindowAt,
   createHudWindow,
   closeHudWindow,
   broadcast,
@@ -50,7 +51,10 @@ function startTickLoop() {
     const holding = store.isHolding();
     const holdSec = store.getLiveHoldSec();
     broadcast('app-event', { type: 'tick', activeId: active.id, elapsedSec, holding, holdSec });
-    updateTray({ active: true, elapsedSec, holding }, trayHandlers);
+    updateTray(
+      { active: true, elapsedSec, holding, recording: store.getSettings().recording.enabled },
+      trayHandlers,
+    );
 
     const alertMin = store.getSettings().longCallAlertMin;
     if (alertMin && alertMin > 0 && !longCallAlertFired && elapsedSec >= alertMin * 60) {
@@ -161,6 +165,15 @@ const trayHandlers: TrayHandlers = {
     markForceQuit();
     app.quit();
   },
+  onSetTheme: (theme) => {
+    const cur = store.getSettings();
+    if (cur.theme === theme) return;
+    const next = { ...cur, theme };
+    store.setSettings(next);
+    broadcast('app-event', { type: 'settings:updated', settings: next });
+    updateTray({ active: !!getActive() }, trayHandlers);
+  },
+  getTheme: () => store.getSettings().theme,
 };
 
 function reRegisterShortcuts(): void {
@@ -170,6 +183,7 @@ function reRegisterShortcuts(): void {
     end: () => { void endCall(); },
     toggle: () => toggleMainWindow(),
     toggleHold: () => toggleHold(),
+    openSettings: () => showMainWindowAt('settings'),
   });
   if (failures.length > 0) {
     notify('ショートカット登録失敗', `登録できませんでした: ${failures.join(', ')}`);
@@ -523,7 +537,37 @@ function setupMediaPermissions(): void {
   });
 }
 
+function setupDisplayCapture(): void {
+  // Required so navigator.mediaDevices.getDisplayMedia({ audio: true }) actually
+  // captures the system audio loopback. Without this handler, Chromium on
+  // Windows silently drops the audio track and the user sees only the mic.
+  type DisplayHandler = (
+    req: unknown,
+    cb: (streams: { video?: unknown; audio?: 'loopback' | 'loopbackWithMute' }) => void,
+  ) => void;
+  type SessionWithDisplay = typeof session.defaultSession & {
+    setDisplayMediaRequestHandler?: (handler: DisplayHandler, opts?: { useSystemPicker?: boolean }) => void;
+  };
+  const s = session.defaultSession as SessionWithDisplay;
+  if (typeof s.setDisplayMediaRequestHandler !== 'function') return;
+  s.setDisplayMediaRequestHandler((_req, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] })
+      .then((sources) => {
+        callback({ video: sources[0], audio: 'loopback' });
+      })
+      .catch(() => callback({}));
+  }, { useSystemPicker: false });
+}
+
 async function main() {
+  // Establish the Windows AppUserModelID and product name BEFORE any window is
+  // created, so the taskbar / notifications / jump lists show "TelTimeStack"
+  // instead of the generic "Electron".
+  app.setName('TelTimeStack');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.teltimestack.app');
+  }
+
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {
     app.quit();
@@ -539,6 +583,7 @@ async function main() {
   setupIpc();
   setupTranscriptionHandlers();
   setupMediaPermissions();
+  setupDisplayCapture();
   registerAppProtocol();
 
   createTray(trayHandlers);

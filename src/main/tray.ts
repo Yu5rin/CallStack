@@ -1,5 +1,6 @@
 import { Tray, Menu, nativeImage, app } from 'electron';
 import path from 'node:path';
+import type { ThemePref } from '../shared/types';
 
 let tray: Tray | null = null;
 
@@ -25,25 +26,38 @@ export interface TrayHandlers {
   onOpen: () => void;
   onExport: () => void;
   onQuit: () => void;
+  onSetTheme: (theme: ThemePref) => void;
+  getTheme: () => ThemePref;
+}
+
+export interface TrayState {
+  active: boolean;
+  elapsedSec?: number;
+  holding?: boolean;
+  recording?: boolean;
 }
 
 export function createTray(handlers: TrayHandlers): Tray {
   if (tray) return tray;
   tray = new Tray(buildIcon(false));
   tray.setToolTip('TelTimeStack — 待機中');
-  tray.setContextMenu(buildMenu(false, handlers));
+  tray.setContextMenu(buildMenu({ active: false }, handlers));
   tray.on('click', () => handlers.onOpen());
   return tray;
 }
 
-export function updateTray(state: { active: boolean; elapsedSec?: number; holding?: boolean }, handlers: TrayHandlers): void {
+export function updateTray(state: TrayState, handlers: TrayHandlers): void {
   if (!tray) return;
   tray.setImage(buildIcon(state.active));
-  const tip = state.active
-    ? `TelTimeStack — ${state.holding ? '保留中' : '通話中'} ${formatHMS(state.elapsedSec ?? 0)}`
-    : 'TelTimeStack — 待機中';
-  tray.setToolTip(tip);
-  tray.setContextMenu(buildMenu(state.active, handlers));
+  const parts: string[] = ['TelTimeStack'];
+  if (state.active) {
+    parts.push(`${state.holding ? '保留中' : '通話中'} ${formatHMS(state.elapsedSec ?? 0)}`);
+    if (state.recording) parts.push('録音中');
+  } else {
+    parts.push('待機中');
+  }
+  tray.setToolTip(parts.join(' — '));
+  tray.setContextMenu(buildMenu(state, handlers));
 }
 
 export function destroyTray(): void {
@@ -53,14 +67,30 @@ export function destroyTray(): void {
   }
 }
 
-function buildMenu(active: boolean, h: TrayHandlers): Electron.Menu {
+function buildMenu(state: TrayState, h: TrayHandlers): Electron.Menu {
+  const theme = h.getTheme();
+  const themeItem = (label: string, value: ThemePref): Electron.MenuItemConstructorOptions => ({
+    label,
+    type: 'radio',
+    checked: theme === value,
+    click: () => h.onSetTheme(value),
+  });
   return Menu.buildFromTemplate([
-    active
+    state.active
       ? { label: '通話を終了', click: h.onEnd }
       : { label: '通話を開始', click: h.onStart },
     { type: 'separator' },
     { label: 'メイン窓を開く', click: h.onOpen },
     { label: 'CSV エクスポート…', click: h.onExport },
+    { type: 'separator' },
+    {
+      label: '外観テーマ',
+      submenu: [
+        themeItem('システムに合わせる', 'system'),
+        themeItem('ライト', 'light'),
+        themeItem('ダーク', 'dark'),
+      ],
+    },
     { type: 'separator' },
     { label: `バージョン ${app.getVersion()}`, enabled: false },
     { label: '終了', click: h.onQuit },

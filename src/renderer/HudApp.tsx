@@ -36,7 +36,11 @@ export function HudApp() {
   }
 
   return (
-    <div className="hud-drag h-full w-full select-none rounded-2xl bg-slate-900/95 px-4 py-2 text-slate-100 shadow-2xl ring-1 ring-white/10">
+    <div
+      className="hud-drag h-full w-full select-none rounded-2xl bg-slate-900/95 px-4 py-2 text-slate-100 shadow-2xl ring-1 ring-white/10"
+      onDoubleClick={handleOpenMain}
+      title="ダブルクリックでメイン窓を開く"
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">

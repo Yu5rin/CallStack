@@ -45,3 +45,20 @@ export function useCalls() {
 
   return { calls, loading, reload };
 }
+
+/**
+ * Centralised delete flow. Honours the `confirmCallDelete` setting so the
+ * confirmation can be toggled off for both the list (Delete key) and the
+ * edit dialog (削除 button).
+ */
+export async function deleteCallWithConfirm(
+  id: string,
+  confirmEnabled: boolean,
+): Promise<boolean> {
+  if (confirmEnabled) {
+    const ok = window.confirm('この記録を削除しますか？録音ファイルも削除されます。');
+    if (!ok) return false;
+  }
+  await window.api.calls.delete(id);
+  return true;
+}

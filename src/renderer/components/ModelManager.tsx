@@ -36,7 +36,10 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded }: P
         const p = progress[m.id];
         const pct = p && p.total ? Math.round((p.rec / p.total) * 100) : null;
         return (
-          <div key={m.id} className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
+          <div
+            key={m.id}
+            className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          >
             <input
               type="radio"
               name="whisper-model"
@@ -45,21 +48,21 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded }: P
               disabled={!isDl}
             />
             <div className="flex-1">
-              <div className="text-sm font-medium text-slate-800">{m.label}</div>
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{m.label}</div>
               {p && !p.done && pct !== null && (
-                <div className="mt-1 h-1 w-full overflow-hidden rounded bg-slate-100">
+                <div className="mt-1 h-1 w-full overflow-hidden rounded bg-slate-100 dark:bg-slate-700">
                   <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
                 </div>
               )}
-              {p?.error && <div className="text-xs text-red-600">{p.error}</div>}
+              {p?.error && <div className="text-xs text-red-600 dark:text-red-400">{p.error}</div>}
             </div>
             {isDl ? (
-              <span className="text-xs text-emerald-600">ダウンロード済</span>
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">ダウンロード済</span>
             ) : (
               <button
                 onClick={() => download(m.id)}
                 disabled={!!p && !p.done}
-                className="rounded-md border border-brand-300 bg-white px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                className="rounded-md border border-brand-300 bg-white px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-brand-700 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
               >
                 {p && !p.done ? '取得中…' : 'ダウンロード'}
               </button>

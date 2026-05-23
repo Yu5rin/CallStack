@@ -44,17 +44,19 @@ export function ShortcutInput({ value, onChange }: Props) {
         onFocus={() => setRecording(true)}
         onBlur={() => setRecording(false)}
         className={`w-48 rounded-md border px-3 py-2 font-mono text-sm tabular-nums ${
-          recording ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-200' : 'border-slate-300 bg-white'
+          recording
+            ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-200 dark:bg-brand-900/40 dark:text-slate-100'
+            : 'border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
         }`}
       />
       <button
         type="button"
         onClick={() => onChange('')}
-        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
       >
         クリア
       </button>
-      {recording && <span className="text-xs text-brand-600">キーを押してください…</span>}
+      {recording && <span className="text-xs text-brand-600 dark:text-brand-300">キーを押してください…</span>}
     </div>
   );
 }

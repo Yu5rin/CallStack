@@ -53,6 +53,7 @@ export function useRecorder(
         source: rec.source,
         micDeviceId: rec.micDeviceId,
         onLevel: (v) => setLevel(v),
+        onWarning: (msg) => reportError(msg),
         onError: (err) => {
           if (!/invoking remote method/i.test(err.message)) reportError(err.message);
           else console.warn('[recorder] IPC error:', err);

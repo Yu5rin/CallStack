@@ -66,20 +66,30 @@ export function createMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
+function bringToFront(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
+  win.moveTop();
+  win.focus();
+}
+
 export function toggleMainWindow(): void {
   const win = createMainWindow();
   if (win.isVisible() && win.isFocused()) {
     win.hide();
   } else {
-    win.show();
-    win.focus();
+    bringToFront(win);
   }
 }
 
 export function showMainWindow(): void {
+  bringToFront(createMainWindow());
+}
+
+export function showMainWindowAt(page: 'list' | 'stats' | 'settings'): void {
   const win = createMainWindow();
-  win.show();
-  win.focus();
+  bringToFront(win);
+  win.webContents.send('app-event', { type: 'navigate', page });
 }
 
 export function markForceQuit(): void {
