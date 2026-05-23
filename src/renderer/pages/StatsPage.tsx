@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { CallRecord, Settings } from '../../shared/types';
 import { computeOverview, computeDaily, computeByTag, computeHourHistogram, computeByContact } from '../utils/stats';
 import { formatHMS, formatHMShort, formatDateTime } from '../utils/format';
+import { HeatmapCalendar } from '../components/HeatmapCalendar';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
@@ -82,6 +83,11 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">過去90日のアクティビティ</h3>
+        <HeatmapCalendar calls={calls} />
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">

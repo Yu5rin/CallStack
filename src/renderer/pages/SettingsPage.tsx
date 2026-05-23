@@ -152,6 +152,18 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <Row label="設定画面を開く">
             <ShortcutInput value={draft.shortcuts.openSettings} onChange={(v) => updateShortcut('openSettings', v)} />
           </Row>
+          {([1, 2, 3, 4] as const).map((n) => {
+            const key = `assignTag${n}` as const;
+            const tagName = draft.tags[n - 1]?.name ?? '(未設定)';
+            return (
+              <Row key={key} label={`クイックタグ ${n} (${tagName})`}>
+                <ShortcutInput
+                  value={draft.shortcuts[key]}
+                  onChange={(v) => updateShortcut(key, v)}
+                />
+              </Row>
+            );
+          })}
         </div>
       </section>
 

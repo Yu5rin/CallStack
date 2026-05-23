@@ -29,6 +29,10 @@ const api = {
     import: (): Promise<
       { canceled: true } | { canceled: false; result: CsvImportResult; backupPath: string }
     > => ipcRenderer.invoke('csv:import'),
+    importText: (
+      text: string,
+    ): Promise<{ canceled: false; result: CsvImportResult; backupPath: string }> =>
+      ipcRenderer.invoke('csv:import-text', text),
   },
   report: {
     weekly: (): Promise<{ canceled: true } | { canceled: false; path: string }> =>
@@ -72,6 +76,8 @@ const api = {
     restore: (): Promise<
       { canceled: true } | { canceled: false; calls: number; backupPath: string }
     > => ipcRenderer.invoke('backup:restore'),
+    restoreJson: (json: unknown): Promise<{ calls: number; backupPath: string }> =>
+      ipcRenderer.invoke('backup:restore-json', json),
   },
   onEvent: (cb: (e: AppEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AppEvent) => cb(payload);

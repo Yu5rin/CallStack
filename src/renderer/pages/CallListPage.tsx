@@ -3,6 +3,7 @@ import { CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../s
 import { CallEditDialog } from '../components/CallEditDialog';
 import { deleteCallWithConfirm } from '../hooks/useCalls';
 import { formatDateTime, formatHMS } from '../utils/format';
+import { highlight } from '../utils/highlight';
 
 interface Props {
   calls: CallRecord[];
@@ -20,6 +21,9 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
   const [showUntagged, setShowUntagged] = useState(false);
   const [exportRange, setExportRange] = useState<CsvExportOptions['range']>('all');
   const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
+  const [restoreResult, setRestoreResult] = useState<{ calls: number; backupPath: string } | null>(null);
+  const [dropError, setDropError] = useState<string | null>(null);
+  const [dragDepth, setDragDepth] = useState(0);
 
   // Receive cross-page contact filter
   useEffect(() => {
@@ -92,6 +96,27 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
     setImportResult(r.result);
   };
 
+  const handleDropFile = async (file: File) => {
+    setDropError(null);
+    const name = file.name.toLowerCase();
+    try {
+      if (name.endsWith('.csv')) {
+        const text = await file.text();
+        const r = await window.api.csv.importText(text);
+        setImportResult(r.result);
+      } else if (name.endsWith('.json')) {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        const r = await window.api.backup.restoreJson(json);
+        setRestoreResult({ calls: r.calls, backupPath: r.backupPath });
+      } else {
+        setDropError(`未対応のファイル形式: ${file.name}（.csv / .json のみ対応）`);
+      }
+    } catch (err) {
+      setDropError((err as Error).message);
+    }
+  };
+
   const handleWeeklyReport = async () => {
     const r = await window.api.report.weekly();
     if (!r.canceled) alert(`週次レポートを ${r.path} に保存しました`);
@@ -107,7 +132,35 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
   const untaggedCount = calls.filter((c) => c.endTime && !c.tag).length;
 
   return (
-    <div className="space-y-4 p-6">
+    <div
+      className="relative space-y-4 p-6"
+      onDragEnter={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDragDepth((d) => d + 1);
+        }
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }
+      }}
+      onDragLeave={() => setDragDepth((d) => Math.max(0, d - 1))}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragDepth(0);
+        const file = e.dataTransfer.files?.[0];
+        if (file) void handleDropFile(file);
+      }}
+    >
+      {dragDepth > 0 && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-brand-500/20 backdrop-blur-sm">
+          <div className="rounded-xl border-2 border-dashed border-brand-500 bg-white px-6 py-4 text-base font-semibold text-brand-700 shadow-2xl dark:bg-slate-900 dark:text-brand-200">
+            ドロップで CSV インポート / JSON 復元
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <input
           value={query}
@@ -244,13 +297,15 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                         className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
                         style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
                       >
-                        {c.tag}
+                        {highlight(c.tag, query)}
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{c.contactName || '—'}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                    {c.contactName ? highlight(c.contactName, query) : '—'}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <span className="inline-flex items-center justify-center gap-1 text-base whitespace-nowrap">
                       {c.audio && <span title="録音あり">🎤</span>}
@@ -263,7 +318,11 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-300 max-w-xs truncate">
-                    {c.memo || c.transcript?.text || '—'}
+                    {c.memo
+                      ? highlight(c.memo, query)
+                      : c.transcript?.text
+                        ? highlight(c.transcript.text, query)
+                        : '—'}
                   </td>
                 </tr>
               );
@@ -313,6 +372,46 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {restoreResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          onClick={() => setRestoreResult(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 text-lg font-bold">JSON 復元完了</h3>
+            <div className="space-y-2 text-sm text-slate-800 dark:text-slate-200">
+              <p>📦 {restoreResult.calls} 件の通話記録を読み込みました。</p>
+              <p className="break-all text-xs text-slate-500 dark:text-slate-400">
+                復元前のデータは {restoreResult.backupPath} にバックアップ済みです。
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setRestoreResult(null)}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dropError && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 shadow-lg dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+          {dropError}
+          <button
+            onClick={() => setDropError(null)}
+            className="ml-2 text-xs text-red-600 hover:underline dark:text-red-300"
+          >
+            閉じる
+          </button>
         </div>
       )}
     </div>

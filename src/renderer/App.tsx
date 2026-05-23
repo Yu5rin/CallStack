@@ -11,6 +11,7 @@ import { beep } from './utils/beep';
 import { AppEvent } from '../shared/types';
 import { useRecorder } from './recorder/useRecorder';
 import { LevelMeter } from './recorder/LevelMeter';
+import { SummaryFooter } from './components/SummaryFooter';
 
 type Page = 'list' | 'stats' | 'settings';
 
@@ -118,6 +119,7 @@ export function App() {
         )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
+      <SummaryFooter calls={calls} />
     </div>
   );
 }

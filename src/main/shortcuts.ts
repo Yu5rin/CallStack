@@ -7,6 +7,7 @@ export interface ShortcutHandlers {
   toggle: () => void;
   toggleHold: () => void;
   openSettings: () => void;
+  assignTag: (idx: number) => void;
 }
 
 export function registerShortcuts(shortcuts: ShortcutSettings, handlers: ShortcutHandlers): string[] {
@@ -18,6 +19,10 @@ export function registerShortcuts(shortcuts: ShortcutSettings, handlers: Shortcu
     [shortcuts.toggleWindow, handlers.toggle, 'toggleWindow'],
     [shortcuts.toggleHold, handlers.toggleHold, 'toggleHold'],
     [shortcuts.openSettings, handlers.openSettings, 'openSettings'],
+    [shortcuts.assignTag1, () => handlers.assignTag(0), 'assignTag1'],
+    [shortcuts.assignTag2, () => handlers.assignTag(1), 'assignTag2'],
+    [shortcuts.assignTag3, () => handlers.assignTag(2), 'assignTag3'],
+    [shortcuts.assignTag4, () => handlers.assignTag(3), 'assignTag4'],
   ];
   for (const [accel, handler, label] of attempts) {
     if (!accel) continue;

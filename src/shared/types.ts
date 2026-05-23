@@ -56,6 +56,10 @@ export interface ShortcutSettings {
   toggleWindow: string;
   toggleHold: string;
   openSettings: string;
+  assignTag1: string;
+  assignTag2: string;
+  assignTag3: string;
+  assignTag4: string;
 }
 
 export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium';
@@ -163,6 +167,10 @@ export const DEFAULT_SETTINGS: Settings = {
     toggleWindow: 'Control+Shift+T',
     toggleHold: 'Control+Shift+H',
     openSettings: 'Control+Shift+,',
+    assignTag1: 'Control+Shift+1',
+    assignTag2: 'Control+Shift+2',
+    assignTag3: 'Control+Shift+3',
+    assignTag4: 'Control+Shift+4',
   },
   tags: [
     { name: '営業',   color: '#367aff' },

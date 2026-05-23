@@ -193,6 +193,23 @@ const trayHandlers: TrayHandlers = {
   getTheme: () => store.getSettings().theme,
 };
 
+function assignTagToActive(tag: string | null): CallRecord | null {
+  const active = getActive();
+  if (!active) return null;
+  // Toggle: pressing the shortcut for the already-assigned tag clears it.
+  const next = active.tag === tag ? null : tag;
+  const updated = store.updateCall(active.id, { tag: next });
+  if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
+  return updated;
+}
+
+function assignTagByIndex(idx: number): void {
+  const s = store.getSettings();
+  const tag = s.tags[idx]?.name;
+  if (!tag) return;
+  assignTagToActive(tag);
+}
+
 function reRegisterShortcuts(): void {
   const s = store.getSettings();
   const failures = registerShortcuts(s.shortcuts, {
@@ -201,6 +218,7 @@ function reRegisterShortcuts(): void {
     toggle: () => toggleMainWindow(),
     toggleHold: () => toggleHold(),
     openSettings: () => showMainWindowAt('settings'),
+    assignTag: (idx) => assignTagByIndex(idx),
   });
   if (failures.length > 0) {
     notify('ショートカット登録失敗', `登録できませんでした: ${failures.join(', ')}`);
@@ -278,15 +296,7 @@ function setupIpc(): void {
     return { canceled: false, count, path: result.filePath } as const;
   });
 
-  ipcMain.handle('csv:import', async (): Promise<{ canceled: true } | { canceled: false; result: CsvImportResult; backupPath: string }> => {
-    const dlg = await dialog.showOpenDialog({
-      title: 'CSV を読み込み',
-      filters: [{ name: 'CSV', extensions: ['csv'] }],
-      properties: ['openFile'],
-    });
-    if (dlg.canceled || dlg.filePaths.length === 0) return { canceled: true };
-    const filePath = dlg.filePaths[0];
-    const raw = await fs.readFile(filePath, 'utf-8');
+  const importCsvText = async (raw: string): Promise<{ result: CsvImportResult; backupPath: string }> => {
     const parsed = parseCsv(raw);
     const errors: Array<{ row: number; message: string }> = [];
     const ok: CallRecord[] = [];
@@ -309,9 +319,25 @@ function setupIpc(): void {
     }
     const backupPath = await store.backupNow('pre-import');
     const { inserted, updated } = store.upsertMany(ok);
-    // Broadcast a generic settings refresh so renderer reloads list
     for (const r of ok) broadcast('app-event', { type: 'call:updated', record: store.getCall(r.id)! });
-    return { canceled: false, result: { inserted, updated, skipped, errors }, backupPath };
+    return { result: { inserted, updated, skipped, errors }, backupPath };
+  };
+
+  ipcMain.handle('csv:import', async (): Promise<{ canceled: true } | { canceled: false; result: CsvImportResult; backupPath: string }> => {
+    const dlg = await dialog.showOpenDialog({
+      title: 'CSV を読み込み',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+      properties: ['openFile'],
+    });
+    if (dlg.canceled || dlg.filePaths.length === 0) return { canceled: true };
+    const raw = await fs.readFile(dlg.filePaths[0], 'utf-8');
+    const r = await importCsvText(raw);
+    return { canceled: false, ...r };
+  });
+
+  ipcMain.handle('csv:import-text', async (_e, text: string) => {
+    const r = await importCsvText(text);
+    return { canceled: false as const, ...r };
   });
 
   ipcMain.handle('report:weekly', async () => {
@@ -341,13 +367,7 @@ function setupIpc(): void {
     broadcast('app-event', { type: 'settings:updated', settings: updated });
     return next;
   });
-  ipcMain.handle('hud:assign-tag', (_e, tag: string | null) => {
-    const active = getActive();
-    if (!active) return null;
-    const updated = store.updateCall(active.id, { tag });
-    if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
-    return updated;
-  });
+  ipcMain.handle('hud:assign-tag', (_e, tag: string | null) => assignTagToActive(tag));
   ipcMain.handle('hud:set-extra-height', (_e, extraPx: number) => {
     setHudExtraHeight(extraPx, store.getSettings().hudSize);
   });
@@ -489,6 +509,18 @@ function setupIpc(): void {
     broadcast('app-event', { type: 'settings:updated', settings: store.getSettings() });
     broadcast('app-event', { type: 'data:restored' });
     return { canceled: false, calls, backupPath };
+  });
+
+  ipcMain.handle('backup:restore-json', async (_e, json: unknown): Promise<{ calls: number; backupPath: string }> => {
+    const { calls } = await store.restoreFromJson(json);
+    const backupPath = path.join(
+      app.getPath('userData'),
+      'backups',
+      `data-${localDate(new Date()).replace(/-/g, '')}-pre-restore.json`,
+    );
+    broadcast('app-event', { type: 'settings:updated', settings: store.getSettings() });
+    broadcast('app-event', { type: 'data:restored' });
+    return { calls, backupPath };
   });
 }
 
