@@ -172,6 +172,14 @@ export function setHudSize(size: HudSize): void {
   hudWindow.setBounds({ x: newX, y: oldY, width, height });
 }
 
+/** Add extra height (e.g. for memo overlay) while keeping the window anchored. */
+export function setHudExtraHeight(extraPx: number, baseSize: HudSize): void {
+  if (!hudWindow || hudWindow.isDestroyed()) return;
+  const [x, y] = hudWindow.getPosition();
+  const { width, height } = HUD_SIZES[baseSize];
+  hudWindow.setBounds({ x, y, width, height: height + Math.max(0, extraPx) });
+}
+
 export function closeHudWindow(): void {
   if (hudWindow && !hudWindow.isDestroyed()) {
     hudWindow.close();

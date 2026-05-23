@@ -44,6 +44,8 @@ const api = {
     cycleSize: (): Promise<HudSize> => ipcRenderer.invoke('hud:cycle-size'),
     assignTag: (tag: string | null): Promise<CallRecord | null> =>
       ipcRenderer.invoke('hud:assign-tag', tag),
+    setExtraHeight: (px: number): Promise<void> =>
+      ipcRenderer.invoke('hud:set-extra-height', px),
   },
   recording: {
     appendChunk: (callId: string, buf: ArrayBuffer): Promise<boolean> =>

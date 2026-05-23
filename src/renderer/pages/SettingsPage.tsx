@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
@@ -53,59 +53,50 @@ function SetupCheck() {
 
 export function SettingsPage({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => Promise<void> }) {
   const [draft, setDraft] = useState<Settings>(settings);
-  const [dirty, setDirty] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showRecordingWarning, setShowRecordingWarning] = useState(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const lastIncoming = useRef<Settings>(settings);
 
+  // Adopt remote updates only when they actually differ from what we just
+  // saved — avoids fighting the user mid-edit while still reflecting changes
+  // from other surfaces (tray, HUD, etc.).
   useEffect(() => {
-    setDraft(settings);
-    setDirty(false);
+    if (settings !== lastIncoming.current) {
+      lastIncoming.current = settings;
+      setDraft(settings);
+    }
   }, [settings]);
 
-  const update = (patch: Partial<Settings>) => {
-    setDraft((d) => ({ ...d, ...patch }));
-    setDirty(true);
+  // Persist the draft as soon as it differs from the latest incoming settings.
+  // 200ms debounce keeps text fields (tag names, numbers) from spamming IPC.
+  const saveTimer = useRef<number | null>(null);
+  const commit = (next: Settings) => {
+    setDraft(next);
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      lastIncoming.current = next;
+      void onSave(next);
+    }, 200);
   };
 
-  const updateShortcut = (key: keyof Settings['shortcuts'], v: string) => {
-    setDraft((d) => ({ ...d, shortcuts: { ...d.shortcuts, [key]: v } }));
-    setDirty(true);
-  };
-
-  const updateRecording = (patch: Partial<Settings['recording']>) => {
-    setDraft((d) => ({ ...d, recording: { ...d.recording, ...patch } }));
-    setDirty(true);
-  };
-
-  const updateTranscription = (patch: Partial<Settings['transcription']>) => {
-    setDraft((d) => ({ ...d, transcription: { ...d.transcription, ...patch } }));
-    setDirty(true);
-  };
-
+  const update = (patch: Partial<Settings>) => commit({ ...draftRef.current, ...patch });
+  const updateShortcut = (key: keyof Settings['shortcuts'], v: string) =>
+    commit({ ...draftRef.current, shortcuts: { ...draftRef.current.shortcuts, [key]: v } });
+  const updateRecording = (patch: Partial<Settings['recording']>) =>
+    commit({ ...draftRef.current, recording: { ...draftRef.current.recording, ...patch } });
+  const updateTranscription = (patch: Partial<Settings['transcription']>) =>
+    commit({ ...draftRef.current, transcription: { ...draftRef.current.transcription, ...patch } });
   const updateTag = (idx: number, patch: Partial<TagDef>) => {
-    setDraft((d) => {
-      const tags = d.tags.slice();
-      tags[idx] = { ...tags[idx], ...patch };
-      return { ...d, tags };
-    });
-    setDirty(true);
+    const tags = draftRef.current.tags.slice();
+    tags[idx] = { ...tags[idx], ...patch };
+    commit({ ...draftRef.current, tags });
   };
-
-  const removeTag = (idx: number) => {
-    setDraft((d) => ({ ...d, tags: d.tags.filter((_, i) => i !== idx) }));
-    setDirty(true);
-  };
-
-  const addTag = () => {
-    setDraft((d) => ({ ...d, tags: [...d.tags, { name: '新規タグ', color: '#94a3b8' }] }));
-    setDirty(true);
-  };
-
-  const handleSave = async () => {
-    await onSave(draft);
-    setDirty(false);
-    setSavedAt(Date.now());
-  };
+  const removeTag = (idx: number) =>
+    commit({ ...draftRef.current, tags: draftRef.current.tags.filter((_, i) => i !== idx) });
+  const addTag = () =>
+    commit({ ...draftRef.current, tags: [...draftRef.current.tags, { name: '新規タグ', color: '#94a3b8' }] });
 
   const handleToggleRecording = (checked: boolean) => {
     if (checked) {
@@ -412,17 +403,6 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </span>
         </Row>
       </section>
-
-      <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50/80 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
-        {savedAt && !dirty && <span className="text-xs text-emerald-600 dark:text-emerald-400">保存しました</span>}
-        <button
-          onClick={handleSave}
-          disabled={!dirty}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-        >
-          設定を保存
-        </button>
-      </div>
 
       {showRecordingWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">

@@ -197,8 +197,8 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
               <th className="px-4 py-3 text-right">純通話</th>
               <th className="px-4 py-3">タグ</th>
               <th className="px-4 py-3">連絡先</th>
-              <th className="px-4 py-3 w-10 text-center">録音</th>
-              <th className="px-4 py-3">メモ / 文字起こし</th>
+              <th className="px-4 py-3 w-24 whitespace-nowrap text-center">録音 / 文字起こし</th>
+              <th className="px-4 py-3">メモ</th>
             </tr>
           </thead>
           <tbody>
@@ -251,14 +251,16 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{c.contactName || '—'}</td>
-                  <td className="px-4 py-3 text-center text-base">
-                    {c.audio && <span title="録音あり">🎤</span>}
-                    {c.transcript && <span title="文字起こし済">📝</span>}
-                    {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
-                    {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}
-                    {c.transcriptStatus === 'error' && (
-                      <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
-                    )}
+                  <td className="px-4 py-3 text-center">
+                    <span className="inline-flex items-center justify-center gap-1 text-base whitespace-nowrap">
+                      {c.audio && <span title="録音あり">🎤</span>}
+                      {c.transcript && <span title="文字起こし済">📝</span>}
+                      {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
+                      {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}
+                      {c.transcriptStatus === 'error' && (
+                        <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
+                      )}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-300 max-w-xs truncate">
                     {c.memo || c.transcript?.text || '—'}

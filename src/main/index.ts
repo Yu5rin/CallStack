@@ -20,6 +20,7 @@ import {
   markForceQuit,
   setMinimizeToTray,
   setHudSize,
+  setHudExtraHeight,
   nextHudSize,
 } from './window';
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
@@ -346,6 +347,9 @@ function setupIpc(): void {
     const updated = store.updateCall(active.id, { tag });
     if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
     return updated;
+  });
+  ipcMain.handle('hud:set-extra-height', (_e, extraPx: number) => {
+    setHudExtraHeight(extraPx, store.getSettings().hudSize);
   });
 
   ipcMain.handle('hud:get-position', () => {
