@@ -188,7 +188,7 @@ export const DEFAULT_SETTINGS: Settings = {
     source: 'mic',
     micDeviceId: null,
     mp3Bitrate: 96,
-    autoTranscribe: false,
+    autoTranscribe: true,
     retentionDays: 90,
   },
   transcription: {

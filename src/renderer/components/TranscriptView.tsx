@@ -17,7 +17,7 @@ export function TranscriptView({ transcript, onSeek }: Props) {
         モデル: {transcript.model} / 言語: {transcript.language || '自動'} / 生成: {new Date(transcript.createdAt).toLocaleString()}
       </div>
       {segments.length > 0 ? (
-        <div className="max-h-64 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
           {segments.map((s, i) => (
             <div
               key={i}
