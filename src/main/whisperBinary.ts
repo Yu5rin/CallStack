@@ -11,16 +11,78 @@ import { logInfo } from './log';
  */
 
 const RELEASE_BASE = 'https://github.com/ggerganov/whisper.cpp/releases/download';
+const RELEASES_API = 'https://api.github.com/repos/ggerganov/whisper.cpp/releases?per_page=10';
 
-/** 上から順に試す。BLAS 版（CPU 最適化）を優先 */
-const CANDIDATE_ASSETS = [
-  'v1.7.4/whisper-blas-bin-x64.zip',
-  'v1.7.4/whisper-bin-x64.zip',
-  'v1.7.2/whisper-blas-bin-x64.zip',
-  'v1.7.2/whisper-bin-x64.zip',
+/**
+ * GitHub API が使えない場合のフォールバック候補（上から順に試す）。
+ * リリースごとに資産名が揺れるため、実行時は API で動的に解決するのが第一。
+ */
+const FALLBACK_ASSETS = [
   'v1.5.5/whisper-blas-bin-x64.zip',
+  'v1.5.5/whisper-bin-x64.zip',
   'v1.5.4/whisper-blas-bin-x64.zip',
+  'v1.5.4/whisper-bin-x64.zip',
+  'v1.7.4/whisper-bin-x64.zip',
+  'v1.7.2/whisper-bin-x64.zip',
 ];
+
+/** Windows 用 CPU ビルドとして採用する資産名（優先順） */
+const ASSET_PATTERNS: RegExp[] = [
+  /^whisper-blas-bin-x64\.zip$/i,     // CPU + OpenBLAS（速い）
+  /^whisper-bin-x64\.zip$/i,          // CPU 汎用
+  /^whisper-.*bin.*x64.*\.zip$/i,     // 名前が変わった場合の保険（cublas 等は除外したいので最後）
+];
+
+function fetchJson<T>(url: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = net.request({ url, method: 'GET', redirect: 'follow' });
+    req.setHeader('Accept', 'application/vnd.github+json');
+    req.on('response', (res) => {
+      let body = '';
+      res.on('data', (c: Buffer) => { body += c.toString(); });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        try { resolve(JSON.parse(body) as T); } catch (err) { reject(err as Error); }
+      });
+      res.on('error', (err: Error) => reject(err));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+interface GhRelease {
+  tag_name: string;
+  prerelease: boolean;
+  assets: Array<{ name: string; browser_download_url: string }>;
+}
+
+/** 最近のリリースから Windows x64 CPU ビルドのダウンロード URL を解決する */
+async function resolveAssetUrls(): Promise<string[]> {
+  try {
+    const releases = await fetchJson<GhRelease[]>(RELEASES_API);
+    const urls: string[] = [];
+    for (const pattern of ASSET_PATTERNS) {
+      for (const rel of releases) {
+        if (rel.prerelease) continue;
+        // GPU 版 (cublas/cuda/vulkan) は CUDA ランタイムが必要なため除外
+        const asset = rel.assets.find((a) =>
+          pattern.test(a.name) && !/cublas|cuda|vulkan|arm|win32/i.test(a.name));
+        if (asset) urls.push(asset.browser_download_url);
+      }
+    }
+    if (urls.length > 0) {
+      logInfo('whisperbin', `resolved ${urls.length} candidate assets via GitHub API`);
+      return [...new Set(urls)];
+    }
+  } catch (err) {
+    logInfo('whisperbin', `GitHub API failed: ${(err as Error).message} — using fallback list`);
+  }
+  return FALLBACK_ASSETS.map((a) => `${RELEASE_BASE}/${a}`);
+}
 
 export function getUserWhisperDir(): string {
   return path.join(app.getPath('userData'), 'whisper');
@@ -117,19 +179,19 @@ export async function downloadWhisperBinary(
   await fs.mkdir(dir, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `whisper-bin-${Date.now()}.zip`);
 
+  const urls = await resolveAssetUrls();
   let lastError: Error | null = null;
   let downloaded = false;
-  for (const asset of CANDIDATE_ASSETS) {
-    const url = `${RELEASE_BASE}/${asset}`;
+  for (const url of urls) {
     try {
       logInfo('whisperbin', `trying ${url}`);
       await downloadTo(url, tmpZip, (p) => onProgress({ ...p, step: 'download' }));
       downloaded = true;
-      logInfo('whisperbin', `downloaded ${asset}`);
+      logInfo('whisperbin', `downloaded ${url}`);
       break;
     } catch (err) {
       lastError = err as Error;
-      logInfo('whisperbin', `failed ${asset}: ${(err as Error).message}`);
+      logInfo('whisperbin', `failed ${url}: ${(err as Error).message}`);
     }
   }
   if (!downloaded) {
