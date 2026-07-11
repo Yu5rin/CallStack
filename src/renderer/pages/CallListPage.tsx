@@ -27,6 +27,24 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
   const [restoreResult, setRestoreResult] = useState<{ calls: number; backupPath: string } | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [dragDepth, setDragDepth] = useState(0);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; call: CallRecord } | null>(null);
+
+  // 右クリックメニューは外側クリック・Esc・スクロールで閉じる
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [ctxMenu]);
 
   // Receive cross-page contact filter
   useEffect(() => {
@@ -135,6 +153,55 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
     const rec = await window.api.calls.create({ startTime: ago, endTime: now });
     setEditing(rec);
   };
+
+  const showSaveResult = (r: { canceled: boolean; path?: string; error?: string }) => {
+    if (r.canceled) return;
+    if (r.error) toast.error(r.error);
+    else toast.success(`保存しました: ${r.path}`);
+  };
+
+  const ctxActions: Array<{ label: string; danger?: boolean; run: () => void | Promise<void> }> = ctxMenu
+    ? [
+        {
+          label: '✏️ 編集',
+          run: () => setEditing(ctxMenu.call),
+        },
+        ...(ctxMenu.call.audio && ctxMenu.call.transcriptStatus !== 'running' && ctxMenu.call.transcriptStatus !== 'queued'
+          ? [{
+              label: ctxMenu.call.transcript ? '🔁 再文字起こし' : '📝 文字起こしを開始',
+              run: async () => {
+                const r = await window.api.transcription.start(ctxMenu.call.id);
+                if (!r.ok) toast.error(r.error);
+                else toast.info('文字起こしを開始しました');
+              },
+            }]
+          : []),
+        ...(ctxMenu.call.audio
+          ? [{
+              label: '⬇ 録音 (MP3) を保存…',
+              run: async () => showSaveResult(await window.api.recording.saveAs(ctxMenu.call.id)),
+            }]
+          : []),
+        ...(ctxMenu.call.transcript
+          ? [{
+              label: '⬇ 文字起こしを保存…',
+              run: async () => showSaveResult(await window.api.transcript.saveAs(ctxMenu.call.id, false)),
+            }]
+          : []),
+        {
+          label: '📄 議事録 (MD) を保存…',
+          run: async () => showSaveResult(await window.api.minutes.saveAs(ctxMenu.call.id)),
+        },
+        {
+          label: '🗑 削除',
+          danger: true,
+          run: async () => {
+            const removed = await deleteCallWithConfirm(ctxMenu.call.id, settings.confirmCallDelete);
+            if (removed && selectedId === ctxMenu.call.id) setSelectedId(null);
+          },
+        },
+      ]
+    : [];
 
   const untaggedCount = calls.filter((c) => c.endTime && !c.tag).length;
 
@@ -287,12 +354,17 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                   key={c.id}
                   onClick={() => setSelectedId(c.id)}
                   onDoubleClick={() => setEditing(c)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSelectedId(c.id);
+                    setCtxMenu({ x: e.clientX, y: e.clientY, call: c });
+                  }}
                   className={`cursor-pointer border-t border-slate-100 dark:border-slate-800 ${
                     selected
                       ? 'bg-brand-50 dark:bg-brand-900/40'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
                   }`}
-                  title="クリックで選択 / ダブルクリックで編集 / Delete キーで削除"
+                  title="クリックで選択 / ダブルクリックで編集 / 右クリックでメニュー / Delete キーで削除"
                 >
                   <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
                     <span className="mr-1" title={c.kind === 'meeting' ? '会議' : '通話'}>
@@ -354,6 +426,34 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
           </tbody>
         </table>
       </div>
+
+      {ctxMenu && (
+        <div
+          className="fixed z-[90] min-w-[13rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+          style={{
+            left: Math.min(ctxMenu.x, window.innerWidth - 220),
+            top: Math.min(ctxMenu.y, window.innerHeight - ctxActions.length * 34 - 12),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {ctxActions.map((a, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                setCtxMenu(null);
+                void a.run();
+              }}
+              className={`block w-full px-3 py-1.5 text-left text-sm ${
+                a.danger
+                  ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950'
+                  : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {editing && (
         <CallEditDialog

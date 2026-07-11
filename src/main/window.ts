@@ -1,6 +1,53 @@
-import { BrowserWindow, screen, app } from 'electron';
+import { BrowserWindow, screen, app, Menu, MenuItemConstructorOptions, dialog } from 'electron';
 import path from 'node:path';
 import type { HudSize } from '../shared/types';
+
+/**
+ * テキスト編集・選択テキスト用の標準右クリックメニューを取り付ける。
+ * （Electron は既定でコンテキストメニューを持たないため、コピー/貼り付け等を提供する）
+ */
+function attachEditContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_e, params) => {
+    const items: MenuItemConstructorOptions[] = [];
+    if (params.isEditable) {
+      items.push(
+        { label: '元に戻す', role: 'undo', enabled: params.editFlags.canUndo },
+        { label: 'やり直し', role: 'redo', enabled: params.editFlags.canRedo },
+        { type: 'separator' },
+        { label: '切り取り', role: 'cut', enabled: params.editFlags.canCut },
+        { label: 'コピー', role: 'copy', enabled: params.editFlags.canCopy },
+        { label: '貼り付け', role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { label: 'すべて選択', role: 'selectAll' },
+      );
+    } else if (params.selectionText.trim()) {
+      items.push({ label: 'コピー', role: 'copy' });
+    }
+    if (items.length > 0) {
+      Menu.buildFromTemplate(items).popup({ window: win });
+    }
+  });
+}
+
+/** レンダラが応答不能になったときの保険。再読み込みを提案する。 */
+function attachUnresponsiveRecovery(win: BrowserWindow, name: string): void {
+  win.webContents.on('unresponsive', () => {
+    console.error(`[window] ${name} renderer unresponsive`);
+    if (win.isDestroyed()) return;
+    dialog
+      .showMessageBox(win, {
+        type: 'warning',
+        title: 'CallStack',
+        message: '画面の応答がありません。再読み込みしますか？（記録データは失われません）',
+        buttons: ['再読み込み', 'このまま待つ'],
+        defaultId: 0,
+      })
+      .then((r) => {
+        if (r.response === 0 && !win.isDestroyed()) win.webContents.reload();
+      })
+      .catch(() => {});
+  });
+}
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const DIST_DIR = path.join(__dirname, '..', '..', 'dist');
@@ -78,9 +125,22 @@ export function createMainWindow(): BrowserWindow {
     wc.setBackgroundThrottling(false);
     wc.invalidate();
   };
-  mainWindow.on('restore', wakeRenderer);
   mainWindow.on('show', wakeRenderer);
   mainWindow.on('focus', wakeRenderer);
+  mainWindow.on('restore', () => {
+    wakeRenderer();
+    // invalidate で回復しない環境向けの最終手段: 1px リサイズで
+    // コンポジタに新しいフレームの生成を強制する。
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+      const [w, h] = mainWindow.getSize();
+      mainWindow.setSize(w, h + 1);
+      mainWindow.setSize(w, h);
+    }, 60);
+  });
+
+  attachEditContextMenu(mainWindow);
+  attachUnresponsiveRecovery(mainWindow, 'main');
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -162,6 +222,8 @@ export function createHudWindow(
   });
 
   hudWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  attachEditContextMenu(hudWindow);
 
   hudWindow.once('ready-to-show', () => {
     hudWindow?.show();

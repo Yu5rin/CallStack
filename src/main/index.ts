@@ -37,6 +37,12 @@ import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels'
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
 
+// 録音（メディアキャプチャ）中に最小化→復帰すると GPU コンポジタが
+// フレーム生成を再開せず画面がフリーズする環境がある（Chromium の既知問題。
+// webContents.invalidate() では回復しない）。GPU 合成を使わないことで根本回避する。
+// この規模の UI ではソフトウェアレンダリングの性能影響は実用上ない。
+app.disableHardwareAcceleration();
+
 registerAppProtocolPrivilege();
 
 const store = new Store();
