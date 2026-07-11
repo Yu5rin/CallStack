@@ -11,10 +11,16 @@ import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
 import { ToastProvider, useToast } from './components/Toast';
-import { StartRecordDialog } from './components/StartRecordDialog';
+import { StartRecordDialog, StartMeta } from './components/StartRecordDialog';
 import { OnboardingDialog } from './components/OnboardingDialog';
 
 type Page = 'list' | 'stats' | 'settings';
+
+const LAST_KIND_KEY = 'callstack.lastStartKind';
+
+function loadLastKind(): RecordKind {
+  return localStorage.getItem(LAST_KIND_KEY) === 'meeting' ? 'meeting' : 'call';
+}
 
 export function App() {
   return (
@@ -28,7 +34,7 @@ function AppContent() {
   const [page, setPage] = useState<Page>('list');
   const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
   const [initialEditId, setInitialEditId] = useState<string | null>(null);
-  const [startDialogKind, setStartDialogKind] = useState<RecordKind | null>(null);
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
@@ -87,22 +93,25 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleStartClick = (kind: RecordKind) => {
-    if (settings?.recording.enabled && settings.recording.askSourceOnStart) {
-      setStartDialogKind(kind);
-    } else {
-      void window.api.calls.startNow(kind);
+  const handleStartClick = () => {
+    if (settings && !settings.recording.askSourceOnStart) {
+      // ダイアログを使わない設定なら前回の種別・既定ソースで即開始
+      void window.api.calls.startNow(loadLastKind());
+      return;
     }
+    setStartDialogOpen(true);
   };
 
   const handleDialogStart = async (
+    kind: RecordKind,
+    meta: StartMeta,
     config: RecordingSourceConfig | null,
     windowId: string | null,
     micDeviceId: string | null,
     saveAsDefault: boolean,
   ) => {
-    const kind = startDialogKind!;
-    setStartDialogKind(null);
+    setStartDialogOpen(false);
+    localStorage.setItem(LAST_KIND_KEY, kind);
     if (config && saveAsDefault && settings) {
       const next = {
         ...settings,
@@ -119,7 +128,7 @@ function AppContent() {
         ? { config, windowId, micDeviceId }
         : { config: { mic: false, system: false, systemScope: 'screen' }, windowId: null, micDeviceId: null },
     );
-    await window.api.calls.startNow(kind);
+    await window.api.calls.startNow(kind, meta);
   };
 
   const handleAddMarker = () => {
@@ -216,22 +225,13 @@ function AppContent() {
               </button>
             </>
           ) : (
-            <>
-              <button
-                onClick={() => handleStartClick('call')}
-                className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-                title={`通話を開始 (${settings.shortcuts.startCall})`}
-              >
-                📞 通話開始
-              </button>
-              <button
-                onClick={() => handleStartClick('meeting')}
-                className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
-                title={`会議を開始 (${settings.shortcuts.startMeeting})`}
-              >
-                👥 会議開始
-              </button>
-            </>
+            <button
+              onClick={handleStartClick}
+              className="rounded-md bg-brand-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              title={`記録を開始（ダイアログで通話/会議を選択）\nショートカット即開始: 通話 ${settings.shortcuts.startCall} / 会議 ${settings.shortcuts.startMeeting}`}
+            >
+              ▶ 開始
+            </button>
           )}
         </div>
       </header>
@@ -254,13 +254,14 @@ function AppContent() {
       </main>
       <SummaryFooter calls={callsOnly} />
 
-      {startDialogKind && settings && (
+      {startDialogOpen && settings && (
         <StartRecordDialog
-          kind={startDialogKind}
+          initialKind={loadLastKind()}
           settings={settings}
-          onCancel={() => setStartDialogKind(null)}
-          onStart={(config, windowId, micDeviceId, saveAsDefault) =>
-            void handleDialogStart(config, windowId, micDeviceId, saveAsDefault)}
+          calls={callsAlive}
+          onCancel={() => setStartDialogOpen(false)}
+          onStart={(kind, meta, config, windowId, micDeviceId, saveAsDefault) =>
+            void handleDialogStart(kind, meta, config, windowId, micDeviceId, saveAsDefault)}
         />
       )}
 

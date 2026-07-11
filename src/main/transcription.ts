@@ -260,3 +260,12 @@ async function pump(): Promise<void> {
 export function queueLength(): number {
   return queue.length + (running ? 1 : 0);
 }
+
+/** アプリ終了時: キューを破棄し、実行中の whisper プロセスを確実に落とす */
+export function shutdownQueue(): void {
+  queue.length = 0;
+  if (currentJob) {
+    currentJob.token.cancelled = true;
+    currentJob.token.kill?.();
+  }
+}

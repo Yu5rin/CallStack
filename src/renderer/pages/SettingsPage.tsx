@@ -356,18 +356,17 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           disabled={!draft.recording.enabled}
           onChange={(v) => updateRecording({ meetingSource: v })}
         />
-        <Row label="開始時のソース確認">
+        <Row label="開始ダイアログ">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={draft.recording.askSourceOnStart}
               onChange={(e) => updateRecording({ askSourceOnStart: e.target.checked })}
-              disabled={!draft.recording.enabled}
             />
-            画面のボタンから開始するとき、録音ソースの選択ダイアログを表示する
+            「▶ 開始」ボタンで通話/会議・録音ソースの選択ダイアログを表示する
           </label>
           <span className="ml-2 block text-xs text-slate-500 dark:text-slate-400">
-            ショートカット・トレイから開始した場合は、上の既定ソースで即座に録音が始まります
+            オフにするとボタンは前回の種別で即開始します。ショートカット・トレイからは常に既定ソースで即開始です
           </span>
         </Row>
         <Row label="マイクデバイス">

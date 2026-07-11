@@ -34,7 +34,9 @@ export function CallEditDialog({
   const [transcribeProgress, setTranscribeProgress] = useState<number | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
-  const isMeeting = current.kind === 'meeting';
+  // 種別は編集で変更できる（通話⇄会議）。保存時に反映される。
+  const [kind, setKind] = useState<'call' | 'meeting'>(call.kind ?? 'call');
+  const isMeeting = kind === 'meeting';
 
   useEffect(() => {
     const off = window.api.onEvent((e) => {
@@ -105,6 +107,7 @@ export function CallEditDialog({
     setSaving(true);
     try {
       await window.api.calls.update(current.id, {
+        kind,
         startTime: fromDatetimeLocalValue(startTime),
         endTime: endTime ? fromDatetimeLocalValue(endTime) : null,
         tag: tag || null,
@@ -206,9 +209,41 @@ export function CallEditDialog({
         className="w-[min(96vw,60rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-lg font-bold text-slate-900 dark:text-slate-100">
-          {isMeeting ? '👥 会議記録の編集' : '通話記録の編集'}
-        </h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            {isMeeting ? '👥 会議記録の編集' : '📞 通話記録の編集'}
+          </h2>
+          {/* 種別の事後変更: 間違えて開始しても後から直せる */}
+          <div className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold dark:border-slate-600">
+            <button
+              onClick={() => setKind('call')}
+              className={`px-3 py-1.5 transition ${
+                !isMeeting
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+              title="この記録を通話として扱う"
+            >
+              📞 通話
+            </button>
+            <button
+              onClick={() => setKind('meeting')}
+              className={`px-3 py-1.5 transition ${
+                isMeeting
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+              title="この記録を会議として扱う"
+            >
+              👥 会議
+            </button>
+          </div>
+        </div>
+        {kind !== (current.kind ?? 'call') && (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+            種別を{isMeeting ? '会議' : '通話'}に変更します（「保存」で確定）。入力済みの連絡先・タイトルは保持されます。
+          </p>
+        )}
 
         {/* 通話: 連絡先名 / 電話番号、会議: タイトル / 参加者 を最上段に */}
         {isMeeting ? (

@@ -59,6 +59,13 @@ let hudWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
 let minimizeToTrayEnabled = false;
 
+/** ウィンドウを閉じる前の確認フック。'prevent' を返すと閉じない */
+let beforeCloseHandler: (() => 'close' | 'prevent') | null = null;
+
+export function setBeforeCloseHandler(h: (() => 'close' | 'prevent') | null): void {
+  beforeCloseHandler = h;
+}
+
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
   mini:    { width: 200, height: 32 },
   compact: { width: 330, height: 64 },
@@ -105,7 +112,12 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (e) => {
+    // 録音中の終了確認などのため、index.ts 側のフックに判断を委ねる
+    if (beforeCloseHandler && beforeCloseHandler() === 'prevent') {
+      e.preventDefault();
+      return;
+    }
     markForceQuit();
     app.quit();
   });

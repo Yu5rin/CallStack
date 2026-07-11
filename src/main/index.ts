@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session, shell, WebContents, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, shell, powerSaveBlocker, WebContents, desktopCapturer } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
@@ -21,6 +21,7 @@ import {
   broadcast,
   getHudWindow,
   markForceQuit,
+  setBeforeCloseHandler,
   setMinimizeToTray,
   setHudSize,
   setHudExtraHeight,
@@ -36,6 +37,7 @@ import { convertWebmToMp3, probeDurationSec } from './ffmpeg';
 import {
   enqueue as enqueueTranscription, cancel as cancelTranscription,
   setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup,
+  queueLength as transcriptionQueueLength, shutdownQueue as shutdownTranscription,
 } from './transcription';
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
@@ -63,6 +65,29 @@ let pendingSourceOverride: {
 
 /** 録音サービスウィンドウが報告する現在の録音状態（HUD 等の初期表示用） */
 let lastRecordingState = { recording: false, paused: false };
+
+/** 実行中の finalize（webm→mp3 変換）数。終了時にこれを待つ */
+let finalizingCount = 0;
+
+/** アプリ終了フロー中フラグ */
+let shuttingDown = false;
+
+// ============ スリープ抑止 ============
+// 記録中（=録音の可能性あり）または文字起こし中は PC のスリープを防ぐ。
+// スリープすると録音が途切れ、whisper も中断されるため。
+let powerBlockerId: number | null = null;
+
+function updatePowerBlocker(): void {
+  const needed = !!store.getActiveCall() || transcriptionQueueLength() > 0 || finalizingCount > 0;
+  if (needed && powerBlockerId === null) {
+    powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    logInfo('power', 'sleep blocker ON');
+  } else if (!needed && powerBlockerId !== null) {
+    powerSaveBlocker.stop(powerBlockerId);
+    powerBlockerId = null;
+    logInfo('power', 'sleep blocker OFF');
+  }
+}
 
 function getActive(): CallRecord | null {
   return store.getActiveCall();
@@ -112,7 +137,8 @@ function stopTickLoop() {
   }
 }
 
-function startCall(kind: RecordKind = 'call'): CallRecord | null {
+/** 記録を開始する。meta で開始前に入力されたタイトル・連絡先などを反映できる */
+function startCall(kind: RecordKind = 'call', meta?: Partial<CallRecord>): CallRecord | null {
   if (getActive()) {
     notify('CallStack', '進行中の記録があります。先に終了してください。');
     return null;
@@ -124,8 +150,12 @@ function startCall(kind: RecordKind = 'call'): CallRecord | null {
     startTime: now,
     endTime: null,
     durationSec: null,
-    tag: null,
-    memo: '',
+    tag: meta?.tag ?? null,
+    memo: meta?.memo ?? '',
+    contactName: meta?.contactName,
+    phoneNumber: meta?.phoneNumber,
+    title: meta?.title,
+    participants: meta?.participants,
     holds: [],
     holdSec: 0,
   };
@@ -136,6 +166,7 @@ function startCall(kind: RecordKind = 'call'): CallRecord | null {
   createHudWindow(settings.hudPosition, settings.hudSize);
   updateTray({ active: true, elapsedSec: 0, today: todayStats() }, trayHandlers);
   startTickLoop();
+  updatePowerBlocker();
   broadcast('app-event', { type: 'call:started', record: rec });
   return rec;
 }
@@ -159,6 +190,7 @@ async function endCall(): Promise<CallRecord | null> {
   stopTickLoop();
   closeHudWindow();
   updateTray({ active: false, today: todayStats() }, trayHandlers);
+  updatePowerBlocker();
   logInfo('call', `ended ${active.id} (${durationSec}s)`);
   if (updated) {
     broadcast('app-event', { type: 'call:ended', record: updated });
@@ -286,7 +318,8 @@ function setupIpc(): void {
   ipcMain.handle('calls:getActive', () => store.getActiveCall());
   ipcMain.handle('calls:get', (_e, id: string) => store.getCall(id));
 
-  ipcMain.handle('calls:startNow', (_e, kind?: RecordKind) => startCall(kind ?? 'call'));
+  ipcMain.handle('calls:startNow', (_e, kind?: RecordKind, meta?: Partial<CallRecord>) =>
+    startCall(kind ?? 'call', meta));
   ipcMain.handle('calls:endNow', () => endCall());
   ipcMain.handle('calls:toggleHold', () => toggleHold());
 
@@ -511,7 +544,15 @@ function setupIpc(): void {
   ipcMain.handle('recording:finalize', async (_e, callId: string, sourceLabel?: AudioSourceLabel) => {
     const s = store.getSettings();
     logInfo('recorder', `finalize start ${callId}`);
-    const r = await recording.finalize(callId, s.recording.mp3Bitrate);
+    finalizingCount += 1;
+    updatePowerBlocker();
+    let r: recording.FinalizeResult | null;
+    try {
+      r = await recording.finalize(callId, s.recording.mp3Bitrate);
+    } finally {
+      finalizingCount -= 1;
+      updatePowerBlocker();
+    }
     logInfo('recorder', `finalize done ${callId} (${r ? `${r.bytes}B ${r.durationSec}s` : 'no data'})`);
     if (!r) return null;
     const updated = store.updateCall(callId, {
@@ -903,6 +944,7 @@ function queueTranscription(callId: string): void {
     language: s.transcription.language,
     prompt: s.transcription.prompt,
   });
+  updatePowerBlocker();
 }
 
 /** 保存ダイアログの既定ファイル名（例: 会議-20260613-1030-定例MTG） */
@@ -999,6 +1041,7 @@ function setupTranscriptionHandlers(): void {
       const status = rec?.transcript ? 'done' : 'none';
       const updated = store.updateCall(callId, { transcriptStatus: status, transcriptError: undefined });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status });
+      updatePowerBlocker();
     },
     onDone: (callId, transcript) => {
       const updated = store.updateCall(callId, { transcript, transcriptStatus: 'done', transcriptError: undefined });
@@ -1006,13 +1049,15 @@ function setupTranscriptionHandlers(): void {
         broadcast('app-event', { type: 'transcription:status', callId, status: 'done', transcript });
         broadcast('app-event', { type: 'call:updated', record: updated });
       }
+      updatePowerBlocker();
     },
     onError: (callId, err) => {
       const message = err instanceof WhisperMissingError
-        ? `whisper.cpp の実行ファイルが見つかりません。READMEの「文字起こしの準備」を参照してください。\n(${err.binaryPath})`
+        ? `whisper.cpp の実行ファイルが見つかりません。設定画面の「whisper.cpp をダウンロード」で自動セットアップできます。`
         : err.message;
       const updated = store.updateCall(callId, { transcriptStatus: 'error', transcriptError: message });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'error', error: message });
+      updatePowerBlocker();
     },
   });
 }
@@ -1076,6 +1121,96 @@ function buildWeeklyReport(calls: CallRecord[]): string {
   }
   lines.push('');
   return lines.join('\n');
+}
+
+/**
+ * 録音中にウィンドウを閉じようとしたときの保護。
+ * 確認のうえ記録を終了し、録音の保存（finalize）を待ってから終了する。
+ */
+function setupSafeShutdown(): void {
+  setBeforeCloseHandler(() => {
+    if (shuttingDown) return 'close';
+    if (!lastRecordingState.recording && finalizingCount === 0) return 'close';
+
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'CallStack',
+      message: '録音中です。記録を終了して録音を保存してから終了しますか？',
+      detail: 'このまま終了すると録音が失われる可能性があります。',
+      buttons: ['保存して終了', 'キャンセル'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice === 1) return 'prevent';
+
+    shuttingDown = true;
+    logInfo('app', 'safe shutdown: ending call and waiting for finalize');
+    void (async () => {
+      try {
+        await endCall();
+        // 録音停止 → finalize 完了を待つ（最大 20 秒）
+        const deadline = Date.now() + 20000;
+        while (Date.now() < deadline) {
+          if (!lastRecordingState.recording && finalizingCount === 0) break;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        // finalize の IPC が届く前に閉じないよう少しだけ余裕を持たせる
+        await new Promise((r) => setTimeout(r, 500));
+        await store.flush().catch(() => {});
+      } finally {
+        logInfo('app', 'safe shutdown: done, quitting');
+        markForceQuit();
+        app.quit();
+      }
+    })();
+    return 'prevent';
+  });
+}
+
+/**
+ * 前回クラッシュ・強制終了などで残った録音断片 (.webm) を起動時に回収する。
+ * 対応する記録があり録音が未保存なら MP3 化して添付、そうでなければ削除する。
+ */
+async function recoverOrphanRecordings(): Promise<void> {
+  const { tmpRecordings, recordings } = getDirs();
+  let files: string[] = [];
+  try {
+    files = await fs.readdir(tmpRecordings);
+  } catch {
+    return;
+  }
+  let recovered = 0;
+  for (const name of files) {
+    if (!name.endsWith('.webm')) continue;
+    const callId = name.replace(/\.webm$/, '');
+    const tmpPath = path.join(tmpRecordings, name);
+    const rec = store.getCall(callId);
+    // 進行中の記録の断片には触れない（録音サービスが追記中）
+    if (rec && !rec.endTime) continue;
+    try {
+      if (rec && !rec.audio && rec.endTime) {
+        const rel = `${callId}.mp3`;
+        const abs = path.join(recordings, rel);
+        const { durationSec } = await convertWebmToMp3(tmpPath, abs, store.getSettings().recording.mp3Bitrate);
+        const stat = await fs.stat(abs);
+        const updated = store.updateCall(callId, {
+          audio: { path: rel, format: 'mp3', bytes: stat.size, durationSec: Math.round(durationSec), source: 'mic' },
+        });
+        if (updated) {
+          broadcast('app-event', { type: 'call:updated', record: updated });
+          recovered += 1;
+          logInfo('recover', `salvaged orphan recording ${name} (${Math.round(durationSec)}s)`);
+        }
+      }
+      await fs.unlink(tmpPath).catch(() => {});
+    } catch (err) {
+      logInfo('recover', `failed to salvage ${name}: ${(err as Error).message}`);
+      await fs.unlink(tmpPath).catch(() => {});
+    }
+  }
+  if (recovered > 0) {
+    notify('録音を復元しました', `前回保存されなかった録音 ${recovered} 件を復元しました。`, () => showMainWindow());
+  }
 }
 
 /** Windows ログイン時の自動起動を設定する */
@@ -1165,10 +1300,13 @@ async function main() {
   reRegisterShortcuts();
   setMinimizeToTray(store.getSettings().minimizeToTray);
   applyLaunchAtLogin(store.getSettings().launchAtLogin);
+  setupSafeShutdown();
   createMainWindow();
   createRecorderWindow();
   logInfo('app', `started v${app.getVersion()}`);
   scheduleDailyCleanup(store, broadcast);
+  // 前回終了時に保存されなかった録音断片を回収（進行中の記録は除く）
+  setTimeout(() => { void recoverOrphanRecordings(); }, 3000);
 
   // 起動時の更新チェック（通知型。取得できない環境では静かにスキップ）
   if (store.getSettings().checkUpdatesOnStartup) {
@@ -1213,6 +1351,9 @@ app.on('will-quit', () => {
   stopDailyCleanup();
   destroyTray();
   destroyRecorderWindow();
+  // 実行中の whisper プロセスを残さない
+  shutdownTranscription();
+  if (powerBlockerId !== null) powerSaveBlocker.stop(powerBlockerId);
 });
 
 app.on('before-quit', async () => {

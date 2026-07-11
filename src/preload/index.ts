@@ -20,7 +20,8 @@ const api = {
     list: (): Promise<CallRecord[]> => ipcRenderer.invoke('calls:list'),
     get: (id: string): Promise<CallRecord | null> => ipcRenderer.invoke('calls:get', id),
     getActive: (): Promise<CallRecord | null> => ipcRenderer.invoke('calls:getActive'),
-    startNow: (kind?: RecordKind): Promise<CallRecord | null> => ipcRenderer.invoke('calls:startNow', kind),
+    startNow: (kind?: RecordKind, meta?: Partial<CallRecord>): Promise<CallRecord | null> =>
+      ipcRenderer.invoke('calls:startNow', kind, meta),
     endNow: (): Promise<CallRecord | null> => ipcRenderer.invoke('calls:endNow'),
     toggleHold: (): Promise<void> => ipcRenderer.invoke('calls:toggleHold'),
     update: (id: string, patch: Partial<CallRecord>): Promise<CallRecord | null> =>
