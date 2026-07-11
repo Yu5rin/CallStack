@@ -67,6 +67,21 @@ export function createMainWindow(): BrowserWindow {
     }
   });
 
+  // backgroundThrottling: false のウィンドウは、最小化からの復帰時にコンポジタが
+  // フレーム生成を再開せず「フリーズ」して見えることがある（Chromium の既知問題。
+  // 最小化中に録音の画面キャプチャセッションが終了した場合に発生しやすい）。
+  // 復帰時にスロットリングを一瞬入れ直してから強制再描画し、コンポジタを起こす。
+  const wakeRenderer = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const wc = mainWindow.webContents;
+    wc.setBackgroundThrottling(true);
+    wc.setBackgroundThrottling(false);
+    wc.invalidate();
+  };
+  mainWindow.on('restore', wakeRenderer);
+  mainWindow.on('show', wakeRenderer);
+  mainWindow.on('focus', wakeRenderer);
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
