@@ -181,8 +181,18 @@ export type TranscriptionProgressEvent = {
   callId: string;
   /** 処理段階。convert=音声変換, transcribe=whisper 実行 */
   stage: 'convert' | 'transcribe';
-  /** 変換〜完了までを通した全体進捗 (0-100) */
+  /** 変換〜完了までを通した全体進捗 (0-100)。1秒ごとに補間して配信される */
   percent: number;
+  /** 推定残り秒数（進捗速度から算出。算出前は null） */
+  etaSec?: number | null;
+};
+
+/** 文字起こしキュー全体の状況（フッター表示用。進捗・状態変化のたびに配信） */
+export type TranscriptionSummaryEvent = {
+  type: 'transcription:summary';
+  running: { callId: string; percent: number; etaSec: number | null } | null;
+  /** 実行中を除く待機ジョブ数 */
+  waiting: number;
 };
 /** 録音中ウィンドウへの一時停止/再開の指示（HUD・ショートカットから発火） */
 export type RecordingTogglePauseEvent = { type: 'recording:togglePause' };
@@ -228,6 +238,7 @@ export type AppEvent =
   | RecordingFinalizedEvent
   | TranscriptionStatusEvent
   | TranscriptionProgressEvent
+  | TranscriptionSummaryEvent
   | RecordingTogglePauseEvent
   | RecordingStateEvent
   | RecordingErrorEvent

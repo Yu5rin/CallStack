@@ -1,6 +1,52 @@
-import { useMemo } from 'react';
-import { CallRecord } from '../../shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import { Loader2 } from 'lucide-react';
+import { AppEvent, CallRecord } from '../../shared/types';
 import { formatHMShort } from '../utils/format';
+
+function formatEta(sec: number): string {
+  if (sec < 60) return `${sec}秒`;
+  const m = Math.ceil(sec / 60);
+  if (m < 60) return `約${m}分`;
+  return `約${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ''}`;
+}
+
+/** フッター右側の文字起こし状況（進捗 %・推定残り時間・待機数） */
+function TranscriptionStatusBar() {
+  const [summary, setSummary] = useState<{
+    running: { callId: string; percent: number; etaSec: number | null } | null;
+    waiting: number;
+  }>({ running: null, waiting: 0 });
+
+  useEffect(() => {
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type === 'transcription:summary') {
+        setSummary({ running: e.running, waiting: e.waiting });
+      }
+    });
+    return () => off();
+  }, []);
+
+  if (!summary.running && summary.waiting === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+      <Loader2 size={13} className="animate-spin text-brand-600 dark:text-brand-300" />
+      {summary.running ? (
+        <span>
+          文字起こし中 <span className="font-semibold tabular-nums">{summary.running.percent}%</span>
+          {summary.running.etaSec !== null && (
+            <span className="text-slate-500 dark:text-slate-400">（残り {formatEta(summary.running.etaSec)}）</span>
+          )}
+        </span>
+      ) : (
+        <span>文字起こしを準備中…</span>
+      )}
+      {summary.waiting > 0 && (
+        <span className="text-slate-400 dark:text-slate-500">/ 待機 {summary.waiting} 件</span>
+      )}
+    </div>
+  );
+}
 
 interface Bucket {
   count: number;
@@ -61,6 +107,7 @@ export function SummaryFooter({ calls }: { calls: CallRecord[] }) {
         {cell('今週', stats.week)}
         {cell('今月', stats.month)}
       </div>
+      <TranscriptionStatusBar />
     </footer>
   );
 }

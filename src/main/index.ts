@@ -753,9 +753,21 @@ function setupIpc(): void {
     const rec = store.getCall(callId);
     if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
     if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
+    // 押した瞬間に状況が見えるよう、セットアップ確認の前に「待機中」を即時表示する
+    const optimistic = store.updateCall(callId, { transcriptStatus: 'queued', transcriptError: undefined });
+    if (optimistic) {
+      broadcast('app-event', {
+        type: 'transcription:status', callId, status: 'queued',
+        queuePosition: transcriptionQueueLength() + 1,
+      });
+    }
     const s = store.getSettings();
     const setup = await checkTranscriptionSetup(s.transcription.model);
-    if (!setup.ok) return setup;
+    if (!setup.ok) {
+      const reverted = store.updateCall(callId, { transcriptStatus: 'error', transcriptError: setup.error });
+      if (reverted) broadcast('app-event', { type: 'transcription:status', callId, status: 'error', error: setup.error });
+      return setup;
+    }
     queueTranscription(callId);
     return { ok: true };
   });
@@ -1012,6 +1024,9 @@ function queueTranscription(callId: string): void {
     prompt: s.transcription.prompt,
   });
   updatePowerBlocker();
+  // 実行中ジョブがあればその進捗込みで、なければ待機数のみサマリーを更新
+  if (jobProgress) broadcastTranscriptionProgress();
+  else broadcastTranscriptionIdleSummary();
 }
 
 /** 保存ダイアログの既定ファイル名（例: 会議-20260613-1030-定例MTG） */
@@ -1093,16 +1108,114 @@ function buildMinutesMd(rec: CallRecord): string {
   return lines.join('\n');
 }
 
+// ============ 文字起こし進捗マネージャ ============
+// whisper の進捗通知は約5%刻みのため、直近の進行速度から1秒ごとに補間して
+// 1%単位の進捗と推定残り時間を全ウィンドウへ配信する。
+interface JobProgress {
+  callId: string;
+  stage: 'convert' | 'transcribe';
+  startedAt: number;
+  lastTickAt: number;
+  lastTickPercent: number;
+  /** %/秒。2回目の実測値から算出 */
+  rate: number | null;
+  displayPercent: number;
+}
+let jobProgress: JobProgress | null = null;
+let progressTimer: NodeJS.Timeout | null = null;
+
+function transcriptionWaitingCount(): number {
+  return Math.max(0, transcriptionQueueLength() - (jobProgress ? 1 : 0));
+}
+
+function jobEtaSec(): number | null {
+  if (!jobProgress || !jobProgress.rate || jobProgress.rate <= 0) return null;
+  return Math.max(1, Math.round((100 - jobProgress.displayPercent) / jobProgress.rate));
+}
+
+function broadcastTranscriptionProgress(): void {
+  if (!jobProgress) return;
+  broadcast('app-event', {
+    type: 'transcription:progress',
+    callId: jobProgress.callId,
+    stage: jobProgress.stage,
+    percent: Math.round(jobProgress.displayPercent),
+    etaSec: jobEtaSec(),
+  });
+  broadcast('app-event', {
+    type: 'transcription:summary',
+    running: {
+      callId: jobProgress.callId,
+      percent: Math.round(jobProgress.displayPercent),
+      etaSec: jobEtaSec(),
+    },
+    waiting: transcriptionWaitingCount(),
+  });
+}
+
+function broadcastTranscriptionIdleSummary(): void {
+  broadcast('app-event', {
+    type: 'transcription:summary',
+    running: null,
+    waiting: transcriptionWaitingCount(),
+  });
+}
+
+function startProgressTicker(): void {
+  if (progressTimer) return;
+  progressTimer = setInterval(() => {
+    if (!jobProgress) return;
+    // 実測値の間を速度で補間（次の実測 5% 手前と 99% で頭打ち）
+    if (jobProgress.rate && jobProgress.rate > 0) {
+      const elapsed = (Date.now() - jobProgress.lastTickAt) / 1000;
+      const cap = Math.min(99, jobProgress.lastTickPercent + 4.5);
+      jobProgress.displayPercent = Math.min(cap, jobProgress.lastTickPercent + jobProgress.rate * elapsed);
+    }
+    broadcastTranscriptionProgress();
+  }, 1000);
+}
+
+function stopProgressTicker(): void {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
+function endJobProgress(callId: string): void {
+  if (jobProgress?.callId === callId) jobProgress = null;
+  if (transcriptionQueueLength() === 0) stopProgressTicker();
+  broadcastTranscriptionIdleSummary();
+}
+
 function setupTranscriptionHandlers(): void {
   setQueueHandlers({
     onStart: (callId) => {
       const updated = store.updateCall(callId, { transcriptStatus: 'running' });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'running' });
+      const now = Date.now();
+      jobProgress = {
+        callId, stage: 'convert', startedAt: now,
+        lastTickAt: now, lastTickPercent: 1, rate: null, displayPercent: 1,
+      };
+      startProgressTicker();
+      broadcastTranscriptionProgress();
     },
     onProgress: (callId, stage, percent) => {
       // 全体進捗: 変換フェーズを 0-2%、whisper 実行を 2-100% に割り当てる
-      const overall = stage === 'convert' ? 2 : Math.min(100, 2 + Math.round(percent * 0.98));
-      broadcast('app-event', { type: 'transcription:progress', callId, stage, percent: overall });
+      const overall = stage === 'convert' ? 2 : Math.min(100, 2 + percent * 0.98);
+      if (jobProgress?.callId === callId) {
+        const now = Date.now();
+        const dt = (now - jobProgress.lastTickAt) / 1000;
+        if (overall > jobProgress.lastTickPercent && dt > 0.5) {
+          jobProgress.rate = (overall - jobProgress.lastTickPercent) / dt;
+        }
+        jobProgress.stage = stage;
+        jobProgress.lastTickAt = now;
+        jobProgress.lastTickPercent = overall;
+        jobProgress.displayPercent = Math.max(jobProgress.displayPercent, overall);
+      }
+      broadcastTranscriptionProgress();
     },
     onCancelled: (callId) => {
       const rec = store.getCall(callId);
@@ -1110,6 +1223,7 @@ function setupTranscriptionHandlers(): void {
       const status = rec?.transcript ? 'done' : 'none';
       const updated = store.updateCall(callId, { transcriptStatus: status, transcriptError: undefined });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status });
+      endJobProgress(callId);
       updatePowerBlocker();
     },
     onDone: (callId, transcript) => {
@@ -1118,6 +1232,7 @@ function setupTranscriptionHandlers(): void {
         broadcast('app-event', { type: 'transcription:status', callId, status: 'done', transcript });
         broadcast('app-event', { type: 'call:updated', record: updated });
       }
+      endJobProgress(callId);
       updatePowerBlocker();
     },
     onError: (callId, err) => {
@@ -1126,6 +1241,7 @@ function setupTranscriptionHandlers(): void {
         : err.message;
       const updated = store.updateCall(callId, { transcriptStatus: 'error', transcriptError: message });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'error', error: message });
+      endJobProgress(callId);
       updatePowerBlocker();
     },
   });

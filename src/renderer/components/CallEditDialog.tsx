@@ -479,6 +479,9 @@ export function CallEditDialog({
                       文字起こし
                     </div>
                     <div className="flex items-center gap-2">
+                      {transcribing && !transcriptBusy && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">開始しています…</span>
+                      )}
                       {current.transcriptStatus === 'running' && (
                         <span className="text-xs font-medium text-brand-600 dark:text-brand-300">
                           {transcribeProgress === null
