@@ -145,8 +145,12 @@ export interface Settings {
   hudSize: HudSize;
   hudOpacity: HudOpacity;
   transcriptSeekOffsetSec: number;
-  /** 保存ダイアログで前回使ったフォルダ（内部用・UI なし） */
+  /** 保存ダイアログで前回使ったフォルダ（auto モードで使用） */
   lastSaveDir?: string | null;
+  /** 保存先の決め方。auto=前回の保存先を記憶 / fixed=固定フォルダ */
+  saveDirMode?: 'auto' | 'fixed';
+  /** saveDirMode='fixed' のときの保存先フォルダ */
+  fixedSaveDir?: string | null;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -169,11 +173,16 @@ export type TranscriptionStatusEvent = {
   status: TranscriptStatus;
   transcript?: CallTranscript;
   error?: string;
+  /** queued のとき、何番目の処理か（1=次に実行） */
+  queuePosition?: number;
 };
 export type TranscriptionProgressEvent = {
   type: 'transcription:progress';
   callId: string;
-  percent: number;            // 0-100
+  /** 処理段階。convert=音声変換, transcribe=whisper 実行 */
+  stage: 'convert' | 'transcribe';
+  /** 変換〜完了までを通した全体進捗 (0-100) */
+  percent: number;
 };
 /** 録音中ウィンドウへの一時停止/再開の指示（HUD・ショートカットから発火） */
 export type RecordingTogglePauseEvent = { type: 'recording:togglePause' };
@@ -246,18 +255,18 @@ export interface CsvImportResult {
 
 export const DEFAULT_SETTINGS: Settings = {
   shortcuts: {
-    startCall: 'Control+Shift+S',
-    startMeeting: 'Control+Shift+M',
-    endCall: 'Control+Shift+E',
-    toggleWindow: 'Control+Shift+T',
-    toggleHold: 'Control+Shift+H',
-    togglePauseRecording: 'Control+Shift+P',
-    addMarker: 'Control+Shift+K',
-    openSettings: 'Control+Shift+,',
-    assignTag1: 'Control+Shift+1',
-    assignTag2: 'Control+Shift+2',
-    assignTag3: 'Control+Shift+3',
-    assignTag4: 'Control+Shift+4',
+    startCall: 'Ctrl+Shift+S',
+    startMeeting: 'Ctrl+Shift+M',
+    endCall: 'Ctrl+Shift+E',
+    toggleWindow: 'Ctrl+Shift+T',
+    toggleHold: 'Ctrl+Shift+H',
+    togglePauseRecording: 'Ctrl+Shift+P',
+    addMarker: 'Ctrl+Shift+K',
+    openSettings: 'Ctrl+Shift+,',
+    assignTag1: 'Ctrl+Shift+1',
+    assignTag2: 'Ctrl+Shift+2',
+    assignTag3: 'Ctrl+Shift+3',
+    assignTag4: 'Ctrl+Shift+4',
   },
   tags: [
     { name: '営業',   color: '#367aff' },

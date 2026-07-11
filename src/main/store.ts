@@ -43,6 +43,10 @@ export class Store {
         ...DEFAULT_SETTINGS.shortcuts,
         ...(parsed.settings?.shortcuts ?? {}),
       };
+      // v1.9.0 以前の 'Control+' 表記を 'Ctrl+' へ移行（accelerator としては等価）
+      for (const k of Object.keys(this.data.settings.shortcuts) as Array<keyof typeof this.data.settings.shortcuts>) {
+        this.data.settings.shortcuts[k] = this.data.settings.shortcuts[k].replace(/\bControl\b/g, 'Ctrl');
+      }
       this.data.settings.recording = {
         ...DEFAULT_SETTINGS.recording,
         ...(parsed.settings?.recording ?? {}),

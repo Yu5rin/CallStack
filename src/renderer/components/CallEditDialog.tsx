@@ -37,7 +37,8 @@ export function CallEditDialog({
   const [saving, setSaving] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
-  const [transcribeProgress, setTranscribeProgress] = useState<number | null>(null);
+  const [transcribeProgress, setTranscribeProgress] = useState<{ stage: 'convert' | 'transcribe'; percent: number } | null>(null);
+  const [queuePos, setQueuePos] = useState<number | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
   // 種別は編集で変更できる（通話⇄会議）。保存時に反映される。
@@ -47,14 +48,17 @@ export function CallEditDialog({
   useEffect(() => {
     const off = window.api.onEvent((e) => {
       if (e.type === 'transcription:progress' && e.callId === current.id) {
-        setTranscribeProgress(e.percent);
+        setTranscribeProgress({ stage: e.stage, percent: e.percent });
         return;
       }
       if (
         (e.type === 'call:updated' && e.record.id === current.id) ||
         (e.type === 'transcription:status' && e.callId === current.id)
       ) {
-        if (e.type === 'transcription:status' && e.status !== 'running') setTranscribeProgress(null);
+        if (e.type === 'transcription:status') {
+          if (e.status !== 'running') setTranscribeProgress(null);
+          setQueuePos(e.status === 'queued' ? (e.queuePosition ?? null) : null);
+        }
         window.api.calls.get(current.id).then((r) => {
           if (r) setCurrent(r);
         });
@@ -476,12 +480,18 @@ export function CallEditDialog({
                     </div>
                     <div className="flex items-center gap-2">
                       {current.transcriptStatus === 'running' && (
-                        <span className="text-xs text-brand-600 dark:text-brand-300">
-                          処理中… {transcribeProgress !== null ? `${transcribeProgress}%` : ''}
+                        <span className="text-xs font-medium text-brand-600 dark:text-brand-300">
+                          {transcribeProgress === null
+                            ? '準備中…'
+                            : transcribeProgress.stage === 'convert'
+                              ? '音声を変換中…'
+                              : `文字起こし中 ${transcribeProgress.percent}%`}
                         </span>
                       )}
                       {current.transcriptStatus === 'queued' && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">待機中…</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          待機中{queuePos && queuePos > 1 ? `（${queuePos} 番目）` : '（まもなく開始）'}
+                        </span>
                       )}
                       {transcriptBusy && (
                         <button
@@ -501,21 +511,23 @@ export function CallEditDialog({
                           </button>
                         </>
                       )}
-                      <button
-                        onClick={handleTranscribe}
-                        disabled={transcribing || transcriptBusy}
-                        className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                      >
-                        <RefreshCw size={12} />
-                        {current.transcript ? '再文字起こし' : '文字起こし'}
-                      </button>
+                      {!transcriptBusy && (
+                        <button
+                          onClick={handleTranscribe}
+                          disabled={transcribing}
+                          className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} />
+                          {current.transcript ? '再文字起こし' : '文字起こし'}
+                        </button>
+                      )}
                     </div>
                   </div>
-                  {current.transcriptStatus === 'running' && transcribeProgress !== null && (
+                  {(current.transcriptStatus === 'running' || current.transcriptStatus === 'queued') && (
                     <div className="mb-2 h-1.5 w-full flex-none overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
                       <div
-                        className="h-full bg-brand-500 transition-all"
-                        style={{ width: `${transcribeProgress}%` }}
+                        className={`h-full bg-brand-500 transition-all ${current.transcriptStatus === 'queued' ? 'animate-pulse' : ''}`}
+                        style={{ width: `${current.transcriptStatus === 'queued' ? 100 : (transcribeProgress?.percent ?? 2)}%`, opacity: current.transcriptStatus === 'queued' ? 0.25 : 1 }}
                       />
                     </div>
                   )}

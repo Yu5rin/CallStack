@@ -138,7 +138,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
       onClick={onCancel}
     >
       <div
-        className="w-[min(94vw,40rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        className="w-[min(94vw,46rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 種別タブ */}
@@ -266,7 +266,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                     {loadingWindows ? '更新中…' : <><RefreshCw size={11} className="mr-0.5 inline align-[-1px]" />更新</>}
                   </button>
                 </div>
-                <div className="grid max-h-44 grid-cols-2 gap-2 overflow-auto">
+                <div className="grid max-h-[46vh] grid-cols-2 gap-2 overflow-auto pr-1">
                   {(windows ?? []).map((w) => (
                     <button
                       key={w.id}
@@ -278,11 +278,13 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                       }`}
                       title={w.name}
                     >
-                      {w.thumbnail ? (
-                        <img src={w.thumbnail} alt="" className="h-14 w-full rounded object-cover" />
-                      ) : (
-                        <div className="flex h-14 w-full items-center justify-center rounded bg-slate-100 dark:bg-slate-700"><AppWindow size={24} className="text-slate-400" /></div>
-                      )}
+                      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded bg-slate-900/90">
+                        {w.thumbnail ? (
+                          <img src={w.thumbnail} alt="" className="max-h-full max-w-full object-contain" />
+                        ) : (
+                          <AppWindow size={28} className="text-slate-500" />
+                        )}
+                      </div>
                       <div className="mt-1 truncate text-[11px] text-slate-700 dark:text-slate-300">{w.name}</div>
                     </button>
                   ))}

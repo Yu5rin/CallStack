@@ -70,6 +70,7 @@ export async function probeDurationSec(inputPath: string): Promise<number> {
 export async function convertMp3ToWav16k(
   inputPath: string,
   outputPath: string,
+  cancelToken?: { cancelled: boolean; kill: (() => void) | null },
 ): Promise<void> {
   const ffmpeg = getFfmpegPath();
   return new Promise((resolve, reject) => {
@@ -81,11 +82,16 @@ export async function convertMp3ToWav16k(
       '-c:a', 'pcm_s16le',
       outputPath,
     ]);
+    // キャンセル・ハング対策: kill フックの公開と 10 分のタイムアウト
+    if (cancelToken) cancelToken.kill = () => proc.kill();
+    const timeout = setTimeout(() => proc.kill(), 10 * 60 * 1000);
     let stderr = '';
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('error', reject);
+    proc.on('error', (err) => { clearTimeout(timeout); reject(err); });
     proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`ffmpeg(wav) exited ${code}: ${stderr}`));
+      clearTimeout(timeout);
+      if (cancelToken) cancelToken.kill = null;
+      if (code !== 0) return reject(new Error(`ffmpeg(wav) exited ${code}: ${stderr.slice(-300)}`));
       resolve();
     });
   });

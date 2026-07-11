@@ -539,6 +539,45 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。
         </p>
+        <Row label="ファイルの保存先">
+          <div className="space-y-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={(draft.saveDirMode ?? 'auto') === 'auto'}
+                onChange={() => update({ saveDirMode: 'auto' })}
+              />
+              自動（前回の保存先を記憶して既定にする）
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={draft.saveDirMode === 'fixed'}
+                onChange={() => update({ saveDirMode: 'fixed' })}
+              />
+              自分で決める（常に指定フォルダを既定にする）
+            </label>
+            {draft.saveDirMode === 'fixed' && (
+              <div className="ml-6 flex flex-wrap items-center gap-2">
+                <span className="max-w-md truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  {draft.fixedSaveDir ?? '（未設定 — ドキュメントフォルダを使用）'}
+                </span>
+                <button
+                  onClick={async () => {
+                    const r = await window.api.app.chooseDir('保存先フォルダを選択');
+                    if (!r.canceled) update({ fixedSaveDir: r.dir });
+                  }}
+                  className={ghostBtn}
+                >
+                  <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
+                </button>
+              </div>
+            )}
+            <span className="block text-xs text-slate-500 dark:text-slate-400">
+              CSV・録音・文字起こし・議事録などの保存ダイアログの既定フォルダに使われます
+            </span>
+          </div>
+        </Row>
         <Row label="バックアップの複製先">
           <div className="flex flex-wrap items-center gap-2">
             <span className="max-w-md truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">

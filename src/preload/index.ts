@@ -40,6 +40,8 @@ const api = {
       ipcRenderer.invoke('app:info'),
     openPath: (target: 'logs' | 'data' | 'recordings'): Promise<boolean> =>
       ipcRenderer.invoke('app:open-path', target),
+    chooseDir: (title: string): Promise<{ canceled: true } | { canceled: false; dir: string }> =>
+      ipcRenderer.invoke('app:choose-dir', title),
   },
   update: {
     check: (): Promise<{

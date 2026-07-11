@@ -254,14 +254,19 @@ async function showSaveDialogRemembered(
   filters: Electron.FileFilter[],
 ): Promise<string | null> {
   const s = store.getSettings();
-  const baseDir = s.lastSaveDir ?? app.getPath('documents');
+  // fixed: 設定で決めたフォルダを常に既定にする / auto: 前回の保存先を記憶
+  const baseDir = (s.saveDirMode === 'fixed' && s.fixedSaveDir)
+    ? s.fixedSaveDir
+    : (s.lastSaveDir ?? app.getPath('documents'));
   const result = await dialog.showSaveDialog({
     title,
     defaultPath: path.join(baseDir, fileName),
     filters,
   });
   if (result.canceled || !result.filePath) return null;
-  store.setSettings({ ...store.getSettings(), lastSaveDir: path.dirname(result.filePath) });
+  if (s.saveDirMode !== 'fixed') {
+    store.setSettings({ ...store.getSettings(), lastSaveDir: path.dirname(result.filePath) });
+  }
   return result.filePath;
 }
 
@@ -633,7 +638,7 @@ function setupIpc(): void {
   ipcMain.handle('capture:list-windows', async () => {
     const sources = await desktopCapturer.getSources({
       types: ['window'],
-      thumbnailSize: { width: 192, height: 120 },
+      thumbnailSize: { width: 360, height: 225 },
     });
     return sources
       .filter((s) => s.name && s.name !== 'CallStack')
@@ -935,6 +940,13 @@ function setupIpc(): void {
     return store.backupNow('manual');
   });
 
+  // 汎用のフォルダ選択（保存先の固定フォルダなど）
+  ipcMain.handle('app:choose-dir', async (_e, title: string): Promise<{ canceled: true } | { canceled: false; dir: string }> => {
+    const r = await dialog.showOpenDialog({ title, properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || r.filePaths.length === 0) return { canceled: true };
+    return { canceled: false, dir: r.filePaths[0] };
+  });
+
   // 自動バックアップの複製先フォルダを選択（OneDrive 等を指定すれば実質クラウドバックアップになる）
   ipcMain.handle('backup:choose-dir', async (): Promise<{ canceled: true } | { canceled: false; dir: string }> => {
     const r = await dialog.showOpenDialog({
@@ -987,7 +999,12 @@ function queueTranscription(callId: string): void {
   const abs = path.join(recordings, rec.audio.path);
   const s = store.getSettings();
   const updated = store.updateCall(callId, { transcriptStatus: 'queued', transcriptError: undefined });
-  if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'queued' });
+  if (updated) {
+    broadcast('app-event', {
+      type: 'transcription:status', callId, status: 'queued',
+      queuePosition: transcriptionQueueLength() + 1,
+    });
+  }
   enqueueTranscription(callId, {
     audioPath: abs,
     model: s.transcription.model,
@@ -1082,8 +1099,10 @@ function setupTranscriptionHandlers(): void {
       const updated = store.updateCall(callId, { transcriptStatus: 'running' });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'running' });
     },
-    onProgress: (callId, percent) => {
-      broadcast('app-event', { type: 'transcription:progress', callId, percent });
+    onProgress: (callId, stage, percent) => {
+      // 全体進捗: 変換フェーズを 0-2%、whisper 実行を 2-100% に割り当てる
+      const overall = stage === 'convert' ? 2 : Math.min(100, 2 + Math.round(percent * 0.98));
+      broadcast('app-event', { type: 'transcription:progress', callId, stage, percent: overall });
     },
     onCancelled: (callId) => {
       const rec = store.getCall(callId);
@@ -1357,6 +1376,17 @@ async function main() {
   scheduleDailyCleanup(store, broadcast);
   // 前回終了時に保存されなかった録音断片を回収（進行中の記録は除く）
   setTimeout(() => { void recoverOrphanRecordings(); }, 3000);
+
+  // 前回のセッションで待機中・処理中のまま終了した文字起こしを自動再開する
+  // （これが無いと記録が「待機中」のまま永久に止まって見える）
+  setTimeout(() => {
+    const stale = store.getCalls().filter((c) =>
+      !c.deletedAt && c.audio && (c.transcriptStatus === 'queued' || c.transcriptStatus === 'running'));
+    for (const c of stale) {
+      logInfo('transcribe', `requeue stale job ${c.id} (was ${c.transcriptStatus})`);
+      queueTranscription(c.id);
+    }
+  }, 4000);
 
   // 起動時の更新チェック（通知型。取得できない環境では静かにスキップ）
   if (store.getSettings().checkUpdatesOnStartup) {

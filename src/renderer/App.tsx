@@ -10,12 +10,12 @@ import { formatHMS } from './utils/format';
 import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared/types';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
-import { Phone, Users, Bookmark, Play, Pause, Square } from 'lucide-react';
+import { Phone, Users, Bookmark, Play, Pause, Square, Circle, MoreVertical, FileAudio, Plus, Upload, Download } from 'lucide-react';
 import { ToastProvider, useToast } from './components/Toast';
 import { StartRecordDialog, StartMeta } from './components/StartRecordDialog';
 import { OnboardingDialog } from './components/OnboardingDialog';
 
-type Page = 'list' | 'stats' | 'settings';
+type Page = 'list' | 'trash' | 'stats' | 'settings';
 
 const LAST_KIND_KEY = 'callstack.lastStartKind';
 
@@ -36,6 +36,7 @@ function AppContent() {
   const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
   const [initialEditId, setInitialEditId] = useState<string | null>(null);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
@@ -136,6 +137,24 @@ function AppContent() {
     if (active) void window.api.calls.addMarker(active.id);
   };
 
+  // ︙ メニューは外側クリックで閉じる
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const close = () => setMoreMenuOpen(false);
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [moreMenuOpen]);
+
+  /** ︙ メニューの項目: 記録一覧ページ側にアクションを依頼する */
+  const dispatchListAction = (action: string) => {
+    setMoreMenuOpen(false);
+    setPage('list');
+    // CallListPage がマウントされてから処理されるよう次フレームで発火
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('callstack:list-action', { detail: action }));
+    }, 50);
+  };
+
   // オンボーディングの「設定を開いてセットアップ」
   useEffect(() => {
     const onNav = () => setPage('settings');
@@ -162,6 +181,7 @@ function AppContent() {
         <nav className="flex gap-1">
           <TabButton active={page === 'list'} onClick={() => setPage('list')}>記録</TabButton>
           <TabButton active={page === 'stats'} onClick={() => setPage('stats')}>統計</TabButton>
+          <TabButton active={page === 'trash'} onClick={() => setPage('trash')}>ゴミ箱</TabButton>
           <TabButton active={page === 'settings'} onClick={() => setPage('settings')}>設定</TabButton>
         </nav>
         <div className="flex items-center gap-3">
@@ -230,11 +250,43 @@ function AppContent() {
             <button
               onClick={handleStartClick}
               className="rounded-md bg-brand-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-              title={`記録を開始（ダイアログで通話/会議を選択）\nショートカット即開始: 通話 ${settings.shortcuts.startCall} / 会議 ${settings.shortcuts.startMeeting}`}
+              title={`記録・録音を開始（ダイアログで通話/会議を選択）\nショートカット即開始: 通話 ${settings.shortcuts.startCall} / 会議 ${settings.shortcuts.startMeeting}`}
             >
-              <Play size={14} fill="currentColor" className="mr-1 inline align-[-2px]" />開始
+              <Circle size={11} fill="#f87171" stroke="none" className="mr-1.5 inline align-[-1px]" />録音
             </button>
           )}
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setMoreMenuOpen((v) => !v); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              title="その他の操作"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {moreMenuOpen && (
+              <div
+                className="absolute right-0 top-full z-[80] mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {([
+                  { action: 'audio-import', icon: <FileAudio size={14} />, label: '音声を取り込み…' },
+                  { action: 'manual-add', icon: <Plus size={14} />, label: '手動追加' },
+                  { action: 'csv-import', icon: <Upload size={14} />, label: 'CSV インポート…' },
+                  { action: 'csv-export', icon: <Download size={14} />, label: 'CSV エクスポート…' },
+                ] as const).map((item) => (
+                  <button
+                    key={item.action}
+                    onClick={() => dispatchListAction(item.action)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    <span className="text-slate-400">{item.icon}</span>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -248,6 +300,9 @@ function AppContent() {
             initialEditId={initialEditId}
             onConsumeInitialEditId={() => setInitialEditId(null)}
           />
+        )}
+        {page === 'trash' && (
+          <CallListPage calls={calls} settings={settings} mode="trash" />
         )}
         {page === 'stats' && (
           <StatsPage calls={callsAlive} settings={settings} onSelectContact={navigateToContact} />

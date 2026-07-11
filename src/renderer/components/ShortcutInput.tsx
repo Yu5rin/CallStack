@@ -9,7 +9,7 @@ const MOD_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
 
 function eventToAccelerator(e: React.KeyboardEvent): string | null {
   const parts: string[] = [];
-  if (e.ctrlKey) parts.push('Control');
+  if (e.ctrlKey) parts.push('Ctrl');
   if (e.shiftKey) parts.push('Shift');
   if (e.altKey) parts.push('Alt');
   if (e.metaKey) parts.push('Super');

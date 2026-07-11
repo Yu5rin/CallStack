@@ -15,6 +15,8 @@ import { useToast } from '../components/Toast';
 interface Props {
   calls: CallRecord[];
   settings: Settings;
+  /** 'trash' はゴミ箱タブとして動作（削除済みのみ表示） */
+  mode?: 'normal' | 'trash';
   initialContactFilter?: string | null;
   onConsumeInitialFilter?: () => void;
   initialEditId?: string | null;
@@ -65,8 +67,9 @@ function loadHidden(): ColKey[] {
 const AUDIO_EXT = /\.(mp3|wav|m4a|webm|ogg|aac|flac)$/i;
 
 export function CallListPage({
-  calls, settings, initialContactFilter, onConsumeInitialFilter, initialEditId, onConsumeInitialEditId,
+  calls, settings, mode = 'normal', initialContactFilter, onConsumeInitialFilter, initialEditId, onConsumeInitialEditId,
 }: Props) {
+  const showTrash = mode === 'trash';
   const toast = useToast();
   const [editing, setEditing] = useState<CallRecord | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,7 +78,7 @@ export function CallListPage({
   const [filterTag, setFilterTag] = useState<string>('');
   const [filterContact, setFilterContact] = useState<string>('');
   const [showUntagged, setShowUntagged] = useState(false);
-  const [exportRange, setExportRange] = useState<CsvExportOptions['range']>('all');
+  const [filterRange, setFilterRange] = useState<CsvExportOptions['range']>('all');
   const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
   const [restoreResult, setRestoreResult] = useState<{ calls: number; backupPath: string } | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -83,7 +86,6 @@ export function CallListPage({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; call: CallRecord } | null>(null);
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
   const [audioImport, setAudioImport] = useState<{ open: boolean; file: ImportFile | null }>({ open: false, file: null });
-  const [showTrash, setShowTrash] = useState(false);
   // 詳細フィルタ
   const [showDetailFilter, setShowDetailFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -163,6 +165,20 @@ export function CallListPage({
     return () => off();
   }, []);
 
+  // ヘッダーの ︙ メニューからのアクションを受け付ける
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const action = (e as CustomEvent<string>).detail;
+      if (action === 'audio-import') setAudioImport({ open: true, file: null });
+      else if (action === 'manual-add') void handleAddManual();
+      else if (action === 'csv-import') void handleImport();
+      else if (action === 'csv-export') void handleExport();
+    };
+    window.addEventListener('callstack:list-action', handler);
+    return () => window.removeEventListener('callstack:list-action', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterRange]);
+
   // Receive cross-page contact filter
   useEffect(() => {
     if (initialContactFilter) {
@@ -234,6 +250,21 @@ export function CallListPage({
     const source = showTrash ? trashCalls : aliveCalls;
     const fromMs = dateFrom ? new Date(dateFrom).getTime() : null;
     const toMs = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 : null;
+    // 期間セレクト（全期間/今週/今月）
+    let rangeFrom: number | null = null;
+    let rangeTo: number | null = null;
+    if (filterRange === 'thisWeek') {
+      const now = new Date();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+      monday.setHours(0, 0, 0, 0);
+      rangeFrom = monday.getTime();
+      rangeTo = rangeFrom + 7 * 24 * 60 * 60 * 1000;
+    } else if (filterRange === 'thisMonth') {
+      const now = new Date();
+      rangeFrom = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      rangeTo = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+    }
     const base = source.filter((c) => {
       const kind = c.kind ?? 'call';
       if (filterKind && kind !== filterKind) return false;
@@ -243,6 +274,8 @@ export function CallListPage({
       const t = new Date(c.startTime).getTime();
       if (fromMs !== null && t < fromMs) return false;
       if (toMs !== null && t >= toMs) return false;
+      if (rangeFrom !== null && t < rangeFrom) return false;
+      if (rangeTo !== null && t >= rangeTo) return false;
       if (hasAudio === 'yes' && !c.audio) return false;
       if (hasAudio === 'no' && c.audio) return false;
       if (hasTranscript === 'yes' && !c.transcript) return false;
@@ -259,7 +292,7 @@ export function CallListPage({
       // 第2キーは開始日時の新しい順で安定させる
       return b.startTime.localeCompare(a.startTime);
     });
-  }, [aliveCalls, trashCalls, showTrash, debouncedQuery, haystacks, filterKind, filterTag, filterContact, showUntagged, dateFrom, dateTo, hasAudio, hasTranscript, sort]);
+  }, [aliveCalls, trashCalls, showTrash, debouncedQuery, haystacks, filterKind, filterTag, filterContact, showUntagged, filterRange, dateFrom, dateTo, hasAudio, hasTranscript, sort]);
 
   // 仮想化の可視範囲（少件数では全件描画）
   const virtualized = filtered.length > 150;
@@ -296,7 +329,7 @@ export function CallListPage({
   }, [selectedId, calls, editing, importResult, audioImport.open, showTrash, settings.confirmCallDelete]);
 
   const handleExport = async () => {
-    const r = await window.api.csv.export({ range: exportRange });
+    const r = await window.api.csv.export({ range: filterRange });
     if (!r.canceled) toast.success(`${r.count} 件を ${r.path} にエクスポートしました`);
   };
 
@@ -331,11 +364,6 @@ export function CallListPage({
     } catch (err) {
       setDropError((err as Error).message);
     }
-  };
-
-  const handleWeeklyReport = async () => {
-    const r = await window.api.report.weekly();
-    if (!r.canceled) toast.success(`週次レポートを ${r.path} に保存しました`);
   };
 
   const handleAddManual = async () => {
@@ -495,10 +523,10 @@ export function CallListPage({
               {c.audio && <span title="録音あり"><Mic size={14} className="text-slate-500 dark:text-slate-400" /></span>}
               {c.markers && c.markers.length > 0 && <span className="inline-flex items-center gap-0.5 text-xs text-slate-500 dark:text-slate-400" title={`マーカー ${c.markers.length} 個`}><Bookmark size={13} />{c.markers.length}</span>}
               {c.transcript && c.transcriptStatus !== 'running' && c.transcriptStatus !== 'queued' && <span title="文字起こし済"><FileText size={14} className="text-emerald-600 dark:text-emerald-400" /></span>}
-              {c.transcriptStatus === 'queued' && <span className="inline-flex items-center gap-1 text-xs text-slate-500" title="文字起こし待機中"><Loader2 size={13} className="animate-spin" /> 待機</span>}
+              {c.transcriptStatus === 'queued' && <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-slate-500" title="文字起こし待機中"><Loader2 size={13} className="shrink-0 animate-spin" />待機</span>}
               {c.transcriptStatus === 'running' && (
-                <span className="text-xs font-semibold text-brand-600 dark:text-brand-300" title="文字起こし中">
-                  <Loader2 size={13} className="mr-0.5 inline animate-spin align-[-2px]" />{pct !== undefined ? `${pct}%` : '…'}
+                <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-brand-600 dark:text-brand-300" title="文字起こし中">
+                  <Loader2 size={13} className="shrink-0 animate-spin" />{pct ?? 0}%
                 </span>
               )}
               {c.transcriptStatus === 'error' && (
@@ -617,6 +645,16 @@ export function CallListPage({
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+        <select
+          value={filterRange}
+          onChange={(e) => setFilterRange(e.target.value as CsvExportOptions['range'])}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          title="期間で絞り込み（CSV エクスポートもこの範囲が対象）"
+        >
+          <option value="all">全期間</option>
+          <option value="thisWeek">今週</option>
+          <option value="thisMonth">今月</option>
+        </select>
         <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
@@ -636,59 +674,6 @@ export function CallListPage({
         >
           <SlidersHorizontal size={14} className="mr-1 inline align-[-2px]" />詳細
         </button>
-        <button
-          onClick={() => { setShowTrash((v) => !v); setSelectedId(null); }}
-          className={`rounded-md border px-3 py-2 text-sm font-medium ${
-            showTrash
-              ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300'
-              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-          }`}
-          title="削除した記録（30日間保持）"
-        >
-          <Trash2 size={14} className="mr-1 inline align-[-2px]" />ゴミ箱 ({trashCalls.length})
-        </button>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setAudioImport({ open: true, file: null })}
-            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
-            title="音声ファイルを通話/会議の記録として取り込み、文字起こしできます"
-          >
-            <FileAudio size={14} className="mr-1 inline align-[-2px]" />音声を取り込み
-          </button>
-          <button
-            onClick={handleAddManual}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            手動追加
-          </button>
-          <button
-            onClick={handleImport}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            CSV インポート
-          </button>
-          <select
-            value={exportRange}
-            onChange={(e) => setExportRange(e.target.value as CsvExportOptions['range'])}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-          >
-            <option value="all">全期間</option>
-            <option value="thisWeek">今週</option>
-            <option value="thisMonth">今月</option>
-          </select>
-          <button
-            onClick={handleExport}
-            className="rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-          >
-            CSV エクスポート
-          </button>
-          <button
-            onClick={handleWeeklyReport}
-            className="rounded-md border border-brand-300 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100 dark:border-brand-700 dark:bg-brand-900/40 dark:text-brand-200 dark:hover:bg-brand-900/60"
-          >
-            週次レポート (MD)
-          </button>
-        </div>
       </div>
 
       {showDetailFilter && (
@@ -738,7 +723,7 @@ export function CallListPage({
 
       {showTrash && (
         <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-          <span className="inline-flex items-center gap-1.5"><Trash2 size={14} />ゴミ箱 — 削除から30日で自動的に完全削除されます。右クリックで復元できます。</span>
+          <span className="inline-flex items-center gap-1.5"><Trash2 size={14} />削除から30日で自動的に完全削除されます。行を右クリックすると復元できます。</span>
           {trashCalls.length > 0 && (
             <button
               onClick={async () => {
@@ -792,7 +777,7 @@ export function CallListPage({
                     key,
                     dir: prev.key === key && prev.dir === 'desc' ? 'asc' : prev.key === key ? 'desc' : 'desc',
                   }))}
-                  className={`cursor-pointer select-none px-4 py-3 transition ${thAlignRight(key) ? 'text-right' : key === 'media' ? 'w-28 whitespace-nowrap text-center' : ''} ${
+                  className={`cursor-pointer select-none px-4 py-3 transition ${thAlignRight(key) ? 'text-right' : key === 'media' ? 'w-36 whitespace-nowrap text-center' : ''} ${
                     dropTarget === key ? 'bg-brand-100 dark:bg-brand-900/50' : 'hover:bg-slate-100 dark:hover:bg-slate-700/60'
                   } ${dragCol === key ? 'opacity-50' : ''}`}
                   title="クリックで並び替え / ドラッグで列を移動 / 右クリックで表示する列を選択"
@@ -823,7 +808,7 @@ export function CallListPage({
                       </div>
                       {calls.length === 0 && (
                         <div className="text-xs text-slate-400 dark:text-slate-500">
-                          右上のボタン、または {settings.shortcuts.startCall}（通話）/ {settings.shortcuts.startMeeting}（会議）で開始できます。
+                          右上の「録音」ボタン、または {settings.shortcuts.startCall}（通話）/ {settings.shortcuts.startMeeting}（会議）で開始できます。
                           <br />音声ファイルをこの画面にドラッグ&ドロップして取り込むこともできます。
                         </div>
                       )}

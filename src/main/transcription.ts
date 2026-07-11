@@ -70,9 +70,11 @@ async function resolveWhisperBin(): Promise<string> {
   }
 }
 
+export type TranscribeStage = 'convert' | 'transcribe';
+
 export async function transcribe(
   opts: TranscribeOptions,
-  onProgress?: (percent: number) => void,
+  onProgress?: (stage: TranscribeStage, percent: number) => void,
   cancelToken?: { cancelled: boolean; kill: (() => void) | null },
 ): Promise<CallTranscript> {
   if (!(await isModelDownloaded(opts.model))) {
@@ -84,14 +86,17 @@ export async function transcribe(
   const wavPath = baseTmp + '.wav';
   const outBase = baseTmp;
 
-  await convertMp3ToWav16k(opts.audioPath, wavPath);
+  onProgress?.('convert', 0);
+  // キャンセルは変換中の ffmpeg にも届く（kill フックを共有）
+  await convertMp3ToWav16k(opts.audioPath, wavPath, cancelToken);
   if (cancelToken?.cancelled) {
     await fs.unlink(wavPath).catch(() => {});
     throw new TranscriptionCancelledError();
   }
+  onProgress?.('transcribe', 0);
 
   try {
-    await runWhisper(bin, modelPath, wavPath, outBase, opts.language, opts.prompt, onProgress, cancelToken);
+    await runWhisper(bin, modelPath, wavPath, outBase, opts.language, opts.prompt, (p) => onProgress?.('transcribe', p), cancelToken);
     const jsonPath = `${outBase}.json`;
     const raw = await fs.readFile(jsonPath, 'utf-8');
     const parsed = JSON.parse(raw) as WhisperJson;
@@ -143,7 +148,16 @@ function runWhisper(
     const proc = spawn(bin, args);
     if (cancelToken) cancelToken.kill = () => proc.kill();
     let stderr = '';
+    // ストール監視: 出力が 10 分止まったらハングとみなして中断する
+    let stalled = false;
+    let stallTimer = setTimeout(onStall, 10 * 60 * 1000);
+    function onStall() { stalled = true; proc.kill(); }
+    function resetStall() {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(onStall, 10 * 60 * 1000);
+    }
     proc.stderr.on('data', (d) => {
+      resetStall();
       const text = d.toString();
       stderr += text;
       // whisper.cpp -pp: "whisper_print_progress_callback: progress =  15%"
@@ -153,11 +167,16 @@ function runWhisper(
         if (last) onProgress(Math.min(100, Number(last[1])));
       }
     });
-    proc.on('error', reject);
+    proc.on('error', (err) => { clearTimeout(stallTimer); reject(err); });
     proc.on('close', (code) => {
+      clearTimeout(stallTimer);
       if (cancelToken) cancelToken.kill = null;
       if (cancelToken?.cancelled) {
         reject(new TranscriptionCancelledError());
+        return;
+      }
+      if (stalled) {
+        reject(new Error('whisper が応答しないため文字起こしを中断しました。再度お試しください。'));
         return;
       }
       if (code === 0) {
@@ -191,7 +210,7 @@ interface WhisperJson {
 type Job = { callId: string; opts: TranscribeOptions };
 type JobHandlers = {
   onStart: (callId: string) => void;
-  onProgress: (callId: string, percent: number) => void;
+  onProgress: (callId: string, stage: TranscribeStage, percent: number) => void;
   onDone: (callId: string, t: CallTranscript) => void;
   onCancelled: (callId: string) => void;
   onError: (callId: string, err: Error) => void;
@@ -240,7 +259,7 @@ async function pump(): Promise<void> {
       currentJob = { callId: job.callId, token };
       handlers?.onStart(job.callId);
       try {
-        const t = await transcribe(job.opts, (p) => handlers?.onProgress(job.callId, p), token);
+        const t = await transcribe(job.opts, (stage, p) => handlers?.onProgress(job.callId, stage, p), token);
         handlers?.onDone(job.callId, t);
       } catch (err) {
         if (err instanceof TranscriptionCancelledError || token.cancelled) {
