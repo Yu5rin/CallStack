@@ -28,8 +28,23 @@ const api = {
     create: (partial: Partial<CallRecord>): Promise<CallRecord> =>
       ipcRenderer.invoke('calls:create', partial),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('calls:delete', id),
+    restore: (id: string): Promise<CallRecord | null> => ipcRenderer.invoke('calls:restore', id),
+    purge: (id: string): Promise<boolean> => ipcRenderer.invoke('calls:purge', id),
+    purgeTrash: (): Promise<number> => ipcRenderer.invoke('calls:purge-trash'),
     addMarker: (callId?: string, label?: string): Promise<CallRecord | null> =>
       ipcRenderer.invoke('calls:add-marker', callId, label),
+  },
+  app: {
+    info: (): Promise<{ version: string; logPath: string; dataDir: string }> =>
+      ipcRenderer.invoke('app:info'),
+    openPath: (target: 'logs' | 'data' | 'recordings'): Promise<boolean> =>
+      ipcRenderer.invoke('app:open-path', target),
+  },
+  update: {
+    check: (): Promise<{
+      ok: boolean; current: string; latest?: string; hasUpdate?: boolean; url?: string; error?: string;
+    }> => ipcRenderer.invoke('update:check'),
+    openReleases: (url?: string): Promise<boolean> => ipcRenderer.invoke('update:open-releases', url),
   },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),

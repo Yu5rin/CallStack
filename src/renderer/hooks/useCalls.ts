@@ -58,7 +58,7 @@ export async function deleteCallWithConfirm(
   confirmEnabled: boolean,
 ): Promise<boolean> {
   if (confirmEnabled) {
-    const ok = window.confirm('この記録を削除しますか？録音ファイルも削除されます。');
+    const ok = window.confirm('この記録をゴミ箱に移動しますか？（30日以内なら復元できます）');
     if (!ok) return false;
   }
   await window.api.calls.delete(id);

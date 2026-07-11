@@ -90,11 +90,12 @@ export function createMainWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 760,
+    minHeight: 560,
     show: false,
     autoHideMenuBar: true,
     title: 'CallStack',
+    icon: path.join(__dirname, '..', '..', 'resources', 'app-icon-512.png'),
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,

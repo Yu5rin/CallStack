@@ -55,6 +55,8 @@ export interface CallRecord {
   participants?: string[];
   /** 録音中に打ったマーカー */
   markers?: Marker[];
+  /** ゴミ箱に入れた日時（設定されている間は一覧・統計から除外。30日後に完全削除） */
+  deletedAt?: string;
   holds?: HoldSegment[];
   holdSec?: number;
   audio?: CallAudio;
@@ -75,6 +77,7 @@ export interface ShortcutSettings {
   toggleWindow: string;
   toggleHold: string;
   togglePauseRecording: string;
+  addMarker: string;
   openSettings: string;
   assignTag1: string;
   assignTag2: string;
@@ -131,6 +134,12 @@ export interface Settings {
   transcription: TranscriptionSettings;
   confirmRecordingEnable: boolean;
   minimizeToTray: boolean;
+  /** Windows ログイン時に自動起動する */
+  launchAtLogin: boolean;
+  /** 起動時に新バージョンを確認して通知する */
+  checkUpdatesOnStartup: boolean;
+  /** 初回セットアップウィザードを完了したか */
+  onboardingDone: boolean;
   confirmCallDelete: boolean;
   theme: ThemePref;
   hudSize: HudSize;
@@ -238,6 +247,7 @@ export const DEFAULT_SETTINGS: Settings = {
     toggleWindow: 'Control+Shift+T',
     toggleHold: 'Control+Shift+H',
     togglePauseRecording: 'Control+Shift+P',
+    addMarker: 'Control+Shift+K',
     openSettings: 'Control+Shift+,',
     assignTag1: 'Control+Shift+1',
     assignTag2: 'Control+Shift+2',
@@ -272,6 +282,9 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   confirmRecordingEnable: true,
   minimizeToTray: false,
+  launchAtLogin: false,
+  checkUpdatesOnStartup: true,
+  onboardingDone: false,
   confirmCallDelete: true,
   theme: 'system',
   hudSize: 'compact',

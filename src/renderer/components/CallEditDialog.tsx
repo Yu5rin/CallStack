@@ -181,6 +181,19 @@ export function CallEditDialog({
     void updateMarkers((current.markers ?? []).filter((_, i) => i !== idx));
   };
 
+  /** 文字起こしセグメントの手動修正。全文テキストも作り直して保存する */
+  const handleEditSegment = async (index: number, text: string) => {
+    if (!current.transcript?.segments) return;
+    const segments = current.transcript.segments.map((s, i) => (i === index ? { ...s, text } : s));
+    const transcript = {
+      ...current.transcript,
+      segments,
+      text: segments.map((s) => s.text).join('\n').trim(),
+    };
+    const updated = await window.api.calls.update(current.id, { transcript });
+    if (updated) setCurrent(updated);
+  };
+
   const audioSrc = current.audio ? `app://recordings/${current.audio.path}` : null;
   const transcriptBusy = current.transcriptStatus === 'running' || current.transcriptStatus === 'queued';
 
@@ -468,6 +481,7 @@ export function CallEditDialog({
                   <TranscriptView
                     transcript={current.transcript}
                     onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
+                    onEditSegment={(i, text) => void handleEditSegment(i, text)}
                   />
                 </div>
               </div>

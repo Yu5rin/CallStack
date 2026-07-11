@@ -1,6 +1,6 @@
 {
   "name": "callstack",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "電話通話時間記録デスクトップアプリ（グローバルショートカット・累積CSV・統計ダッシュボード）",
   "main": "dist-electron/main/index.js",
   "private": true,
@@ -72,7 +72,8 @@
         }
       ],
       "artifactName": "${productName}-${version}-win-${arch}.${ext}",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

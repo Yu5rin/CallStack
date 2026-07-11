@@ -4,15 +4,10 @@ import type { ThemePref } from '../shared/types';
 
 let tray: Tray | null = null;
 
-function buildIcon(active: boolean): Electron.NativeImage {
-  // Try to use a packaged icon; otherwise generate a tiny colored swatch
-  const iconPath = path.join(
-    __dirname,
-    '..',
-    '..',
-    'resources',
-    active ? 'tray-active.png' : 'tray-idle.png',
-  );
+function buildIcon(active: boolean, recording = false): Electron.NativeImage {
+  // 状態別トレイアイコン: 待機=グレー波形 / 通話・会議中=緑波形 / 録音中=緑波形+赤ドット
+  const name = active ? (recording ? 'tray-rec.png' : 'tray-active.png') : 'tray-idle.png';
+  const iconPath = path.join(__dirname, '..', '..', 'resources', name);
   const img = nativeImage.createFromPath(iconPath);
   if (!img.isEmpty()) return img;
   // Fallback 16x16 PNG generated inline (solid color square)
@@ -50,7 +45,7 @@ export function createTray(handlers: TrayHandlers): Tray {
 
 export function updateTray(state: TrayState, handlers: TrayHandlers): void {
   if (!tray) return;
-  tray.setImage(buildIcon(state.active));
+  tray.setImage(buildIcon(state.active, state.recording));
   const parts: string[] = ['CallStack'];
   if (state.active) {
     parts.push(`${state.holding ? '保留中' : '通話中'} ${formatHMS(state.elapsedSec ?? 0)}`);

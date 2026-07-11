@@ -78,6 +78,13 @@ export function CallListPage({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; call: CallRecord } | null>(null);
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
   const [audioImport, setAudioImport] = useState<{ open: boolean; file: ImportFile | null }>({ open: false, file: null });
+  const [showTrash, setShowTrash] = useState(false);
+  // 詳細フィルタ
+  const [showDetailFilter, setShowDetailFilter] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [hasAudio, setHasAudio] = useState<'' | 'yes' | 'no'>('');
+  const [hasTranscript, setHasTranscript] = useState<'' | 'yes' | 'no'>('');
 
   // 列の並び・表示状態（この端末に保存）
   const [colOrder, setColOrder] = useState<ColKey[]>(loadOrder);
@@ -154,11 +161,14 @@ export function CallListPage({
     return m;
   }, [settings.tags]);
 
+  const aliveCalls = useMemo(() => calls.filter((c) => !c.deletedAt), [calls]);
+  const trashCalls = useMemo(() => calls.filter((c) => c.deletedAt), [calls]);
+
   const allContacts = useMemo(() => {
     const set = new Set<string>();
-    for (const c of calls) if (c.contactName) set.add(c.contactName);
+    for (const c of aliveCalls) if (c.contactName) set.add(c.contactName);
     return [...set].sort();
-  }, [calls]);
+  }, [aliveCalls]);
 
   // ============ ソート ============
 
@@ -178,12 +188,22 @@ export function CallListPage({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = calls.filter((c) => {
+    const source = showTrash ? trashCalls : aliveCalls;
+    const fromMs = dateFrom ? new Date(dateFrom).getTime() : null;
+    const toMs = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 : null;
+    const base = source.filter((c) => {
       const kind = c.kind ?? 'call';
       if (filterKind && kind !== filterKind) return false;
       if (showUntagged && c.tag) return false;
       if (filterTag && c.tag !== filterTag) return false;
       if (filterContact && c.contactName !== filterContact) return false;
+      const t = new Date(c.startTime).getTime();
+      if (fromMs !== null && t < fromMs) return false;
+      if (toMs !== null && t >= toMs) return false;
+      if (hasAudio === 'yes' && !c.audio) return false;
+      if (hasAudio === 'no' && c.audio) return false;
+      if (hasTranscript === 'yes' && !c.transcript) return false;
+      if (hasTranscript === 'no' && c.transcript) return false;
       if (!q) return true;
       const hay = [
         c.memo,
@@ -205,7 +225,7 @@ export function CallListPage({
       // 第2キーは開始日時の新しい順で安定させる
       return b.startTime.localeCompare(a.startTime);
     });
-  }, [calls, query, filterKind, filterTag, filterContact, showUntagged, sort]);
+  }, [aliveCalls, trashCalls, showTrash, query, filterKind, filterTag, filterContact, showUntagged, dateFrom, dateTo, hasAudio, hasTranscript, sort]);
 
   // Delete-key handler with focus / dialog awareness.
   useEffect(() => {
@@ -219,12 +239,19 @@ export function CallListPage({
       const target = calls.find((c) => c.id === selectedId);
       if (!target) return;
       e.preventDefault();
+      if (showTrash) {
+        if (window.confirm('この記録を完全に削除しますか？録音ファイルも削除され、元に戻せません。')) {
+          await window.api.calls.purge(selectedId);
+          setSelectedId(null);
+        }
+        return;
+      }
       const removed = await deleteCallWithConfirm(selectedId, settings.confirmCallDelete);
       if (removed) setSelectedId(null);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedId, calls, editing, importResult, audioImport.open, settings.confirmCallDelete]);
+  }, [selectedId, calls, editing, importResult, audioImport.open, showTrash, settings.confirmCallDelete]);
 
   const handleExport = async () => {
     const r = await window.api.csv.export({ range: exportRange });
@@ -282,8 +309,27 @@ export function CallListPage({
     else toast.success(`保存しました: ${r.path}`);
   };
 
-  const ctxActions: Array<{ label: string; danger?: boolean; run: () => void | Promise<void> }> = ctxMenu
+  const ctxActions: Array<{ label: string; danger?: boolean; run: () => void | Promise<void> }> = !ctxMenu
+    ? []
+    : showTrash
     ? [
+        {
+          label: '♻️ 復元',
+          run: async () => {
+            await window.api.calls.restore(ctxMenu.call.id);
+            toast.success('記録を復元しました');
+          },
+        },
+        {
+          label: '🗑 完全に削除',
+          danger: true,
+          run: async () => {
+            if (!window.confirm('この記録を完全に削除しますか？録音ファイルも削除され、元に戻せません。')) return;
+            await window.api.calls.purge(ctxMenu.call.id);
+          },
+        },
+      ]
+    : [
         {
           label: '✏️ 編集',
           run: () => setEditing(ctxMenu.call),
@@ -322,8 +368,7 @@ export function CallListPage({
             if (removed && selectedId === ctxMenu.call.id) setSelectedId(null);
           },
         },
-      ]
-    : [];
+      ];
 
   // ============ セル描画 ============
 
@@ -528,6 +573,28 @@ export function CallListPage({
           />
           未タグのみ ({untaggedCount})
         </label>
+        <button
+          onClick={() => setShowDetailFilter((v) => !v)}
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${
+            showDetailFilter || dateFrom || dateTo || hasAudio || hasTranscript
+              ? 'border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/40 dark:text-brand-200'
+              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+          }`}
+          title="期間・録音有無などで絞り込み"
+        >
+          🔍 詳細
+        </button>
+        <button
+          onClick={() => { setShowTrash((v) => !v); setSelectedId(null); }}
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${
+            showTrash
+              ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300'
+              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+          }`}
+          title="削除した記録（30日間保持）"
+        >
+          🗑 ゴミ箱 ({trashCalls.length})
+        </button>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setAudioImport({ open: true, file: null })}
@@ -571,6 +638,69 @@ export function CallListPage({
           </button>
         </div>
       </div>
+
+      {showDetailFilter && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">期間</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          />
+          <span className="text-slate-400">〜</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          />
+          <span className="ml-2 text-xs font-semibold text-slate-500 dark:text-slate-400">録音</span>
+          <select
+            value={hasAudio}
+            onChange={(e) => setHasAudio(e.target.value as '' | 'yes' | 'no')}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          >
+            <option value="">指定なし</option>
+            <option value="yes">あり</option>
+            <option value="no">なし</option>
+          </select>
+          <span className="ml-2 text-xs font-semibold text-slate-500 dark:text-slate-400">文字起こし</span>
+          <select
+            value={hasTranscript}
+            onChange={(e) => setHasTranscript(e.target.value as '' | 'yes' | 'no')}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          >
+            <option value="">指定なし</option>
+            <option value="yes">あり</option>
+            <option value="no">なし</option>
+          </select>
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); setHasAudio(''); setHasTranscript(''); }}
+            className="ml-auto text-xs text-slate-500 underline hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          >
+            クリア
+          </button>
+        </div>
+      )}
+
+      {showTrash && (
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+          <span>🗑 ゴミ箱 — 削除から30日で自動的に完全削除されます。右クリックで復元できます。</span>
+          {trashCalls.length > 0 && (
+            <button
+              onClick={async () => {
+                if (!window.confirm(`ゴミ箱の ${trashCalls.length} 件を完全に削除しますか？録音ファイルも削除され、元に戻せません。`)) return;
+                const n = await window.api.calls.purgeTrash();
+                toast.success(`${n} 件を完全に削除しました`);
+              }}
+              className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-900"
+            >
+              ゴミ箱を空にする
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <table className="w-full text-sm">
@@ -624,8 +754,23 @@ export function CallListPage({
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={visibleCols.length} className="px-4 py-12 text-center text-slate-400 dark:text-slate-500">
-                  記録がありません。{settings.shortcuts.startCall} で通話、{settings.shortcuts.startMeeting} で会議を開始しましょう。
+                <td colSpan={visibleCols.length} className="px-4 py-16 text-center">
+                  {showTrash ? (
+                    <div className="text-slate-400 dark:text-slate-500">ゴミ箱は空です</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-3xl">📞</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">
+                        {calls.length === 0 ? 'まだ記録がありません' : '条件に一致する記録がありません'}
+                      </div>
+                      {calls.length === 0 && (
+                        <div className="text-xs text-slate-400 dark:text-slate-500">
+                          右上のボタン、または {settings.shortcuts.startCall}（通話）/ {settings.shortcuts.startMeeting}（会議）で開始できます。
+                          <br />音声ファイルをこの画面にドラッグ&ドロップして取り込むこともできます。
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             )}

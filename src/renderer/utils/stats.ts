@@ -120,11 +120,21 @@ export interface ContactBucket {
 }
 
 export function computeByContact(calls: CallRecord[]): ContactBucket[] {
+  return computeByName(calls, (c) => c.contactName);
+}
+
+/** 会議名別サマリー（会議タブ用） */
+export function computeByTitle(calls: CallRecord[]): ContactBucket[] {
+  return computeByName(calls, (c) => c.title || '（無題の会議）');
+}
+
+function computeByName(calls: CallRecord[], getName: (c: CallRecord) => string | undefined): ContactBucket[] {
   const map = new Map<string, { name: string; count: number; totalSec: number; last: string; tagCounts: Map<string, number> }>();
   for (const c of calls) {
-    if (!c.contactName || !c.endTime || c.durationSec === null) continue;
-    const cur = map.get(c.contactName) ?? {
-      name: c.contactName,
+    const name = getName(c);
+    if (!name || !c.endTime || c.durationSec === null) continue;
+    const cur = map.get(name) ?? {
+      name,
       count: 0,
       totalSec: 0,
       last: c.startTime,
@@ -134,7 +144,7 @@ export function computeByContact(calls: CallRecord[]): ContactBucket[] {
     cur.totalSec += c.durationSec;
     if (c.startTime > cur.last) cur.last = c.startTime;
     if (c.tag) cur.tagCounts.set(c.tag, (cur.tagCounts.get(c.tag) ?? 0) + 1);
-    map.set(c.contactName, cur);
+    map.set(name, cur);
   }
   return [...map.values()]
     .map((b) => {

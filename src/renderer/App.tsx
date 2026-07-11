@@ -7,11 +7,12 @@ import { CallListPage } from './pages/CallListPage';
 import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { formatHMS } from './utils/format';
-import { AppEvent, RecordKind, RecordingSourceConfig } from '../shared/types';
+import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared/types';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
 import { ToastProvider, useToast } from './components/Toast';
 import { StartRecordDialog } from './components/StartRecordDialog';
+import { OnboardingDialog } from './components/OnboardingDialog';
 
 type Page = 'list' | 'stats' | 'settings';
 
@@ -40,8 +41,9 @@ function AppContent() {
   const [recError, setRecError] = useState<string | null>(null);
   const recErrorTimer = useRef<number | null>(null);
 
-  // 統計・フッターは通話のみを対象にする（会議が混ざると平均・件数が意味を失うため）
-  const callsOnly = useMemo(() => calls.filter((c) => c.kind !== 'meeting'), [calls]);
+  // ゴミ箱の記録は集計から除外する。フッターは通話のみを対象にする。
+  const callsAlive = useMemo(() => calls.filter((c) => !c.deletedAt), [calls]);
+  const callsOnly = useMemo(() => callsAlive.filter((c) => c.kind !== 'meeting'), [callsAlive]);
   const isMeeting = active?.kind === 'meeting';
 
   const navigateToContact = (name: string) => {
@@ -122,6 +124,18 @@ function AppContent() {
 
   const handleAddMarker = () => {
     if (active) void window.api.calls.addMarker(active.id);
+  };
+
+  // オンボーディングの「設定を開いてセットアップ」
+  useEffect(() => {
+    const onNav = () => setPage('settings');
+    window.addEventListener('callstack:navigate-settings', onNav);
+    return () => window.removeEventListener('callstack:navigate-settings', onNav);
+  }, []);
+
+  const handleOnboardingFinish = async (patch: Partial<Settings>) => {
+    if (!settings) return;
+    await save({ ...settings, ...patch });
   };
 
   if (loading || !settings) {
@@ -234,7 +248,7 @@ function AppContent() {
           />
         )}
         {page === 'stats' && (
-          <StatsPage calls={callsOnly} settings={settings} onSelectContact={navigateToContact} />
+          <StatsPage calls={callsAlive} settings={settings} onSelectContact={navigateToContact} />
         )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
@@ -248,6 +262,10 @@ function AppContent() {
           onStart={(config, windowId, micDeviceId, saveAsDefault) =>
             void handleDialogStart(config, windowId, micDeviceId, saveAsDefault)}
         />
+      )}
+
+      {!settings.onboardingDone && (
+        <OnboardingDialog settings={settings} onFinish={(p) => void handleOnboardingFinish(p)} />
       )}
     </div>
   );

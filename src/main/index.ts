@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session, WebContents, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, shell, WebContents, desktopCapturer } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
@@ -40,8 +40,9 @@ import {
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
-import { logInfo } from './log';
+import { getLogPath, logInfo } from './log';
 import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
+import { checkForUpdate, checkOnStartup } from './updates';
 
 registerAppProtocolPrivilege();
 
@@ -73,7 +74,7 @@ function todayStats(): { count: number; totalSec: number } {
   let count = 0;
   let totalSec = 0;
   for (const c of store.getCalls()) {
-    if (!c.endTime) continue;
+    if (!c.endTime || c.deletedAt) continue;
     if (new Date(c.startTime).getTime() < start) continue;
     count++;
     totalSec += c.durationSec ?? 0;
@@ -167,6 +168,23 @@ async function endCall(): Promise<CallRecord | null> {
   return updated;
 }
 
+/** 指定（または進行中）の記録に現在時刻のマーカーを追加する */
+function addMarkerTo(callId?: string, label?: string): CallRecord | null {
+  const rec = callId ? store.getCall(callId) : getActive();
+  if (!rec) return null;
+  const at = rec.endTime
+    ? 0
+    : Math.max(0, Math.round((Date.now() - new Date(rec.startTime).getTime()) / 1000));
+  const marker: Marker = label ? { at, label } : { at };
+  const markers = [...(rec.markers ?? []), marker].sort((a, b) => a.at - b.at);
+  const updated = store.updateCall(rec.id, { markers });
+  if (updated) {
+    broadcast('app-event', { type: 'call:updated', record: updated });
+    broadcast('app-event', { type: 'marker:added', callId: rec.id, marker, count: markers.length });
+  }
+  return updated;
+}
+
 /** 録音中のレンダラへ一時停止/再開のトグルを指示する */
 function togglePauseRecording(): void {
   if (!getActive()) return;
@@ -200,7 +218,7 @@ async function chooseAndExport(): Promise<{ count: number; path: string } | null
     filters: [{ name: 'CSV', extensions: ['csv'] }],
   });
   if (result.canceled || !result.filePath) return null;
-  const count = await exportCsv(result.filePath, store.getCalls(), { range: 'all' });
+  const count = await exportCsv(result.filePath, store.getCalls().filter((c) => !c.deletedAt), { range: 'all' });
   return { count, path: result.filePath };
 }
 
@@ -254,6 +272,7 @@ function reRegisterShortcuts(): void {
     toggle: () => toggleMainWindow(),
     toggleHold: () => toggleHold(),
     togglePauseRecording: () => togglePauseRecording(),
+    addMarker: () => { addMarkerTo(); },
     openSettings: () => showMainWindowAt('settings'),
     assignTag: (idx) => assignTagByIndex(idx),
   });
@@ -271,22 +290,9 @@ function setupIpc(): void {
   ipcMain.handle('calls:endNow', () => endCall());
   ipcMain.handle('calls:toggleHold', () => toggleHold());
 
-  // 進行中の記録に現在時刻のマーカーを打つ（HUD・ヘッダーから）
-  ipcMain.handle('calls:add-marker', (_e, callId?: string, label?: string) => {
-    const rec = callId ? store.getCall(callId) : getActive();
-    if (!rec) return null;
-    const at = rec.endTime
-      ? 0
-      : Math.max(0, Math.round((Date.now() - new Date(rec.startTime).getTime()) / 1000));
-    const marker: Marker = label ? { at, label } : { at };
-    const markers = [...(rec.markers ?? []), marker].sort((a, b) => a.at - b.at);
-    const updated = store.updateCall(rec.id, { markers });
-    if (updated) {
-      broadcast('app-event', { type: 'call:updated', record: updated });
-      broadcast('app-event', { type: 'marker:added', callId: rec.id, marker, count: markers.length });
-    }
-    return updated;
-  });
+  // 進行中の記録に現在時刻のマーカーを打つ（HUD・ヘッダー・ショートカットから）
+  ipcMain.handle('calls:add-marker', (_e, callId?: string, label?: string) =>
+    addMarkerTo(callId, label));
 
   ipcMain.handle('calls:update', (_e, id: string, patch: Partial<CallRecord>) => {
     const updated = store.updateCall(id, patch);
@@ -294,7 +300,22 @@ function setupIpc(): void {
     return updated;
   });
 
+  // 削除はまずゴミ箱へ（ソフトデリート）。録音ファイルは完全削除まで保持する。
   ipcMain.handle('calls:delete', async (_e, id: string) => {
+    const updated = store.updateCall(id, { deletedAt: new Date().toISOString() });
+    if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
+    return !!updated;
+  });
+
+  // ゴミ箱から復元
+  ipcMain.handle('calls:restore', (_e, id: string) => {
+    const updated = store.updateCall(id, { deletedAt: undefined });
+    if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
+    return updated;
+  });
+
+  // 完全削除（録音ファイルごと）
+  ipcMain.handle('calls:purge', async (_e, id: string) => {
     const rec = store.getCall(id);
     if (rec?.audio) {
       try { await recording.deleteRecording(rec.audio.path); } catch { /* ignore */ }
@@ -302,6 +323,19 @@ function setupIpc(): void {
     const ok = store.deleteCall(id);
     if (ok) broadcast('app-event', { type: 'call:deleted', id });
     return ok;
+  });
+
+  // ゴミ箱を空にする
+  ipcMain.handle('calls:purge-trash', async () => {
+    const trash = store.getCalls().filter((c) => c.deletedAt);
+    for (const rec of trash) {
+      if (rec.audio) {
+        try { await recording.deleteRecording(rec.audio.path); } catch { /* ignore */ }
+      }
+      store.deleteCall(rec.id);
+      broadcast('app-event', { type: 'call:deleted', id: rec.id });
+    }
+    return trash.length;
   });
 
   ipcMain.handle('calls:create', (_e, partial: Partial<CallRecord>) => {
@@ -338,8 +372,32 @@ function setupIpc(): void {
     reRegisterShortcuts();
     setMinimizeToTray(next.minimizeToTray);
     if (prev.hudSize !== next.hudSize) setHudSize(next.hudSize);
+    if (prev.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next.launchAtLogin);
     broadcast('app-event', { type: 'settings:updated', settings: next });
     return next;
+  });
+
+  // ============ アプリ情報・更新チェック ============
+  ipcMain.handle('app:info', () => ({
+    version: app.getVersion(),
+    logPath: getLogPath(),
+    dataDir: app.getPath('userData'),
+  }));
+
+  ipcMain.handle('app:open-path', async (_e, target: 'logs' | 'data' | 'recordings') => {
+    const p = target === 'logs'
+      ? path.dirname(getLogPath())
+      : target === 'recordings'
+        ? getDirs().recordings
+        : app.getPath('userData');
+    await shell.openPath(p);
+    return true;
+  });
+
+  ipcMain.handle('update:check', () => checkForUpdate());
+  ipcMain.handle('update:open-releases', async (_e, url?: string) => {
+    await shell.openExternal(url ?? 'https://github.com/Yu5rin/CallStack/releases/latest');
+    return true;
   });
 
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
@@ -349,7 +407,7 @@ function setupIpc(): void {
       filters: [{ name: 'CSV', extensions: ['csv'] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true } as const;
-    const count = await exportCsv(result.filePath, store.getCalls(), opts);
+    const count = await exportCsv(result.filePath, store.getCalls().filter((c) => !c.deletedAt), opts);
     return { canceled: false, count, path: result.filePath } as const;
   });
 
@@ -401,7 +459,7 @@ function setupIpc(): void {
   });
 
   ipcMain.handle('report:weekly', async () => {
-    const md = buildWeeklyReport(store.getCalls());
+    const md = buildWeeklyReport(store.getCalls().filter((c) => !c.deletedAt));
     const result = await dialog.showSaveDialog({
       title: '週次レポートを保存',
       defaultPath: `report-${weekStamp()}.md`,
@@ -1020,6 +1078,13 @@ function buildWeeklyReport(calls: CallRecord[]): string {
   return lines.join('\n');
 }
 
+/** Windows ログイン時の自動起動を設定する */
+function applyLaunchAtLogin(enabled: boolean): void {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  app.setLoginItemSettings({ openAtLogin: enabled });
+  logInfo('app', `launchAtLogin = ${enabled}`);
+}
+
 function setupMediaPermissions(): void {
   // Allow media (microphone) and display capture requests from our windows.
   session.defaultSession.setPermissionRequestHandler((_wc: WebContents, permission, callback) => {
@@ -1099,10 +1164,26 @@ async function main() {
 
   reRegisterShortcuts();
   setMinimizeToTray(store.getSettings().minimizeToTray);
+  applyLaunchAtLogin(store.getSettings().launchAtLogin);
   createMainWindow();
   createRecorderWindow();
   logInfo('app', `started v${app.getVersion()}`);
   scheduleDailyCleanup(store, broadcast);
+
+  // 起動時の更新チェック（通知型。取得できない環境では静かにスキップ）
+  if (store.getSettings().checkUpdatesOnStartup) {
+    setTimeout(() => {
+      void checkOnStartup().then((r) => {
+        if (r?.hasUpdate) {
+          notify(
+            `新しいバージョン v${r.latest} があります`,
+            `現在 v${r.current} — クリックでダウンロードページを開く`,
+            () => { void shell.openExternal(r.url!); },
+          );
+        }
+      });
+    }, 5000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

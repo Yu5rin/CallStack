@@ -21,15 +21,37 @@ export async function cleanupExpiredRecordings(store: Store, broadcast: (channel
   return deleted;
 }
 
+/** ゴミ箱に入れてから30日経過した記録を完全削除する（録音ファイル含む） */
+const TRASH_RETENTION_DAYS = 30;
+
+export async function purgeOldTrash(store: Store, broadcast: (channel: string, payload: unknown) => void): Promise<number> {
+  const cutoffMs = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  let purged = 0;
+  for (const c of store.getCalls().slice()) {
+    if (!c.deletedAt) continue;
+    if (new Date(c.deletedAt).getTime() >= cutoffMs) continue;
+    if (c.audio) {
+      try { await deleteRecording(c.audio.path); } catch { /* ignore */ }
+    }
+    if (store.deleteCall(c.id)) {
+      broadcast('app-event', { type: 'call:deleted', id: c.id });
+      purged += 1;
+    }
+  }
+  return purged;
+}
+
 let timer: NodeJS.Timeout | null = null;
 
 export function scheduleDailyCleanup(store: Store, broadcast: (channel: string, payload: unknown) => void): void {
   if (timer) clearInterval(timer);
   // Run once at startup and every 12 hours
-  void cleanupExpiredRecordings(store, broadcast).catch((err) => console.error('[retention]', err));
-  timer = setInterval(() => {
+  const run = () => {
     cleanupExpiredRecordings(store, broadcast).catch((err) => console.error('[retention]', err));
-  }, 12 * 60 * 60 * 1000);
+    purgeOldTrash(store, broadcast).catch((err) => console.error('[retention]', err));
+  };
+  run();
+  timer = setInterval(run, 12 * 60 * 60 * 1000);
 }
 
 export function stopDailyCleanup(): void {

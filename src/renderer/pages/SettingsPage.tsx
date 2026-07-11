@@ -193,6 +193,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
       {/* ============ ウィンドウと HUD ============ */}
       <section className={sectionClass}>
         <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">🪟 ウィンドウと HUD</h3>
+        <Row label="自動起動">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={draft.launchAtLogin}
+              onChange={(e) => update({ launchAtLogin: e.target.checked })}
+            />
+            Windows ログイン時に CallStack を自動起動する
+          </label>
+        </Row>
         <Row label="最小化の動作">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
@@ -265,6 +275,9 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </Row>
           <Row label="録音の一時停止/再開">
             <ShortcutInput value={draft.shortcuts.togglePauseRecording} onChange={(v) => updateShortcut('togglePauseRecording', v)} />
+          </Row>
+          <Row label="マーカーを打つ">
+            <ShortcutInput value={draft.shortcuts.addMarker} onChange={(v) => updateShortcut('addMarker', v)} />
           </Row>
           <Row label="メイン窓を表示/隠す">
             <ShortcutInput value={draft.shortcuts.toggleWindow} onChange={(v) => updateShortcut('toggleWindow', v)} />
@@ -523,6 +536,15 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         <BackupRestoreRow />
       </section>
 
+      {/* ============ バージョン情報 ============ */}
+      <section className={sectionClass}>
+        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">ℹ️ バージョン情報</h3>
+        <AboutSection
+          checkOnStartup={draft.checkUpdatesOnStartup}
+          onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
+        />
+      </section>
+
       {showRecordingWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-[min(94vw,32rem)] rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
@@ -553,6 +575,106 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AboutSection({
+  checkOnStartup,
+  onToggleCheckOnStartup,
+}: {
+  checkOnStartup: boolean;
+  onToggleCheckOnStartup: (v: boolean) => void;
+}) {
+  const [info, setInfo] = useState<{ version: string; logPath: string; dataDir: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [updateUrl, setUpdateUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.api.app.info().then(setInfo).catch(() => {});
+  }, []);
+
+  const check = async () => {
+    setChecking(true);
+    setResult(null);
+    setUpdateUrl(null);
+    try {
+      const r = await window.api.update.check();
+      if (!r.ok) {
+        setResult(`更新を確認できませんでした（${r.error ?? '不明なエラー'}）。リリースページで直接確認してください。`);
+        setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
+      } else if (r.hasUpdate) {
+        setResult(`🎉 新しいバージョン v${r.latest} が利用できます（現在 v${r.current}）`);
+        setUpdateUrl(r.url ?? null);
+      } else {
+        setResult(`✅ 最新です（v${r.current}）`);
+      }
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <Row label="バージョン">
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-sm text-slate-800 dark:text-slate-200">
+            CallStack v{info?.version ?? '…'}
+          </span>
+          <button
+            onClick={check}
+            disabled={checking}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            {checking ? '確認中…' : '🔄 更新を確認'}
+          </button>
+          {updateUrl && (
+            <button
+              onClick={() => void window.api.update.openReleases(updateUrl)}
+              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+            >
+              ダウンロードページを開く
+            </button>
+          )}
+        </div>
+        {result && <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{result}</div>}
+      </Row>
+      <Row label="更新の自動確認">
+        <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={checkOnStartup}
+            onChange={(e) => onToggleCheckOnStartup(e.target.checked)}
+          />
+          起動時に新しいバージョンを確認して通知する
+        </label>
+      </Row>
+      <Row label="フォルダ">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => void window.api.app.openPath('data')}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            📁 データフォルダを開く
+          </button>
+          <button
+            onClick={() => void window.api.app.openPath('recordings')}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            🎙 録音フォルダを開く
+          </button>
+          <button
+            onClick={() => void window.api.app.openPath('logs')}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            📋 ログフォルダを開く
+          </button>
+        </div>
+        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          不具合報告の際はログフォルダの app.log を添えていただくと調査がスムーズです
+        </span>
+      </Row>
     </div>
   );
 }

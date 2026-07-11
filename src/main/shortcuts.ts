@@ -8,6 +8,7 @@ export interface ShortcutHandlers {
   toggle: () => void;
   toggleHold: () => void;
   togglePauseRecording: () => void;
+  addMarker: () => void;
   openSettings: () => void;
   assignTag: (idx: number) => void;
 }
@@ -22,6 +23,7 @@ export function registerShortcuts(shortcuts: ShortcutSettings, handlers: Shortcu
     [shortcuts.toggleWindow, handlers.toggle, 'toggleWindow'],
     [shortcuts.toggleHold, handlers.toggleHold, 'toggleHold'],
     [shortcuts.togglePauseRecording, handlers.togglePauseRecording, 'togglePauseRecording'],
+    [shortcuts.addMarker, handlers.addMarker, 'addMarker'],
     [shortcuts.openSettings, handlers.openSettings, 'openSettings'],
     [shortcuts.assignTag1, () => handlers.assignTag(0), 'assignTag1'],
     [shortcuts.assignTag2, () => handlers.assignTag(1), 'assignTag2'],

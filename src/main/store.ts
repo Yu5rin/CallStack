@@ -90,7 +90,7 @@ export class Store {
   }
 
   getActiveCall(): CallRecord | null {
-    return this.data.calls.find((c) => c.endTime === null) ?? null;
+    return this.data.calls.find((c) => c.endTime === null && !c.deletedAt) ?? null;
   }
 
   addCall(record: CallRecord): void {
