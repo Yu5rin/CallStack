@@ -46,7 +46,23 @@ export class Store {
       this.data.settings.recording = {
         ...DEFAULT_SETTINGS.recording,
         ...(parsed.settings?.recording ?? {}),
+        callSource: {
+          ...DEFAULT_SETTINGS.recording.callSource,
+          ...(parsed.settings?.recording?.callSource ?? {}),
+        },
+        meetingSource: {
+          ...DEFAULT_SETTINGS.recording.meetingSource,
+          ...(parsed.settings?.recording?.meetingSource ?? {}),
+        },
       };
+      // v1.4 以前の recording.source ('mic' | 'mic+system') からの移行
+      const legacySource = (parsed.settings?.recording as { source?: string } | undefined)?.source;
+      if (legacySource && !parsed.settings?.recording?.callSource) {
+        const system = legacySource === 'mic+system';
+        this.data.settings.recording.callSource = { mic: true, system, systemScope: 'screen' };
+        this.data.settings.recording.meetingSource = { mic: true, system, systemScope: 'screen' };
+      }
+      delete (this.data.settings.recording as { source?: string }).source;
       this.data.settings.transcription = {
         ...DEFAULT_SETTINGS.transcription,
         ...(parsed.settings?.transcription ?? {}),

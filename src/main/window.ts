@@ -11,9 +11,9 @@ let hudWindow: BrowserWindow | null = null;
 let minimizeToTrayEnabled = false;
 
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
-  mini:    { width: 180, height: 32 },
-  compact: { width: 260, height: 56 },
-  full:    { width: 340, height: 96 },
+  mini:    { width: 200, height: 32 },
+  compact: { width: 330, height: 64 },
+  full:    { width: 400, height: 118 },
 };
 
 const HUD_SIZE_ORDER: HudSize[] = ['mini', 'compact', 'full'];

@@ -8,20 +8,33 @@ import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { formatHMS } from './utils/format';
 import { beep } from './utils/beep';
-import { AppEvent } from '../shared/types';
-import { useRecorder } from './recorder/useRecorder';
+import { AppEvent, RecordKind, RecordingSourceConfig } from '../shared/types';
+import { useRecorder, SourceOverride } from './recorder/useRecorder';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
+import { ToastProvider, useToast } from './components/Toast';
+import { StartRecordDialog } from './components/StartRecordDialog';
 
 type Page = 'list' | 'stats' | 'settings';
 
 export function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
+  );
+}
+
+function AppContent() {
   const [page, setPage] = useState<Page>('list');
   const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
+  const [startDialogKind, setStartDialogKind] = useState<RecordKind | null>(null);
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
-  const recorder = useRecorder(active, settings);
+  const sourceOverrideRef = useRef<SourceOverride | null>(null);
+  const recorder = useRecorder(active, settings, sourceOverrideRef);
+  const toast = useToast();
   useTheme(settings?.theme);
 
   // 統計・フッターは通話のみを対象にする（会議が混ざると平均・件数が意味を失うため）
@@ -41,12 +54,52 @@ export function App() {
         setPage(e.page);
         return;
       }
+      if (e.type === 'marker:added') {
+        toast.info(`🔖 マーカーを追加しました（${e.count} 個目 / ${formatHMS(e.marker.at)}）`);
+        return;
+      }
       if (!soundOn.current) return;
       if (e.type === 'call:started') beep('start');
       if (e.type === 'call:ended') beep('end');
     });
     return () => off();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleStartClick = (kind: RecordKind) => {
+    if (settings?.recording.enabled && settings.recording.askSourceOnStart) {
+      setStartDialogKind(kind);
+    } else {
+      void window.api.calls.startNow(kind);
+    }
+  };
+
+  const handleDialogStart = async (
+    config: RecordingSourceConfig | null,
+    windowId: string | null,
+    saveAsDefault: boolean,
+  ) => {
+    const kind = startDialogKind!;
+    setStartDialogKind(null);
+    if (config && saveAsDefault && settings) {
+      const next = {
+        ...settings,
+        recording: {
+          ...settings.recording,
+          ...(kind === 'meeting' ? { meetingSource: config } : { callSource: config }),
+        },
+      };
+      await save(next);
+    }
+    sourceOverrideRef.current = config
+      ? { config, windowId }
+      : { config: { mic: false, system: false, systemScope: 'screen' }, windowId: null };
+    await window.api.calls.startNow(kind);
+  };
+
+  const handleAddMarker = () => {
+    if (active) void window.api.calls.addMarker(active.id);
+  };
 
   if (loading || !settings) {
     return (
@@ -66,9 +119,16 @@ export function App() {
         </nav>
         <div className="flex items-center gap-3">
           {active ? (
-            <span className="flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-              {isMeeting ? '会議中' : '通話中'} <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
+            <span
+              className={`flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ring-1 ${
+                isMeeting
+                  ? 'bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950 dark:text-violet-300 dark:ring-violet-900'
+                  : 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900'
+              }`}
+            >
+              <span className={`inline-block h-2 w-2 animate-pulse rounded-full ${isMeeting ? 'bg-violet-500' : 'bg-emerald-500'}`} />
+              {isMeeting ? '👥 会議中' : '📞 通話中'}
+              <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
             </span>
           ) : (
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -103,26 +163,36 @@ export function App() {
             </button>
           )}
           {active ? (
-            <button
-              onClick={() => window.api.calls.endNow()}
-              className="rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
-            >
-              終了 ({settings.shortcuts.endCall})
-            </button>
+            <>
+              <button
+                onClick={handleAddMarker}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                title="現在時刻にマーカーを打つ（あとで該当箇所へジャンプできます）"
+              >
+                🔖 マーカー
+              </button>
+              <button
+                onClick={() => window.api.calls.endNow()}
+                className="rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
+              >
+                終了 ({settings.shortcuts.endCall})
+              </button>
+            </>
           ) : (
             <>
               <button
-                onClick={() => window.api.calls.startNow()}
+                onClick={() => handleStartClick('call')}
                 className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                title={`通話を開始 (${settings.shortcuts.startCall})`}
               >
-                通話開始 ({settings.shortcuts.startCall})
+                📞 通話開始
               </button>
               <button
-                onClick={() => window.api.calls.startNow('meeting')}
+                onClick={() => handleStartClick('meeting')}
                 className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
                 title={`会議を開始 (${settings.shortcuts.startMeeting})`}
               >
-                会議開始
+                👥 会議開始
               </button>
             </>
           )}
@@ -144,6 +214,15 @@ export function App() {
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
       <SummaryFooter calls={callsOnly} />
+
+      {startDialogKind && settings && (
+        <StartRecordDialog
+          kind={startDialogKind}
+          settings={settings}
+          onCancel={() => setStartDialogKind(null)}
+          onStart={(config, windowId, saveAsDefault) => void handleDialogStart(config, windowId, saveAsDefault)}
+        />
+      )}
     </div>
   );
 }

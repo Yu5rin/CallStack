@@ -7,12 +7,20 @@ export interface HoldSegment {
   sec: number;
 }
 
+export type AudioSourceLabel = 'mic' | 'system' | 'mic+system';
+
 export interface CallAudio {
   path: string;           // relative to recordings dir, e.g. 'abc.mp3'
   format: 'mp3';
   bytes: number;
   durationSec: number;
-  source: 'mic' | 'mic+system';
+  source: AudioSourceLabel;
+}
+
+/** 録音中に打つマーカー（ブックマーク）。at は記録開始からの秒数 */
+export interface Marker {
+  at: number;
+  label?: string;
 }
 
 export interface TranscriptSegment {
@@ -45,6 +53,8 @@ export interface CallRecord {
   title?: string;
   /** 会議用: 参加者 */
   participants?: string[];
+  /** 録音中に打ったマーカー */
+  markers?: Marker[];
   holds?: HoldSegment[];
   holdSec?: number;
   audio?: CallAudio;
@@ -79,9 +89,22 @@ export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 export type HudSize = 'mini' | 'compact' | 'full';
 export type HudOpacity = 0.5 | 0.75 | 1.0;
 
+/** 録音ソースの構成。mic / system は独立に ON/OFF できる */
+export interface RecordingSourceConfig {
+  mic: boolean;
+  system: boolean;
+  /** システム音声の範囲。'window' はキャプチャ対象ウィンドウを選択（環境により全体音声になる場合あり） */
+  systemScope: 'screen' | 'window';
+}
+
 export interface RecordingSettings {
   enabled: boolean;
-  source: 'mic' | 'mic+system';
+  /** 通話の既定ソース */
+  callSource: RecordingSourceConfig;
+  /** 会議の既定ソース */
+  meetingSource: RecordingSourceConfig;
+  /** 画面のボタンから開始したとき、録音ソースの確認ダイアログを出す（ショートカット開始時は既定で即開始） */
+  askSourceOnStart: boolean;
   micDeviceId: string | null;
   mp3Bitrate: 64 | 96 | 128 | 192;
   autoTranscribe: boolean;
@@ -144,6 +167,10 @@ export type TranscriptionProgressEvent = {
 export type RecordingTogglePauseEvent = { type: 'recording:togglePause' };
 /** 一時停止状態の通知（録音を実行しているレンダラが発火） */
 export type RecordingPausedEvent = { type: 'recording:paused'; callId: string; paused: boolean };
+/** 録音レベルの共有（メイン窓のレコーダ → HUD、約5Hzに間引き） */
+export type RecordingLevelEvent = { type: 'recording:level'; level: number };
+/** マーカー追加の通知 */
+export type MarkerAddedEvent = { type: 'marker:added'; callId: string; marker: Marker; count: number };
 export type ModelDownloadEvent = {
   type: 'model:download';
   model: WhisperModel;
@@ -168,6 +195,8 @@ export type AppEvent =
   | TranscriptionProgressEvent
   | RecordingTogglePauseEvent
   | RecordingPausedEvent
+  | RecordingLevelEvent
+  | MarkerAddedEvent
   | ModelDownloadEvent
   | NavigateEvent
   | DataRestoredEvent;
@@ -211,7 +240,9 @@ export const DEFAULT_SETTINGS: Settings = {
   hudPosition: null,
   recording: {
     enabled: false,
-    source: 'mic',
+    callSource: { mic: true, system: false, systemScope: 'screen' },
+    meetingSource: { mic: true, system: true, systemScope: 'screen' },
+    askSourceOnStart: true,
     micDeviceId: null,
     mp3Bitrate: 96,
     autoTranscribe: true,
@@ -231,6 +262,14 @@ export const DEFAULT_SETTINGS: Settings = {
   hudOpacity: 1.0,
   transcriptSeekOffsetSec: 1.0,
 };
+
+/** ソース構成から保存用ラベルを導出。両方 OFF なら null（録音しない） */
+export function audioSourceLabel(cfg: RecordingSourceConfig): AudioSourceLabel | null {
+  if (cfg.mic && cfg.system) return 'mic+system';
+  if (cfg.mic) return 'mic';
+  if (cfg.system) return 'system';
+  return null;
+}
 
 export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: string }> = [
   { id: 'tiny',   sizeMb: 75,   label: 'tiny (約 75MB, 速度優先)' },

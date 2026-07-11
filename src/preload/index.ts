@@ -1,12 +1,19 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
   CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
+  AudioSourceLabel,
 } from '../shared/types';
 
 type SaveAsResult =
   | { canceled: true }
   | { canceled: false; path: string }
   | { canceled: false; error: string };
+
+export interface CaptureWindow {
+  id: string;
+  name: string;
+  thumbnail: string | null;   // data URL
+}
 
 const api = {
   calls: {
@@ -21,6 +28,8 @@ const api = {
     create: (partial: Partial<CallRecord>): Promise<CallRecord> =>
       ipcRenderer.invoke('calls:create', partial),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('calls:delete', id),
+    addMarker: (callId?: string, label?: string): Promise<CallRecord | null> =>
+      ipcRenderer.invoke('calls:add-marker', callId, label),
   },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
@@ -59,18 +68,29 @@ const api = {
   recording: {
     appendChunk: (callId: string, buf: ArrayBuffer): Promise<boolean> =>
       ipcRenderer.invoke('recording:append-chunk', callId, buf),
-    finalize: (callId: string): Promise<CallRecord | null> =>
-      ipcRenderer.invoke('recording:finalize', callId),
+    finalize: (callId: string, sourceLabel?: AudioSourceLabel): Promise<CallRecord | null> =>
+      ipcRenderer.invoke('recording:finalize', callId, sourceLabel),
     abort: (callId: string): Promise<boolean> => ipcRenderer.invoke('recording:abort', callId),
     togglePause: (): Promise<boolean> => ipcRenderer.invoke('recording:toggle-pause'),
     setPaused: (callId: string, paused: boolean): Promise<boolean> =>
       ipcRenderer.invoke('recording:set-paused', callId, paused),
+    reportLevel: (level: number): Promise<boolean> =>
+      ipcRenderer.invoke('recording:report-level', level),
+    setCaptureTarget: (target: { type: 'screen' } | { type: 'window'; sourceId: string }): Promise<boolean> =>
+      ipcRenderer.invoke('recording:set-capture-target', target),
     saveAs: (callId: string): Promise<SaveAsResult> =>
       ipcRenderer.invoke('recording:save-as', callId),
+  },
+  capture: {
+    listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),
   },
   transcript: {
     saveAs: (callId: string, withTimestamps: boolean): Promise<SaveAsResult> =>
       ipcRenderer.invoke('transcript:save-as', callId, withTimestamps),
+  },
+  minutes: {
+    saveAs: (callId: string): Promise<SaveAsResult> =>
+      ipcRenderer.invoke('minutes:save-as', callId),
   },
   transcription: {
     start: (callId: string): Promise<{ ok: true } | { ok: false; error: string }> =>

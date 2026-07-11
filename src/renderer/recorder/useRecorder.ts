@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { MutableRefObject, useEffect, useRef, useState } from 'react';
 import { RecordingManager } from './RecordingManager';
-import { AppEvent, Settings } from '../../shared/types';
+import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../../shared/types';
 
 interface ActiveLike {
   id: string;
+  kind?: RecordKind;
+}
+
+/** 開始ダイアログで選んだ、次の録音1回分のソース上書き */
+export interface SourceOverride {
+  config: RecordingSourceConfig;
+  windowId: string | null;
 }
 
 export interface UseRecorderState {
@@ -17,6 +24,7 @@ export interface UseRecorderState {
 export function useRecorder(
   active: ActiveLike | null,
   settings: Settings | null,
+  sourceOverrideRef?: MutableRefObject<SourceOverride | null>,
 ): UseRecorderState {
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -61,19 +69,42 @@ export function useRecorder(
     }
   };
 
+  // レベルは HUD へも中継する（IPC を圧迫しないよう 200ms に間引き）
+  const lastLevelSentRef = useRef(0);
+  const handleLevel = (v: number) => {
+    setLevel(v);
+    const now = performance.now();
+    if (now - lastLevelSentRef.current >= 200) {
+      lastLevelSentRef.current = now;
+      void window.api.recording.reportLevel(v).catch(() => {});
+    }
+  };
+
   useEffect(() => {
     if (!settings) return;
     const rec = settings.recording;
 
     if (active && rec.enabled && !managerRef.current) {
+      // 優先順: 開始ダイアログでの選択（1回限り）→ 種別ごとの既定設定
+      const override = sourceOverrideRef?.current ?? null;
+      if (sourceOverrideRef) sourceOverrideRef.current = null;
+      const cfg = override?.config
+        ?? (active.kind === 'meeting' ? rec.meetingSource : rec.callSource);
+      if (!cfg.mic && !cfg.system) {
+        // ソースがすべて OFF の場合はこの記録では録音しない
+        return;
+      }
       const mgr = new RecordingManager();
       managerRef.current = mgr;
       clearError();
       mgr.start({
         callId: active.id,
-        source: rec.source,
+        mic: cfg.mic,
+        system: cfg.system,
+        systemScope: cfg.systemScope,
+        systemWindowId: override?.windowId ?? null,
         micDeviceId: rec.micDeviceId,
-        onLevel: (v) => setLevel(v),
+        onLevel: handleLevel,
         onWarning: (msg) => reportError(msg),
         onError: (err) => {
           if (!/invoking remote method/i.test(err.message)) reportError(err.message);
@@ -100,7 +131,8 @@ export function useRecorder(
         console.warn('[recorder] stop failed:', err);
       });
     }
-  }, [active?.id, settings?.recording.enabled, settings?.recording.source, settings?.recording.micDeviceId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, active?.kind, settings?.recording.enabled, settings?.recording.micDeviceId, settings?.recording.callSource, settings?.recording.meetingSource]);
 
   return { recording, paused, level, error, clearError };
 }

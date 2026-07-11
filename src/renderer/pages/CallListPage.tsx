@@ -4,6 +4,7 @@ import { CallEditDialog } from '../components/CallEditDialog';
 import { deleteCallWithConfirm } from '../hooks/useCalls';
 import { formatDateTime, formatHMS } from '../utils/format';
 import { highlight } from '../utils/highlight';
+import { useToast } from '../components/Toast';
 
 interface Props {
   calls: CallRecord[];
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function CallListPage({ calls, settings, initialContactFilter, onConsumeInitialFilter }: Props) {
+  const toast = useToast();
   const [editing, setEditing] = useState<CallRecord | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -92,7 +94,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
 
   const handleExport = async () => {
     const r = await window.api.csv.export({ range: exportRange });
-    if (!r.canceled) alert(`${r.count} 件を ${r.path} にエクスポートしました`);
+    if (!r.canceled) toast.success(`${r.count} 件を ${r.path} にエクスポートしました`);
   };
 
   const handleImport = async () => {
@@ -124,7 +126,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
 
   const handleWeeklyReport = async () => {
     const r = await window.api.report.weekly();
-    if (!r.canceled) alert(`週次レポートを ${r.path} に保存しました`);
+    if (!r.canceled) toast.success(`週次レポートを ${r.path} に保存しました`);
   };
 
   const handleAddManual = async () => {
@@ -330,6 +332,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                   <td className="px-4 py-3 text-center">
                     <span className="inline-flex items-center justify-center gap-1 text-base whitespace-nowrap">
                       {c.audio && <span title="録音あり">🎤</span>}
+                      {c.markers && c.markers.length > 0 && <span title={`マーカー ${c.markers.length} 個`}>🔖</span>}
                       {c.transcript && <span title="文字起こし済">📝</span>}
                       {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
                       {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}

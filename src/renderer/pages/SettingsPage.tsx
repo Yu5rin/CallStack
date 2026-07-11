@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
+import { RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
@@ -225,27 +225,31 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             録音を有効化する時に確認モーダルを表示する
           </label>
         </Row>
-        <Row label="音声ソース">
-          <div className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
-            <label className="inline-flex items-center gap-1">
-              <input
-                type="radio"
-                checked={draft.recording.source === 'mic'}
-                onChange={() => updateRecording({ source: 'mic' })}
-                disabled={!draft.recording.enabled}
-              />
-              マイクのみ
-            </label>
-            <label className="inline-flex items-center gap-1">
-              <input
-                type="radio"
-                checked={draft.recording.source === 'mic+system'}
-                onChange={() => updateRecording({ source: 'mic+system' })}
-                disabled={!draft.recording.enabled}
-              />
-              マイク + システム音声 (PC で流れている音も録音)
-            </label>
-          </div>
+        <SourceConfigRow
+          label="通話の録音ソース"
+          value={draft.recording.callSource}
+          disabled={!draft.recording.enabled}
+          onChange={(v) => updateRecording({ callSource: v })}
+        />
+        <SourceConfigRow
+          label="会議の録音ソース"
+          value={draft.recording.meetingSource}
+          disabled={!draft.recording.enabled}
+          onChange={(v) => updateRecording({ meetingSource: v })}
+        />
+        <Row label="開始時のソース確認">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={draft.recording.askSourceOnStart}
+              onChange={(e) => updateRecording({ askSourceOnStart: e.target.checked })}
+              disabled={!draft.recording.enabled}
+            />
+            画面のボタンから開始するとき、録音ソースの選択ダイアログを表示する
+          </label>
+          <span className="ml-2 block text-xs text-slate-500 dark:text-slate-400">
+            ショートカット・トレイから開始した場合は、上の既定ソースで即座に録音が始まります
+          </span>
         </Row>
         <Row label="マイクデバイス">
           <AudioDeviceSelect
@@ -361,7 +365,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                   checked={draft.hudSize === s}
                   onChange={() => update({ hudSize: s })}
                 />
-                {s === 'mini' ? 'ミニ (180×32)' : s === 'compact' ? 'コンパクト (260×56)' : 'フル (340×96)'}
+                {s === 'mini' ? 'ミニ (200×32)' : s === 'compact' ? 'コンパクト (330×64)' : 'フル (400×118)'}
               </label>
             ))}
           </div>
@@ -546,6 +550,68 @@ function BackupRestoreRow() {
         </div>
       )}
     </div>
+  );
+}
+
+function SourceConfigRow({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: RecordingSourceConfig;
+  disabled: boolean;
+  onChange: (v: RecordingSourceConfig) => void;
+}) {
+  return (
+    <Row label={label}>
+      <div className={`flex flex-wrap items-center gap-4 text-sm text-slate-700 dark:text-slate-300 ${disabled ? 'opacity-50' : ''}`}>
+        <label className="inline-flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={value.mic}
+            onChange={(e) => onChange({ ...value, mic: e.target.checked })}
+            disabled={disabled}
+          />
+          🎤 マイク
+        </label>
+        <label className="inline-flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={value.system}
+            onChange={(e) => onChange({ ...value, system: e.target.checked })}
+            disabled={disabled}
+          />
+          🔊 システム音声
+        </label>
+        {value.system && (
+          <span className="inline-flex items-center gap-3 rounded-md bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
+            <label className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                checked={value.systemScope === 'screen'}
+                onChange={() => onChange({ ...value, systemScope: 'screen' })}
+                disabled={disabled}
+              />
+              画面全体
+            </label>
+            <label className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                checked={value.systemScope === 'window'}
+                onChange={() => onChange({ ...value, systemScope: 'window' })}
+                disabled={disabled}
+              />
+              ウィンドウ選択（開始時に選ぶ）
+            </label>
+          </span>
+        )}
+        {!value.mic && !value.system && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">⚠️ 両方 OFF のため録音されません</span>
+        )}
+      </div>
+    </Row>
   );
 }
 

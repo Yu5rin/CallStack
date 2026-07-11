@@ -163,6 +163,24 @@ export function CallEditDialog({
     showExportResult(await window.api.transcript.saveAs(current.id, withTimestamps));
   };
 
+  const handleSaveMinutes = async () => {
+    showExportResult(await window.api.minutes.saveAs(current.id));
+  };
+
+  const updateMarkers = async (markers: NonNullable<CallRecord['markers']>) => {
+    const updated = await window.api.calls.update(current.id, { markers });
+    if (updated) setCurrent(updated);
+  };
+
+  const handleMarkerLabel = (idx: number, label: string) => {
+    const markers = (current.markers ?? []).map((m, i) => (i === idx ? { ...m, label: label || undefined } : m));
+    void updateMarkers(markers);
+  };
+
+  const handleMarkerDelete = (idx: number) => {
+    void updateMarkers((current.markers ?? []).filter((_, i) => i !== idx));
+  };
+
   const audioSrc = current.audio ? `app://recordings/${current.audio.path}` : null;
   const transcriptBusy = current.transcriptStatus === 'running' || current.transcriptStatus === 'queued';
 
@@ -318,6 +336,44 @@ export function CallEditDialog({
           </details>
         )}
 
+        {/* マーカー（録音中に打ったブックマーク） */}
+        {(current.markers?.length ?? 0) > 0 && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              🔖 マーカー ({current.markers!.length})
+            </div>
+            <ul className="space-y-1.5">
+              {current.markers!.map((m, i) => (
+                <li key={`${m.at}-${i}`} className="flex items-center gap-2">
+                  <button
+                    onClick={() => playerRef.current?.seekTo(Math.max(0, m.at - settings.transcriptSeekOffsetSec))}
+                    disabled={!audioSrc}
+                    className="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs tabular-nums text-brand-700 hover:bg-brand-50 disabled:cursor-default disabled:text-slate-400 disabled:hover:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
+                    title={audioSrc ? 'クリックで該当位置を再生' : '録音がないため再生できません'}
+                  >
+                    ▶ {formatHMS(m.at)}
+                  </button>
+                  <input
+                    defaultValue={m.label ?? ''}
+                    onBlur={(e) => {
+                      if (e.target.value !== (m.label ?? '')) handleMarkerLabel(i, e.target.value.trim());
+                    }}
+                    placeholder="ラベルを入力（例: 決定事項、宿題）"
+                    className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                  <button
+                    onClick={() => handleMarkerDelete(i)}
+                    className="shrink-0 rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                    title="このマーカーを削除"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* 録音 — 折りたたみ可（既定で展開） */}
         {audioSrc && (
           <details
@@ -398,11 +454,6 @@ export function CallEditDialog({
                     />
                   </div>
                 )}
-                {exportMessage && (
-                  <div className="mb-2 break-all rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-                    {exportMessage}
-                  </div>
-                )}
                 {current.transcriptStatus === 'error' && current.transcriptError && (
                   <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
                     {current.transcriptError}
@@ -424,14 +475,31 @@ export function CallEditDialog({
           </details>
         )}
 
+        {exportMessage && (
+          <div className="mt-3 break-all rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+            {exportMessage}
+          </div>
+        )}
+
         <div className="mt-5 flex justify-between">
-          <button
-            onClick={handleDelete}
-            disabled={saving}
-            className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
-          >
-            削除
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+            >
+              削除
+            </button>
+            {isMeeting && (
+              <button
+                onClick={handleSaveMinutes}
+                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
+                title="タイトル・参加者・メモ・マーカー・文字起こしをまとめた議事録を Markdown で保存"
+              >
+                📄 議事録 (MD) を保存…
+              </button>
+            )}
+          </div>
           <div className="flex gap-2">
             <button
               onClick={onClose}

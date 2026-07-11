@@ -1,6 +1,12 @@
 export interface StartOptions {
   callId: string;
-  source: 'mic' | 'mic+system';
+  /** マイクを録音する */
+  mic: boolean;
+  /** システム音声を録音する */
+  system: boolean;
+  /** システム音声の対象。'window' 時は systemWindowId のウィンドウを対象にする */
+  systemScope: 'screen' | 'window';
+  systemWindowId: string | null;
   micDeviceId: string | null;
   onLevel?: (rms: number) => void;
   onError?: (err: Error) => void;
@@ -19,6 +25,8 @@ export class RecordingManager {
   private callId: string | null = null;
   private chunkPromise: Promise<unknown> = Promise.resolve();
   private startedAt = 0;
+  private actualMic = false;
+  private actualSystem = false;
 
   async start(opts: StartOptions): Promise<void> {
     if (this.recorder) throw new Error('既に録音中です');
@@ -58,6 +66,13 @@ export class RecordingManager {
     return this.recorder?.state === 'paused';
   }
 
+  /** 実際に録音できたソースのラベル（システム音声の取得失敗を反映） */
+  sourceLabel(): 'mic' | 'system' | 'mic+system' {
+    if (this.actualMic && this.actualSystem) return 'mic+system';
+    if (this.actualSystem) return 'system';
+    return 'mic';
+  }
+
   /** 一時停止/再開をトグルし、トグル後の paused 状態を返す。録音していなければ null。 */
   togglePause(): boolean | null {
     const rec = this.recorder;
@@ -84,7 +99,7 @@ export class RecordingManager {
     // Wait for all queued chunk uploads
     await this.chunkPromise;
     try {
-      await window.api.recording.finalize(callId);
+      await window.api.recording.finalize(callId, this.sourceLabel());
     } finally {
       this.cleanup();
     }
@@ -118,52 +133,76 @@ export class RecordingManager {
   }
 
   private async composeStream(opts: StartOptions): Promise<MediaStream> {
-    const micConstraints: MediaStreamConstraints = {
-      audio: opts.micDeviceId
-        ? { deviceId: { exact: opts.micDeviceId }, echoCancellation: true, noiseSuppression: true }
-        : { echoCancellation: true, noiseSuppression: true },
-    };
-    const mic = await navigator.mediaDevices.getUserMedia(micConstraints);
-    if (opts.source === 'mic') {
-      this.mixStreams = [mic];
-      return mic;
+    if (!opts.mic && !opts.system) {
+      throw new Error('録音ソースが選択されていません（マイク・システム音声とも OFF）');
     }
-    // mic + system: use getDisplayMedia for system audio (Chromium / Electron supports loopback)
+
+    let mic: MediaStream | null = null;
+    if (opts.mic) {
+      const micConstraints: MediaStreamConstraints = {
+        audio: opts.micDeviceId
+          ? { deviceId: { exact: opts.micDeviceId }, echoCancellation: true, noiseSuppression: true }
+          : { echoCancellation: true, noiseSuppression: true },
+      };
+      mic = await navigator.mediaDevices.getUserMedia(micConstraints);
+    }
+
     let sys: MediaStream | null = null;
-    try {
-      sys = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-      // Drop video track – we only need audio
-      sys.getVideoTracks().forEach((t) => t.stop());
-      if (sys.getAudioTracks().length === 0) {
+    if (opts.system) {
+      try {
+        // main 側の DisplayMediaRequestHandler がこの対象を使ってソースを返す
+        await window.api.recording.setCaptureTarget(
+          opts.systemScope === 'window' && opts.systemWindowId
+            ? { type: 'window', sourceId: opts.systemWindowId }
+            : { type: 'screen' },
+        );
+        sys = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+        // Drop video track – we only need audio
+        sys.getVideoTracks().forEach((t) => t.stop());
+        if (sys.getAudioTracks().length === 0) {
+          sys.getTracks().forEach((t) => t.stop());
+          sys = null;
+          opts.onWarning?.(
+            'システム音声トラックを取得できませんでした。'
+            + (mic ? 'マイクのみで録音します。' : '録音できません。')
+            + ' Windows 以外の環境では loopback 取得が制限される場合があります。',
+          );
+        }
+      } catch (err) {
+        console.warn('[recorder] system audio capture failed:', err);
         sys = null;
         opts.onWarning?.(
-          'システム音声トラックを取得できませんでした。マイクのみで録音します。'
-          + 'Windows 以外の環境では loopback 取得が制限される場合があります。',
+          `システム音声のキャプチャに失敗しました${mic ? '（マイクのみで録音します）' : ''}: ${(err as Error).message}`,
         );
       }
-    } catch (err) {
-      console.warn('[recorder] system audio capture failed, falling back to mic only:', err);
-      opts.onWarning?.(
-        `システム音声のキャプチャに失敗しました（マイクのみで録音します）: ${(err as Error).message}`,
-      );
+    }
+
+    this.actualMic = !!mic;
+    this.actualSystem = !!sys;
+    if (!mic && !sys) {
+      throw new Error('録音ソースを取得できませんでした');
+    }
+    if (mic && !sys) {
       this.mixStreams = [mic];
       return mic;
     }
-    if (!sys) {
-      this.mixStreams = [mic];
-      return mic;
+    if (!mic && sys) {
+      this.mixStreams = [sys];
+      return new MediaStream(sys.getAudioTracks());
     }
+
+    // mic + system をミックス
     this.audioCtx = new AudioContext();
     const dest = this.audioCtx.createMediaStreamDestination();
-    const micSrc = this.audioCtx.createMediaStreamSource(mic);
-    const sysSrc = this.audioCtx.createMediaStreamSource(new MediaStream(sys.getAudioTracks()));
+    const micSrc = this.audioCtx.createMediaStreamSource(mic!);
+    const sysSrc = this.audioCtx.createMediaStreamSource(new MediaStream(sys!.getAudioTracks()));
     const micGain = this.audioCtx.createGain();
     const sysGain = this.audioCtx.createGain();
     micGain.gain.value = 1.0;
     sysGain.gain.value = 0.85;
     micSrc.connect(micGain).connect(dest);
     sysSrc.connect(sysGain).connect(dest);
-    this.mixStreams = [mic, sys];
+    this.mixStreams = [mic!, sys!];
     return dest.stream;
   }
 

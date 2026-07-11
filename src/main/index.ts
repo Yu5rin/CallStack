@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { Store } from './store';
 import {
   CallRecord, CsvExportOptions, CsvImportResult, Settings,
-  CallTranscript, WhisperModel, RecordKind,
+  CallTranscript, WhisperModel, RecordKind, AudioSourceLabel, Marker,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -43,6 +43,9 @@ const store = new Store();
 
 let tickInterval: NodeJS.Timeout | null = null;
 let longCallAlertFired = false;
+
+/** システム音声キャプチャの対象。録音開始前にレンダラから設定される */
+let captureTarget: { type: 'screen' } | { type: 'window'; sourceId: string } = { type: 'screen' };
 
 function getActive(): CallRecord | null {
   return store.getActiveCall();
@@ -250,6 +253,23 @@ function setupIpc(): void {
   ipcMain.handle('calls:endNow', () => endCall());
   ipcMain.handle('calls:toggleHold', () => toggleHold());
 
+  // 進行中の記録に現在時刻のマーカーを打つ（HUD・ヘッダーから）
+  ipcMain.handle('calls:add-marker', (_e, callId?: string, label?: string) => {
+    const rec = callId ? store.getCall(callId) : getActive();
+    if (!rec) return null;
+    const at = rec.endTime
+      ? 0
+      : Math.max(0, Math.round((Date.now() - new Date(rec.startTime).getTime()) / 1000));
+    const marker: Marker = label ? { at, label } : { at };
+    const markers = [...(rec.markers ?? []), marker].sort((a, b) => a.at - b.at);
+    const updated = store.updateCall(rec.id, { markers });
+    if (updated) {
+      broadcast('app-event', { type: 'call:updated', record: updated });
+      broadcast('app-event', { type: 'marker:added', callId: rec.id, marker, count: markers.length });
+    }
+    return updated;
+  });
+
   ipcMain.handle('calls:update', (_e, id: string, patch: Partial<CallRecord>) => {
     const updated = store.updateCall(id, patch);
     if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
@@ -407,9 +427,8 @@ function setupIpc(): void {
     return true;
   });
 
-  ipcMain.handle('recording:finalize', async (_e, callId: string) => {
+  ipcMain.handle('recording:finalize', async (_e, callId: string, sourceLabel?: AudioSourceLabel) => {
     const s = store.getSettings();
-    const source = s.recording.source;
     const r = await recording.finalize(callId, s.recording.mp3Bitrate);
     if (!r) return null;
     const updated = store.updateCall(callId, {
@@ -418,7 +437,7 @@ function setupIpc(): void {
         format: 'mp3',
         bytes: r.bytes,
         durationSec: r.durationSec,
-        source,
+        source: sourceLabel ?? 'mic',
       },
     });
     if (updated) {
@@ -446,6 +465,36 @@ function setupIpc(): void {
   ipcMain.handle('recording:toggle-pause', () => {
     togglePauseRecording();
     return true;
+  });
+
+  // メイン窓のレコーダから届く録音レベルを HUD へ中継（約5Hz に間引き済み）
+  ipcMain.handle('recording:report-level', (_e, level: number) => {
+    const hud = getHudWindow();
+    if (hud && !hud.isDestroyed()) {
+      hud.webContents.send('app-event', { type: 'recording:level', level });
+    }
+    return true;
+  });
+
+  // システム音声のキャプチャ対象（画面全体 / 特定ウィンドウ）を設定
+  ipcMain.handle('recording:set-capture-target', (_e, target: { type: 'screen' } | { type: 'window'; sourceId: string }) => {
+    captureTarget = target;
+    return true;
+  });
+
+  // キャプチャ可能なウィンドウ一覧（開始ダイアログのウィンドウ選択用）
+  ipcMain.handle('capture:list-windows', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 192, height: 120 },
+    });
+    return sources
+      .filter((s) => s.name && s.name !== 'CallStack')
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        thumbnail: s.thumbnail.isEmpty() ? null : s.thumbnail.toDataURL(),
+      }));
   });
 
   // 録音を実行しているレンダラが一時停止状態を確定させたら全ウィンドウへ通知
@@ -490,6 +539,22 @@ function setupIpc(): void {
     });
     if (result.canceled || !result.filePath) return { canceled: true };
     await fs.writeFile(result.filePath, buildTranscriptText(rec, withTimestamps), 'utf-8');
+    return { canceled: false, path: result.filePath };
+  });
+
+  // 議事録 (Markdown) を保存 — メモ・マーカー・文字起こしをまとめて出力
+  ipcMain.handle('minutes:save-as', async (_e, callId: string): Promise<
+    { canceled: true } | { canceled: false; path: string } | { canceled: false; error: string }
+  > => {
+    const rec = store.getCall(callId);
+    if (!rec) return { canceled: false, error: '記録が見つかりません。' };
+    const result = await dialog.showSaveDialog({
+      title: '議事録を保存',
+      defaultPath: `議事録-${exportBaseName(rec).replace(/^(会議|通話)-/, '')}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fs.writeFile(result.filePath, buildMinutesMd(rec), 'utf-8');
     return { canceled: false, path: result.filePath };
   });
 
@@ -652,6 +717,50 @@ function buildTranscriptText(rec: CallRecord, withTimestamps: boolean): string {
   return lines.join('\r\n');
 }
 
+function buildMinutesMd(rec: CallRecord): string {
+  const isMeeting = rec.kind === 'meeting';
+  const dt = rec.startTime.slice(0, 16).replace('T', ' ');
+  const lines: string[] = [];
+  lines.push(`# ${isMeeting ? '議事録' : '通話記録'}: ${rec.title || rec.contactName || dt}`);
+  lines.push('');
+  lines.push(`- 日時: ${dt}`);
+  if (rec.durationSec !== null) lines.push(`- 時間: ${formatHMS(rec.durationSec)}`);
+  if (isMeeting && rec.participants?.length) lines.push(`- 参加者: ${rec.participants.join('、')}`);
+  if (!isMeeting && rec.contactName) lines.push(`- 連絡先: ${rec.contactName}${rec.phoneNumber ? ` (${rec.phoneNumber})` : ''}`);
+  if (rec.tag) lines.push(`- タグ: ${rec.tag}`);
+  lines.push('');
+  if (rec.memo) {
+    lines.push('## メモ');
+    lines.push('');
+    lines.push(rec.memo);
+    lines.push('');
+  }
+  if (rec.markers?.length) {
+    lines.push('## マーカー');
+    lines.push('');
+    for (const m of rec.markers) {
+      lines.push(`- \`${formatHMS(m.at)}\` ${m.label ?? ''}`.trimEnd());
+    }
+    lines.push('');
+  }
+  if (rec.transcript) {
+    lines.push('## 文字起こし');
+    lines.push('');
+    lines.push(`（モデル: ${rec.transcript.model} / 言語: ${rec.transcript.language || '自動'}）`);
+    lines.push('');
+    const segments = rec.transcript.segments ?? [];
+    if (segments.length > 0) {
+      for (const s of segments) {
+        lines.push(`\`${formatHMS(Math.floor(s.start))}\` ${s.text}`);
+      }
+    } else {
+      lines.push(rec.transcript.text);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
 function setupTranscriptionHandlers(): void {
   setQueueHandlers({
     onStart: (callId) => {
@@ -771,6 +880,20 @@ function setupDisplayCapture(): void {
   const s = session.defaultSession as SessionWithDisplay;
   if (typeof s.setDisplayMediaRequestHandler !== 'function') return;
   s.setDisplayMediaRequestHandler((_req, callback) => {
+    const target = captureTarget;
+    if (target.type === 'window') {
+      // 指定ウィンドウを対象にする。見つからなければ画面全体へフォールバック。
+      // 注: Windows の loopback 音声はシステム全体が対象のため、環境によっては
+      // ウィンドウ選択でも全体の音声が録音される。
+      desktopCapturer.getSources({ types: ['window', 'screen'] })
+        .then((sources) => {
+          const win = sources.find((src) => src.id === target.sourceId);
+          const screenSrc = sources.find((src) => src.id.startsWith('screen:'));
+          callback({ video: win ?? screenSrc, audio: 'loopback' });
+        })
+        .catch(() => callback({}));
+      return;
+    }
     desktopCapturer.getSources({ types: ['screen'] })
       .then((sources) => {
         callback({ video: sources[0], audio: 'loopback' });
