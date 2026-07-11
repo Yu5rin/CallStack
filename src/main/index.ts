@@ -6,6 +6,7 @@ import { Store } from './store';
 import {
   CallRecord, CsvExportOptions, CsvImportResult, Settings,
   CallTranscript, WhisperModel, RecordKind, AudioSourceLabel, Marker,
+  RecordingSourceConfig,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -15,6 +16,8 @@ import {
   showMainWindowAt,
   createHudWindow,
   closeHudWindow,
+  createRecorderWindow,
+  destroyRecorderWindow,
   broadcast,
   getHudWindow,
   markForceQuit,
@@ -29,6 +32,7 @@ import { notify } from './notifications';
 import { ensureAppDirs, getDirs } from './paths';
 import { registerAppProtocol, registerAppProtocolPrivilege } from './protocol';
 import * as recording from './recording';
+import { convertWebmToMp3, probeDurationSec } from './ffmpeg';
 import {
   enqueue as enqueueTranscription, cancel as cancelTranscription,
   setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup,
@@ -36,12 +40,8 @@ import {
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
-
-// 録音（メディアキャプチャ）中に最小化→復帰すると GPU コンポジタが
-// フレーム生成を再開せず画面がフリーズする環境がある（Chromium の既知問題。
-// webContents.invalidate() では回復しない）。GPU 合成を使わないことで根本回避する。
-// この規模の UI ではソフトウェアレンダリングの性能影響は実用上ない。
-app.disableHardwareAcceleration();
+import { logInfo } from './log';
+import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
 
 registerAppProtocolPrivilege();
 
@@ -52,6 +52,16 @@ let longCallAlertFired = false;
 
 /** システム音声キャプチャの対象。録音開始前にレンダラから設定される */
 let captureTarget: { type: 'screen' } | { type: 'window'; sourceId: string } = { type: 'screen' };
+
+/** 開始ダイアログで選択された、次の録音1回分のソース上書き */
+let pendingSourceOverride: {
+  config: RecordingSourceConfig;
+  windowId: string | null;
+  micDeviceId: string | null;
+} | null = null;
+
+/** 録音サービスウィンドウが報告する現在の録音状態（HUD 等の初期表示用） */
+let lastRecordingState = { recording: false, paused: false };
 
 function getActive(): CallRecord | null {
   return store.getActiveCall();
@@ -120,6 +130,7 @@ function startCall(kind: RecordKind = 'call'): CallRecord | null {
   };
   store.addCall(rec);
   longCallAlertFired = false;
+  logInfo('call', `started ${kind} ${rec.id}`);
   const settings = store.getSettings();
   createHudWindow(settings.hudPosition, settings.hudSize);
   updateTray({ active: true, elapsedSec: 0, today: todayStats() }, trayHandlers);
@@ -147,6 +158,7 @@ async function endCall(): Promise<CallRecord | null> {
   stopTickLoop();
   closeHudWindow();
   updateTray({ active: false, today: todayStats() }, trayHandlers);
+  logInfo('call', `ended ${active.id} (${durationSec}s)`);
   if (updated) {
     broadcast('app-event', { type: 'call:ended', record: updated });
     const label = updated.kind === 'meeting' ? '会議を記録しました' : '通話を記録しました';
@@ -402,6 +414,11 @@ function setupIpc(): void {
 
   ipcMain.handle('hud:end', () => endCall());
   ipcMain.handle('hud:open-main', () => showMainWindow());
+  // HUD の編集ボタン: メイン窓を前面に出して該当記録の編集ダイアログを開く
+  ipcMain.handle('hud:open-edit', (_e, callId: string) => {
+    showMainWindow();
+    broadcast('app-event', { type: 'edit:record', callId });
+  });
   ipcMain.handle('hud:save-position', (_e, pos: { x: number; y: number }) => {
     const s = store.getSettings();
     store.setSettings({ ...s, hudPosition: pos });
@@ -435,7 +452,9 @@ function setupIpc(): void {
 
   ipcMain.handle('recording:finalize', async (_e, callId: string, sourceLabel?: AudioSourceLabel) => {
     const s = store.getSettings();
+    logInfo('recorder', `finalize start ${callId}`);
     const r = await recording.finalize(callId, s.recording.mp3Bitrate);
+    logInfo('recorder', `finalize done ${callId} (${r ? `${r.bytes}B ${r.durationSec}s` : 'no data'})`);
     if (!r) return null;
     const updated = store.updateCall(callId, {
       audio: {
@@ -473,12 +492,9 @@ function setupIpc(): void {
     return true;
   });
 
-  // メイン窓のレコーダから届く録音レベルを HUD へ中継（約5Hz に間引き済み）
+  // 録音サービスウィンドウから届く録音レベルを各ウィンドウへ中継（約5Hz に間引き済み）
   ipcMain.handle('recording:report-level', (_e, level: number) => {
-    const hud = getHudWindow();
-    if (hud && !hud.isDestroyed()) {
-      hud.webContents.send('app-event', { type: 'recording:level', level });
-    }
+    broadcast('app-event', { type: 'recording:level', level });
     return true;
   });
 
@@ -503,10 +519,48 @@ function setupIpc(): void {
       }));
   });
 
-  // 録音を実行しているレンダラが一時停止状態を確定させたら全ウィンドウへ通知
-  ipcMain.handle('recording:set-paused', (_e, callId: string, paused: boolean) => {
-    broadcast('app-event', { type: 'recording:paused', callId, paused });
+  // 録音サービスウィンドウが録音状態（録音中/一時停止）を報告 → 全ウィンドウへ配信
+  ipcMain.handle('recording:report-state', (_e, recording: boolean, paused: boolean) => {
+    lastRecordingState = { recording, paused };
+    broadcast('app-event', { type: 'recording:state', recording, paused });
     return true;
+  });
+
+  // HUD 等が起動直後に現在の録音状態を取得する
+  ipcMain.handle('recording:get-state', () => lastRecordingState);
+
+  // 録音サービスウィンドウからのエラー報告 → メイン窓の表示用に配信
+  ipcMain.handle('recording:report-error', (_e, message: string) => {
+    logInfo('recorder', `error: ${message}`);
+    broadcast('app-event', { type: 'recording:error', message });
+    return true;
+  });
+
+  // 開始ダイアログで選んだソースを「次の録音1回分」として登録
+  ipcMain.handle('recording:set-next-source', (_e, payload: {
+    config: RecordingSourceConfig;
+    windowId: string | null;
+    micDeviceId: string | null;
+  } | null) => {
+    pendingSourceOverride = payload;
+    return true;
+  });
+
+  // 録音サービスウィンドウが録音開始時に使う構成を解決する
+  // （ダイアログの上書きがあれば消費し、なければ種別ごとの既定値）
+  ipcMain.handle('recording:get-start-config', (_e, kind: RecordKind) => {
+    const s = store.getSettings();
+    const override = pendingSourceOverride;
+    pendingSourceOverride = null;
+    const config = override?.config
+      ?? (kind === 'meeting' ? s.recording.meetingSource : s.recording.callSource);
+    return {
+      enabled: s.recording.enabled,
+      config,
+      windowId: override?.windowId ?? null,
+      micDeviceId: override?.micDeviceId ?? s.recording.micDeviceId,
+      soundFeedback: s.soundFeedback,
+    };
   });
 
   // 録音ファイル (MP3) を名前を付けて保存
@@ -623,6 +677,111 @@ function setupIpc(): void {
 
   ipcMain.handle('transcription:model-status', async (_e, model: WhisperModel) => {
     return { downloaded: await isModelDownloaded(model), path: getModelPath(model) };
+  });
+
+  // ============ 音声ファイルの取り込み ============
+  // 音声ファイルを選択（開始ダイアログの「参照」用）
+  ipcMain.handle('audio:pick', async (): Promise<
+    { canceled: true } | { canceled: false; path: string; name: string; sizeBytes: number; mtime: string }
+  > => {
+    const dlg = await dialog.showOpenDialog({
+      title: '取り込む音声ファイルを選択',
+      filters: [
+        { name: '音声ファイル', extensions: ['mp3', 'wav', 'm4a', 'webm', 'ogg', 'aac', 'flac'] },
+        { name: 'すべてのファイル', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    });
+    if (dlg.canceled || dlg.filePaths.length === 0) return { canceled: true };
+    const p = dlg.filePaths[0];
+    const stat = await fs.stat(p);
+    return { canceled: false, path: p, name: path.basename(p), sizeBytes: stat.size, mtime: stat.mtime.toISOString() };
+  });
+
+  // 音声ファイルを通話/会議の記録として取り込む（MP3 へ変換して保存し、必要なら文字起こし）
+  ipcMain.handle('audio:import', async (_e, opts: {
+    filePath: string;
+    kind: RecordKind;
+    title?: string;
+    contactName?: string;
+    startTime?: string;      // ISO。省略時はファイルの更新日時
+    autoTranscribe: boolean;
+  }): Promise<{ ok: true; record: CallRecord } | { ok: false; error: string }> => {
+    try {
+      const stat = await fs.stat(opts.filePath);
+      const s = store.getSettings();
+      const id = nanoid();
+      const { recordings } = getDirs();
+      const rel = `${id}.mp3`;
+      const abs = path.join(recordings, rel);
+
+      let durationSec: number;
+      if (/\.mp3$/i.test(opts.filePath)) {
+        // MP3 はそのままコピーして長さだけ取得（再エンコードによる劣化を避ける）
+        durationSec = Math.round(await probeDurationSec(opts.filePath));
+        await fs.copyFile(opts.filePath, abs);
+      } else {
+        const r = await convertWebmToMp3(opts.filePath, abs, s.recording.mp3Bitrate);
+        durationSec = Math.round(r.durationSec);
+      }
+      const outStat = await fs.stat(abs);
+
+      const startTime = opts.startTime ?? stat.mtime.toISOString();
+      const endTime = new Date(new Date(startTime).getTime() + durationSec * 1000).toISOString();
+      const rec: CallRecord = {
+        id,
+        kind: opts.kind,
+        startTime,
+        endTime,
+        durationSec,
+        tag: null,
+        memo: `（音声ファイル取り込み: ${path.basename(opts.filePath)}）`,
+        title: opts.kind === 'meeting' ? (opts.title || path.basename(opts.filePath).replace(/\.[^.]+$/, '')) : undefined,
+        contactName: opts.kind === 'call' ? (opts.contactName || undefined) : undefined,
+        holds: [],
+        holdSec: 0,
+        audio: { path: rel, format: 'mp3', bytes: outStat.size, durationSec, source: 'mic+system' },
+      };
+      store.addCall(rec);
+      broadcast('app-event', { type: 'call:updated', record: rec });
+      logInfo('import', `audio imported ${opts.filePath} -> ${rel} (${durationSec}s)`);
+      if (opts.autoTranscribe) {
+        const setup = await checkTranscriptionSetup(s.transcription.model);
+        if (setup.ok) queueTranscription(id);
+        else broadcast('app-event', { type: 'recording:error', message: `文字起こしを開始できません: ${setup.error}` });
+      }
+      return { ok: true, record: rec };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  // ============ whisper.cpp 実行ファイルのダウンロード ============
+  ipcMain.handle('whisper:binary-status', async () => {
+    return { installed: await isBinaryInstalled() };
+  });
+
+  ipcMain.handle('whisper:download-binary', async () => {
+    try {
+      await downloadWhisperBinary((p) => {
+        broadcast('app-event', {
+          type: 'whisperbin:download',
+          step: p.step,
+          receivedBytes: p.receivedBytes,
+          totalBytes: p.totalBytes,
+        });
+      });
+      broadcast('app-event', {
+        type: 'whisperbin:download', step: 'done', receivedBytes: 0, totalBytes: null,
+      });
+      return { ok: true };
+    } catch (err) {
+      const message = (err as Error).message;
+      broadcast('app-event', {
+        type: 'whisperbin:download', step: 'error', receivedBytes: 0, totalBytes: null, error: message,
+      });
+      return { ok: false, error: message };
+    }
   });
 
   // ============ Devices ============
@@ -941,6 +1100,8 @@ async function main() {
   reRegisterShortcuts();
   setMinimizeToTray(store.getSettings().minimizeToTray);
   createMainWindow();
+  createRecorderWindow();
+  logInfo('app', `started v${app.getVersion()}`);
   scheduleDailyCleanup(store, broadcast);
 
   app.on('activate', () => {
@@ -970,6 +1131,7 @@ app.on('will-quit', () => {
   stopTickLoop();
   stopDailyCleanup();
   destroyTray();
+  destroyRecorderWindow();
 });
 
 app.on('before-quit', async () => {

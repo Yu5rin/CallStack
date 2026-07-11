@@ -7,9 +7,7 @@ import { CallListPage } from './pages/CallListPage';
 import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { formatHMS } from './utils/format';
-import { beep } from './utils/beep';
 import { AppEvent, RecordKind, RecordingSourceConfig } from '../shared/types';
-import { useRecorder, SourceOverride } from './recorder/useRecorder';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
 import { ToastProvider, useToast } from './components/Toast';
@@ -28,14 +26,19 @@ export function App() {
 function AppContent() {
   const [page, setPage] = useState<Page>('list');
   const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
+  const [initialEditId, setInitialEditId] = useState<string | null>(null);
   const [startDialogKind, setStartDialogKind] = useState<RecordKind | null>(null);
   const { calls, loading } = useCalls();
   const { settings, save } = useSettings();
   const { active, elapsedSec } = useActiveCall();
-  const sourceOverrideRef = useRef<SourceOverride | null>(null);
-  const recorder = useRecorder(active, settings, sourceOverrideRef);
   const toast = useToast();
   useTheme(settings?.theme);
+
+  // 録音は専用の不可視ウィンドウで実行される。ここでは状態表示のみを行う。
+  const [recState, setRecState] = useState({ recording: false, paused: false });
+  const [recLevel, setRecLevel] = useState(0);
+  const [recError, setRecError] = useState<string | null>(null);
+  const recErrorTimer = useRef<number | null>(null);
 
   // 統計・フッターは通話のみを対象にする（会議が混ざると平均・件数が意味を失うため）
   const callsOnly = useMemo(() => calls.filter((c) => c.kind !== 'meeting'), [calls]);
@@ -46,21 +49,37 @@ function AppContent() {
     setPage('list');
   };
 
-  const soundOn = useRef(true);
-  soundOn.current = settings?.soundFeedback ?? true;
   useEffect(() => {
+    window.api.recording.getState().then(setRecState).catch(() => {});
     const off = window.api.onEvent((e: AppEvent) => {
       if (e.type === 'navigate') {
         setPage(e.page);
+        return;
+      }
+      if (e.type === 'edit:record') {
+        setPage('list');
+        setInitialEditId(e.callId);
         return;
       }
       if (e.type === 'marker:added') {
         toast.info(`🔖 マーカーを追加しました（${e.count} 個目 / ${formatHMS(e.marker.at)}）`);
         return;
       }
-      if (!soundOn.current) return;
-      if (e.type === 'call:started') beep('start');
-      if (e.type === 'call:ended') beep('end');
+      if (e.type === 'recording:state') {
+        setRecState({ recording: e.recording, paused: e.paused });
+        if (!e.recording) setRecLevel(0);
+        return;
+      }
+      if (e.type === 'recording:level') {
+        setRecLevel(e.level);
+        return;
+      }
+      if (e.type === 'recording:error') {
+        setRecError(e.message);
+        if (recErrorTimer.current !== null) window.clearTimeout(recErrorTimer.current);
+        recErrorTimer.current = window.setTimeout(() => setRecError(null), 10000);
+        return;
+      }
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,6 +96,7 @@ function AppContent() {
   const handleDialogStart = async (
     config: RecordingSourceConfig | null,
     windowId: string | null,
+    micDeviceId: string | null,
     saveAsDefault: boolean,
   ) => {
     const kind = startDialogKind!;
@@ -86,14 +106,17 @@ function AppContent() {
         ...settings,
         recording: {
           ...settings.recording,
+          micDeviceId,
           ...(kind === 'meeting' ? { meetingSource: config } : { callSource: config }),
         },
       };
       await save(next);
     }
-    sourceOverrideRef.current = config
-      ? { config, windowId }
-      : { config: { mic: false, system: false, systemScope: 'screen' }, windowId: null };
+    await window.api.recording.setNextSource(
+      config
+        ? { config, windowId, micDeviceId }
+        : { config: { mic: false, system: false, systemScope: 'screen' }, windowId: null, micDeviceId: null },
+    );
     await window.api.calls.startNow(kind);
   };
 
@@ -135,31 +158,31 @@ function AppContent() {
               待機中
             </span>
           )}
-          {recorder.recording && (
+          {recState.recording && (
             <span className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
-              recorder.paused
+              recState.paused
                 ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900'
                 : 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-900'
             }`}>
-              <span className={`inline-block h-2 w-2 rounded-full ${recorder.paused ? 'bg-amber-500' : 'animate-pulse bg-red-500'}`} />
-              {recorder.paused ? '一時停止中' : 'REC'}
-              {!recorder.paused && <LevelMeter level={recorder.level} />}
+              <span className={`inline-block h-2 w-2 rounded-full ${recState.paused ? 'bg-amber-500' : 'animate-pulse bg-red-500'}`} />
+              {recState.paused ? '一時停止中' : 'REC'}
+              {!recState.paused && <LevelMeter level={recLevel} />}
               <button
                 onClick={() => window.api.recording.togglePause()}
                 className="rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
-                title={recorder.paused ? `録音を再開 (${settings.shortcuts.togglePauseRecording})` : `録音を一時停止 (${settings.shortcuts.togglePauseRecording})`}
+                title={recState.paused ? `録音を再開 (${settings.shortcuts.togglePauseRecording})` : `録音を一時停止 (${settings.shortcuts.togglePauseRecording})`}
               >
-                {recorder.paused ? '▶' : '⏸'}
+                {recState.paused ? '▶' : '⏸'}
               </button>
             </span>
           )}
-          {recorder.error && (
+          {recError && (
             <button
-              onClick={recorder.clearError}
+              onClick={() => setRecError(null)}
               className="max-w-[14rem] truncate rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900 dark:hover:bg-amber-900"
-              title={`${recorder.error}\n(クリックで閉じる)`}
+              title={`${recError}\n(クリックで閉じる)`}
             >
-              録音エラー: {recorder.error} ✕
+              録音エラー: {recError} ✕
             </button>
           )}
           {active ? (
@@ -206,6 +229,8 @@ function AppContent() {
             settings={settings}
             initialContactFilter={initialContactFilter}
             onConsumeInitialFilter={() => setInitialContactFilter(null)}
+            initialEditId={initialEditId}
+            onConsumeInitialEditId={() => setInitialEditId(null)}
           />
         )}
         {page === 'stats' && (
@@ -220,7 +245,8 @@ function AppContent() {
           kind={startDialogKind}
           settings={settings}
           onCancel={() => setStartDialogKind(null)}
-          onStart={(config, windowId, saveAsDefault) => void handleDialogStart(config, windowId, saveAsDefault)}
+          onStart={(config, windowId, micDeviceId, saveAsDefault) =>
+            void handleDialogStart(config, windowId, micDeviceId, saveAsDefault)}
         />
       )}
     </div>

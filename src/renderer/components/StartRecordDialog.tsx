@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { RecordKind, RecordingSourceConfig, Settings } from '../../shared/types';
+import { AudioDeviceSelect } from './AudioDeviceSelect';
 
 interface CaptureWindow {
   id: string;
@@ -12,13 +13,19 @@ interface Props {
   settings: Settings;
   onCancel: () => void;
   /** 録音構成を確定して開始。config が null のときは録音なしで開始 */
-  onStart: (config: RecordingSourceConfig | null, windowId: string | null, saveAsDefault: boolean) => void;
+  onStart: (
+    config: RecordingSourceConfig | null,
+    windowId: string | null,
+    micDeviceId: string | null,
+    saveAsDefault: boolean,
+  ) => void;
 }
 
 export function StartRecordDialog({ kind, settings, onCancel, onStart }: Props) {
   const defaults = kind === 'meeting' ? settings.recording.meetingSource : settings.recording.callSource;
   const [mic, setMic] = useState(defaults.mic);
   const [system, setSystem] = useState(defaults.system);
+  const [micDeviceId, setMicDeviceId] = useState<string | null>(settings.recording.micDeviceId);
   const [scope, setScope] = useState<'screen' | 'window'>(defaults.systemScope);
   const [windows, setWindows] = useState<CaptureWindow[] | null>(null);
   const [windowId, setWindowId] = useState<string | null>(null);
@@ -56,10 +63,10 @@ export function StartRecordDialog({ kind, settings, onCancel, onStart }: Props) 
 
   const handleStart = () => {
     if (nothingSelected) {
-      onStart(null, null, saveAsDefault);
+      onStart(null, null, null, saveAsDefault);
       return;
     }
-    onStart({ mic, system, systemScope: scope }, needsWindow ? windowId : null, saveAsDefault);
+    onStart({ mic, system, systemScope: scope }, needsWindow ? windowId : null, micDeviceId, saveAsDefault);
   };
 
   const checkboxCard = (
@@ -97,7 +104,7 @@ export function StartRecordDialog({ kind, settings, onCancel, onStart }: Props) 
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        className="w-[min(94vw,40rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-1 text-lg font-bold text-slate-900 dark:text-slate-100">
@@ -109,6 +116,12 @@ export function StartRecordDialog({ kind, settings, onCancel, onStart }: Props) 
 
         <div className="space-y-2">
           {checkboxCard(mic, setMic, '🎤', 'マイク', '自分の声を録音します')}
+          {mic && (
+            <div className="ml-7 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800">
+              <div className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">使用するマイク</div>
+              <AudioDeviceSelect value={micDeviceId} onChange={setMicDeviceId} />
+            </div>
+          )}
           {checkboxCard(
             system,
             setSystem,
@@ -192,7 +205,7 @@ export function StartRecordDialog({ kind, settings, onCancel, onStart }: Props) 
             checked={saveAsDefault}
             onChange={(e) => setSaveAsDefault(e.target.checked)}
           />
-          この選択を{isMeeting ? '会議' : '通話'}の既定として保存する
+          この選択（ソース・マイク）を{isMeeting ? '会議' : '通話'}の既定として保存する
         </label>
 
         <div className="mt-5 flex justify-end gap-2">

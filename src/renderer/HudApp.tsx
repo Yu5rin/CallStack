@@ -27,17 +27,19 @@ export function HudApp() {
   const { active, elapsedSec, holding, holdSec } = useActiveCall();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activeRecord, setActiveRecord] = useState<CallRecord | null>(null);
-  const [paused, setPaused] = useState(false);
+  const [recState, setRecState] = useState({ recording: false, paused: false });
   const [level, setLevel] = useState(0);
   const [markerCount, setMarkerCount] = useState(0);
   const [markerFlash, setMarkerFlash] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState('');
+  const [hovered, setHovered] = useState(false);
   const memoTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
   useEffect(() => {
     window.api.settings.get().then(setSettings);
+    window.api.recording.getState().then(setRecState).catch(() => {});
     window.api.calls.getActive().then((r) => {
       setActiveRecord(r);
       setMemoDraft(r?.memo ?? '');
@@ -45,7 +47,10 @@ export function HudApp() {
     });
     const off = window.api.onEvent((e: AppEvent) => {
       if (e.type === 'settings:updated') setSettings(e.settings);
-      if (e.type === 'recording:paused') setPaused(e.paused);
+      if (e.type === 'recording:state') {
+        setRecState({ recording: e.recording, paused: e.paused });
+        if (!e.recording) setLevel(0);
+      }
       if (e.type === 'recording:level') setLevel(e.level);
       if (e.type === 'marker:added') {
         setMarkerCount(e.count);
@@ -54,7 +59,6 @@ export function HudApp() {
         flashTimer.current = window.setTimeout(() => setMarkerFlash(false), 1200);
       }
       if (e.type === 'call:started') {
-        setPaused(false);
         setLevel(0);
         setMarkerCount(e.record.markers?.length ?? 0);
       }
@@ -86,15 +90,20 @@ export function HudApp() {
     void window.api.hud.setExtraHeight(memoOpen ? 92 : 0);
   }, [memoOpen]);
 
-  const recording = !!(active && settings?.recording.enabled);
+  const recording = recState.recording;
+  const paused = recState.paused;
   const isMeeting = activeRecord?.kind === 'meeting';
   const size = settings?.hudSize ?? 'compact';
-  const opacity = settings?.hudOpacity ?? 1.0;
+  // カーソルを乗せている間は透明度を解除して操作しやすくする
+  const opacity = hovered ? 1.0 : Math.min(1, Math.max(0.3, settings?.hudOpacity ?? 1.0));
 
   const containerStyle = useMemo(() => {
     const isBlack = settings?.theme === 'black';
     const bgRgb = isBlack ? '0, 0, 0' : '15, 23, 42';
-    return { background: `rgba(${bgRgb}, ${opacity * 0.95})` };
+    return {
+      background: `rgba(${bgRgb}, ${opacity * 0.95})`,
+      transition: 'background 0.15s ease',
+    };
   }, [settings?.theme, opacity]);
 
   /** 表示名: 会議はタイトル、通話は連絡先（未設定なら空） */
@@ -110,9 +119,8 @@ export function HudApp() {
     if (activeRecord) void window.api.calls.addMarker(activeRecord.id);
   };
   const handleCycleSize = () => { void window.api.hud.cycleSize(); };
-  const handleAssignTag = (tag: string) => {
-    const currentTag = activeRecord?.tag;
-    void window.api.hud.assignTag(currentTag === tag ? null : tag);
+  const handleOpenEdit = () => {
+    if (activeRecord) void window.api.hud.openEdit(activeRecord.id);
   };
   const handleOpenMemo = () => setMemoOpen((v) => !v);
   const handleMemoChange = (text: string) => {
@@ -133,6 +141,11 @@ export function HudApp() {
     }
   };
 
+  const hoverProps = {
+    onMouseEnter: () => setHovered(true),
+    onMouseLeave: () => setHovered(false),
+  };
+
   const memoBox = memoOpen ? (
     <div className="hud-no-drag mt-1 flex-1 min-h-0 rounded-lg bg-slate-900/95 p-2 shadow-2xl ring-1 ring-white/15">
       <textarea
@@ -149,6 +162,7 @@ export function HudApp() {
   if (!active) {
     return (
       <div
+        {...hoverProps}
         className="hud-drag h-full w-full rounded-2xl px-4 py-3 text-slate-100 shadow-2xl ring-1 ring-white/10"
         style={containerStyle}
       >
@@ -234,26 +248,20 @@ export function HudApp() {
     </button>
   );
 
-  const tagDots = (count: number) => (
-    <>
-      {settings?.tags.slice(0, count).map((t) => (
-        <button
-          key={t.name}
-          onClick={() => handleAssignTag(t.name)}
-          className={`hud-no-drag h-[18px] w-[18px] rounded-full ring-1 transition ${
-            activeRecord?.tag === t.name ? 'scale-110 ring-2 ring-white' : 'ring-white/30 hover:ring-white/70'
-          }`}
-          style={{ backgroundColor: t.color }}
-          title={`タグ: ${t.name}${activeRecord?.tag === t.name ? '（クリックで解除）' : ''}`}
-        />
-      ))}
-    </>
+  const editButton = (
+    <button
+      onClick={handleOpenEdit}
+      className={btnGhost}
+      title={`${isMeeting ? '会議' : '通話'}記録の編集を開く（メイン窓が前面に出ます）`}
+    >
+      ✏️ 編集
+    </button>
   );
 
   // ============ mini (200×32) ============
   if (size === 'mini') {
     return (
-      <div className="flex h-full w-full flex-col">
+      <div {...hoverProps} className="flex h-full w-full flex-col">
         <div
           className="hud-drag flex h-8 w-full flex-none select-none items-center gap-1.5 rounded-xl px-2 text-slate-100 shadow-2xl ring-1 ring-white/10"
           style={containerStyle}
@@ -294,7 +302,7 @@ export function HudApp() {
   // ============ compact (330×64) ============
   if (size === 'compact') {
     return (
-      <div className="flex h-full w-full flex-col">
+      <div {...hoverProps} className="flex h-full w-full flex-col">
         <div
           className="hud-drag h-16 w-full flex-none select-none rounded-xl px-3 py-1.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
           style={containerStyle}
@@ -311,10 +319,10 @@ export function HudApp() {
           <div className="mt-0.5 flex items-center gap-1.5">
             <div className="font-mono text-lg font-bold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
             <div className="hud-no-drag ml-auto flex items-center gap-1">
-              {tagDots(3)}
               {markerButton(true)}
               {pauseButton}
               {holdButton}
+              {editButton}
               {memoButton}
               {endButton}
             </div>
@@ -327,7 +335,7 @@ export function HudApp() {
 
   // ============ full (400×118) ============
   return (
-    <div className="flex h-full w-full flex-col">
+    <div {...hoverProps} className="flex h-full w-full flex-col">
       <div
         className="hud-drag w-full flex-none select-none rounded-2xl px-4 py-2.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
         style={{ ...containerStyle, height: 118 }}
@@ -346,12 +354,12 @@ export function HudApp() {
           {holding && (
             <span className="text-[10px] text-amber-400">保留 {formatHMS(holdSec)}</span>
           )}
-          <div className="hud-no-drag ml-auto flex items-center gap-1.5">{tagDots(4)}</div>
         </div>
         <div className="hud-no-drag mt-1.5 flex items-center gap-1.5">
           {markerButton()}
           {pauseButton}
           {holdButton}
+          {editButton}
           {memoButton}
           <div className="flex-1" />
           {endButton}

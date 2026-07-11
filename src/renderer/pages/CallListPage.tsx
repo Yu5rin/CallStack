@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../shared/types';
+import { AppEvent, CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../shared/types';
 import { CallEditDialog } from '../components/CallEditDialog';
+import { AudioImportDialog, ImportFile } from '../components/AudioImportDialog';
 import { deleteCallWithConfirm } from '../hooks/useCalls';
 import { formatDateTime, formatHMS } from '../utils/format';
 import { highlight } from '../utils/highlight';
@@ -11,9 +12,56 @@ interface Props {
   settings: Settings;
   initialContactFilter?: string | null;
   onConsumeInitialFilter?: () => void;
+  initialEditId?: string | null;
+  onConsumeInitialEditId?: () => void;
 }
 
-export function CallListPage({ calls, settings, initialContactFilter, onConsumeInitialFilter }: Props) {
+// ============ 列定義（並び替え・表示/非表示・ソートの単位） ============
+
+type ColKey = 'start' | 'end' | 'duration' | 'hold' | 'talk' | 'tag' | 'name' | 'media' | 'memo';
+
+const DEFAULT_ORDER: ColKey[] = ['start', 'end', 'duration', 'hold', 'talk', 'tag', 'name', 'media', 'memo'];
+
+const COL_LABELS: Record<ColKey, string> = {
+  start: '開始',
+  end: '終了',
+  duration: '時間',
+  hold: '保留',
+  talk: '純通話',
+  tag: 'タグ',
+  name: '連絡先 / 会議名',
+  media: '録音 / 文字起こし',
+  memo: 'メモ',
+};
+
+const ORDER_KEY = 'callstack.columns.order';
+const HIDDEN_KEY = 'callstack.columns.hidden';
+
+function loadOrder(): ColKey[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]') as ColKey[];
+    const valid = raw.filter((k) => DEFAULT_ORDER.includes(k));
+    const missing = DEFAULT_ORDER.filter((k) => !valid.includes(k));
+    return [...valid, ...missing];
+  } catch {
+    return DEFAULT_ORDER;
+  }
+}
+
+function loadHidden(): ColKey[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as ColKey[];
+    return raw.filter((k) => DEFAULT_ORDER.includes(k));
+  } catch {
+    return [];
+  }
+}
+
+const AUDIO_EXT = /\.(mp3|wav|m4a|webm|ogg|aac|flac)$/i;
+
+export function CallListPage({
+  calls, settings, initialContactFilter, onConsumeInitialFilter, initialEditId, onConsumeInitialEditId,
+}: Props) {
   const toast = useToast();
   const [editing, setEditing] = useState<CallRecord | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,11 +76,65 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
   const [dropError, setDropError] = useState<string | null>(null);
   const [dragDepth, setDragDepth] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; call: CallRecord } | null>(null);
+  const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
+  const [audioImport, setAudioImport] = useState<{ open: boolean; file: ImportFile | null }>({ open: false, file: null });
 
-  // 右クリックメニューは外側クリック・Esc・スクロールで閉じる
+  // 列の並び・表示状態（この端末に保存）
+  const [colOrder, setColOrder] = useState<ColKey[]>(loadOrder);
+  const [hiddenCols, setHiddenCols] = useState<ColKey[]>(loadHidden);
+  const [dragCol, setDragCol] = useState<ColKey | null>(null);
+  const [dropTarget, setDropTarget] = useState<ColKey | null>(null);
+  // ソート状態（左クリックで昇順⇄降順）
+  const [sort, setSort] = useState<{ key: ColKey; dir: 'asc' | 'desc' }>({ key: 'start', dir: 'desc' });
+
+  // 文字起こしの進捗 (callId -> %)
+  const [progress, setProgress] = useState<Record<string, number>>({});
+
   useEffect(() => {
-    if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
+    localStorage.setItem(ORDER_KEY, JSON.stringify(colOrder));
+  }, [colOrder]);
+  useEffect(() => {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(hiddenCols));
+  }, [hiddenCols]);
+
+  useEffect(() => {
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type === 'transcription:progress') {
+        setProgress((prev) => ({ ...prev, [e.callId]: e.percent }));
+      } else if (e.type === 'transcription:status' && e.status !== 'running') {
+        setProgress((prev) => {
+          if (!(e.callId in prev)) return prev;
+          const next = { ...prev };
+          delete next[e.callId];
+          return next;
+        });
+      }
+    });
+    return () => off();
+  }, []);
+
+  // Receive cross-page contact filter
+  useEffect(() => {
+    if (initialContactFilter) {
+      setFilterContact(initialContactFilter);
+      onConsumeInitialFilter?.();
+    }
+  }, [initialContactFilter, onConsumeInitialFilter]);
+
+  // HUD の編集ボタンなどから指定された記録の編集を開く
+  useEffect(() => {
+    if (!initialEditId) return;
+    const target = calls.find((c) => c.id === initialEditId);
+    if (target) {
+      setEditing(target);
+      onConsumeInitialEditId?.();
+    }
+  }, [initialEditId, calls, onConsumeInitialEditId]);
+
+  // メニューは外側クリック・Esc・スクロールで閉じる
+  useEffect(() => {
+    if (!ctxMenu && !colMenu) return;
+    const close = () => { setCtxMenu(null); setColMenu(null); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('mousedown', close);
     window.addEventListener('keydown', onKey);
@@ -44,15 +146,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
     };
-  }, [ctxMenu]);
-
-  // Receive cross-page contact filter
-  useEffect(() => {
-    if (initialContactFilter) {
-      setFilterContact(initialContactFilter);
-      onConsumeInitialFilter?.();
-    }
-  }, [initialContactFilter, onConsumeInitialFilter]);
+  }, [ctxMenu, colMenu]);
 
   const tagColor = useMemo(() => {
     const m: Record<string, string> = {};
@@ -66,36 +160,58 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
     return [...set].sort();
   }, [calls]);
 
+  // ============ ソート ============
+
+  const sortValue = (c: CallRecord, key: ColKey): string | number => {
+    switch (key) {
+      case 'start': return c.startTime;
+      case 'end': return c.endTime ?? '￿';           // 進行中は最後へ
+      case 'duration': return c.durationSec ?? -1;
+      case 'hold': return c.holdSec ?? 0;
+      case 'talk': return c.durationSec === null ? -1 : Math.max(0, c.durationSec - (c.holdSec ?? 0));
+      case 'tag': return c.tag ?? '';
+      case 'name': return (c.kind === 'meeting' ? c.title : c.contactName) ?? '';
+      case 'media': return (c.audio ? 2 : 0) + (c.transcript ? 1 : 0);
+      case 'memo': return c.memo || c.transcript?.text || '';
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return calls
-      .slice()
-      .sort((a, b) => b.startTime.localeCompare(a.startTime))
-      .filter((c) => {
-        const kind = c.kind ?? 'call';
-        if (filterKind && kind !== filterKind) return false;
-        if (showUntagged && c.tag) return false;
-        if (filterTag && c.tag !== filterTag) return false;
-        if (filterContact && c.contactName !== filterContact) return false;
-        if (!q) return true;
-        const hay = [
-          c.memo,
-          c.contactName ?? '',
-          c.phoneNumber ?? '',
-          c.title ?? '',
-          c.participants?.join(' ') ?? '',
-          c.tag ?? '',
-          c.transcript?.text ?? '',
-        ].join(' ').toLowerCase();
-        return hay.includes(q);
-      });
-  }, [calls, query, filterKind, filterTag, filterContact, showUntagged]);
+    const base = calls.filter((c) => {
+      const kind = c.kind ?? 'call';
+      if (filterKind && kind !== filterKind) return false;
+      if (showUntagged && c.tag) return false;
+      if (filterTag && c.tag !== filterTag) return false;
+      if (filterContact && c.contactName !== filterContact) return false;
+      if (!q) return true;
+      const hay = [
+        c.memo,
+        c.contactName ?? '',
+        c.phoneNumber ?? '',
+        c.title ?? '',
+        c.participants?.join(' ') ?? '',
+        c.tag ?? '',
+        c.transcript?.text ?? '',
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return base.sort((a, b) => {
+      const av = sortValue(a, sort.key);
+      const bv = sortValue(b, sort.key);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      // 第2キーは開始日時の新しい順で安定させる
+      return b.startTime.localeCompare(a.startTime);
+    });
+  }, [calls, query, filterKind, filterTag, filterContact, showUntagged, sort]);
 
   // Delete-key handler with focus / dialog awareness.
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
       if (e.key !== 'Delete') return;
-      if (editing || importResult) return;
+      if (editing || importResult || audioImport.open) return;
       const t = document.activeElement as HTMLElement | null;
       const tag = t?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
@@ -108,7 +224,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedId, calls, editing, importResult, settings.confirmCallDelete]);
+  }, [selectedId, calls, editing, importResult, audioImport.open, settings.confirmCallDelete]);
 
   const handleExport = async () => {
     const r = await window.api.csv.export({ range: exportRange });
@@ -134,8 +250,14 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
         const json = JSON.parse(text);
         const r = await window.api.backup.restoreJson(json);
         setRestoreResult({ calls: r.calls, backupPath: r.backupPath });
+      } else if (AUDIO_EXT.test(name)) {
+        const p = window.api.util.getFilePath(file);
+        setAudioImport({
+          open: true,
+          file: { path: p, name: file.name, mtime: new Date(file.lastModified).toISOString() },
+        });
       } else {
-        setDropError(`未対応のファイル形式: ${file.name}（.csv / .json のみ対応）`);
+        setDropError(`未対応のファイル形式: ${file.name}（.csv / .json / 音声ファイルに対応）`);
       }
     } catch (err) {
       setDropError((err as Error).message);
@@ -203,7 +325,128 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
       ]
     : [];
 
+  // ============ セル描画 ============
+
+  const renderCell = (c: CallRecord, key: ColKey): React.ReactNode => {
+    switch (key) {
+      case 'start':
+        return (
+          <td key={key} className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
+            <span className="mr-1" title={c.kind === 'meeting' ? '会議' : '通話'}>
+              {c.kind === 'meeting' ? '👥' : '📞'}
+            </span>
+            {formatDateTime(c.startTime)}
+          </td>
+        );
+      case 'end':
+        return (
+          <td key={key} className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
+            {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600 dark:text-emerald-400">{c.kind === 'meeting' ? '会議中…' : '通話中…'}</span>}
+          </td>
+        );
+      case 'duration':
+        return (
+          <td key={key} className="px-4 py-3 text-right font-mono tabular-nums text-slate-900 dark:text-slate-100">
+            {c.durationSec === null ? '—' : formatHMS(c.durationSec)}
+          </td>
+        );
+      case 'hold': {
+        const hold = c.holdSec ?? 0;
+        return (
+          <td key={key} className="px-4 py-3 text-right font-mono tabular-nums text-amber-600 dark:text-amber-400">
+            {hold ? formatHMS(hold) : '—'}
+          </td>
+        );
+      }
+      case 'talk': {
+        const hold = c.holdSec ?? 0;
+        const talk = c.durationSec === null ? null : Math.max(0, c.durationSec - hold);
+        return (
+          <td key={key} className="px-4 py-3 text-right font-mono tabular-nums text-slate-900 dark:text-slate-100">
+            {talk === null ? '—' : formatHMS(talk)}
+          </td>
+        );
+      }
+      case 'tag':
+        return (
+          <td key={key} className="px-4 py-3">
+            {c.tag ? (
+              <span
+                className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
+              >
+                {highlight(c.tag, query)}
+              </span>
+            ) : (
+              <span className="text-xs text-slate-400">—</span>
+            )}
+          </td>
+        );
+      case 'name':
+        return (
+          <td key={key} className="px-4 py-3 text-slate-700 dark:text-slate-300">
+            {c.kind === 'meeting'
+              ? (c.title ? highlight(c.title, query) : <span className="text-xs text-slate-400">（会議名未設定）</span>)
+              : (c.contactName ? highlight(c.contactName, query) : '—')}
+          </td>
+        );
+      case 'media': {
+        const pct = progress[c.id];
+        return (
+          <td key={key} className="px-4 py-3 text-center">
+            <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap text-base">
+              {c.audio && <span title="録音あり">🎤</span>}
+              {c.markers && c.markers.length > 0 && <span title={`マーカー ${c.markers.length} 個`}>🔖</span>}
+              {c.transcript && c.transcriptStatus !== 'running' && c.transcriptStatus !== 'queued' && <span title="文字起こし済">📝</span>}
+              {c.transcriptStatus === 'queued' && <span className="text-xs text-slate-500" title="文字起こし待機中">⏳ 待機</span>}
+              {c.transcriptStatus === 'running' && (
+                <span className="text-xs font-semibold text-brand-600 dark:text-brand-300" title="文字起こし中">
+                  ⏳ {pct !== undefined ? `${pct}%` : '…'}
+                </span>
+              )}
+              {c.transcriptStatus === 'error' && (
+                <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
+              )}
+            </span>
+          </td>
+        );
+      }
+      case 'memo':
+        return (
+          <td key={key} className="max-w-xs truncate px-4 py-3 text-slate-700 dark:text-slate-300">
+            {c.memo
+              ? highlight(c.memo, query)
+              : c.transcript?.text
+                ? highlight(c.transcript.text, query)
+                : '—'}
+          </td>
+        );
+    }
+  };
+
+  const visibleCols = colOrder.filter((k) => !hiddenCols.includes(k));
+
+  const moveColumn = (from: ColKey, to: ColKey) => {
+    if (from === to) return;
+    setColOrder((prev) => {
+      const next = prev.filter((k) => k !== from);
+      const idx = next.indexOf(to);
+      next.splice(idx < 0 ? next.length : idx, 0, from);
+      return next;
+    });
+  };
+
+  const toggleColumn = (key: ColKey) => {
+    setHiddenCols((prev) => {
+      if (prev.includes(key)) return prev.filter((k) => k !== key);
+      // 全列非表示は防ぐ
+      if (visibleCols.length <= 1) return prev;
+      return [...prev, key];
+    });
+  };
+
   const untaggedCount = calls.filter((c) => c.endTime && !c.tag).length;
+  const thAlignRight = (k: ColKey) => k === 'duration' || k === 'hold' || k === 'talk';
 
   return (
     <div
@@ -231,7 +474,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
       {dragDepth > 0 && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-brand-500/20 backdrop-blur-sm">
           <div className="rounded-xl border-2 border-dashed border-brand-500 bg-white px-6 py-4 text-base font-semibold text-brand-700 shadow-2xl dark:bg-slate-900 dark:text-brand-200">
-            ドロップで CSV インポート / JSON 復元
+            ドロップで取り込み（CSV / JSON復元 / 音声ファイル）
           </div>
         </div>
       )}
@@ -245,7 +488,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
               e.currentTarget.blur();
             }
           }}
-          placeholder="検索（メモ・連絡先・電話・文字起こし） — Esc でクリア"
+          placeholder="検索（メモ・連絡先・会議名・文字起こし） — Esc でクリア"
           className="flex-1 min-w-[240px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
         <select
@@ -287,6 +530,13 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
         </label>
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => setAudioImport({ open: true, file: null })}
+            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
+            title="音声ファイルを通話/会議の記録として取り込み、文字起こしできます"
+          >
+            🎵 音声を取り込み
+          </button>
+          <button
             onClick={handleAddManual}
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
@@ -325,29 +575,61 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-            <tr>
-              <th className="px-4 py-3">開始</th>
-              <th className="px-4 py-3">終了</th>
-              <th className="px-4 py-3 text-right">通話</th>
-              <th className="px-4 py-3 text-right">保留</th>
-              <th className="px-4 py-3 text-right">純通話</th>
-              <th className="px-4 py-3">タグ</th>
-              <th className="px-4 py-3">連絡先 / 会議名</th>
-              <th className="px-4 py-3 w-24 whitespace-nowrap text-center">録音 / 文字起こし</th>
-              <th className="px-4 py-3">メモ</th>
+            <tr
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setColMenu({ x: e.clientX, y: e.clientY });
+              }}
+            >
+              {visibleCols.map((key) => (
+                <th
+                  key={key}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragCol(key);
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragCol && dragCol !== key) setDropTarget(key);
+                  }}
+                  onDragLeave={() => setDropTarget((t) => (t === key ? null : t))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragCol) moveColumn(dragCol, key);
+                    setDragCol(null);
+                    setDropTarget(null);
+                  }}
+                  onDragEnd={() => { setDragCol(null); setDropTarget(null); }}
+                  onClick={() => setSort((prev) => ({
+                    key,
+                    dir: prev.key === key && prev.dir === 'desc' ? 'asc' : prev.key === key ? 'desc' : 'desc',
+                  }))}
+                  className={`cursor-pointer select-none px-4 py-3 transition ${thAlignRight(key) ? 'text-right' : key === 'media' ? 'w-28 whitespace-nowrap text-center' : ''} ${
+                    dropTarget === key ? 'bg-brand-100 dark:bg-brand-900/50' : 'hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                  } ${dragCol === key ? 'opacity-50' : ''}`}
+                  title="クリックで並び替え / ドラッグで列を移動 / 右クリックで表示する列を選択"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {COL_LABELS[key]}
+                    {sort.key === key && (
+                      <span className="text-brand-600 dark:text-brand-300">{sort.dir === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-slate-400 dark:text-slate-500">
-                  記録がありません。{settings.shortcuts.startCall} で通話を開始しましょう。
+                <td colSpan={visibleCols.length} className="px-4 py-12 text-center text-slate-400 dark:text-slate-500">
+                  記録がありません。{settings.shortcuts.startCall} で通話、{settings.shortcuts.startMeeting} で会議を開始しましょう。
                 </td>
               </tr>
             )}
             {filtered.map((c) => {
-              const hold = c.holdSec ?? 0;
-              const talk = c.durationSec === null ? null : Math.max(0, c.durationSec - hold);
               const selected = c.id === selectedId;
               return (
                 <tr
@@ -366,60 +648,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                   }`}
                   title="クリックで選択 / ダブルクリックで編集 / 右クリックでメニュー / Delete キーで削除"
                 >
-                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
-                    <span className="mr-1" title={c.kind === 'meeting' ? '会議' : '通話'}>
-                      {c.kind === 'meeting' ? '👥' : '📞'}
-                    </span>
-                    {formatDateTime(c.startTime)}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
-                    {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600 dark:text-emerald-400">{c.kind === 'meeting' ? '会議中…' : '通話中…'}</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900 dark:text-slate-100">
-                    {c.durationSec === null ? '—' : formatHMS(c.durationSec)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-amber-600 dark:text-amber-400">
-                    {hold ? formatHMS(hold) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900 dark:text-slate-100">
-                    {talk === null ? '—' : formatHMS(talk)}
-                  </td>
-                  <td className="px-4 py-3">
-                    {c.tag ? (
-                      <span
-                        className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                        style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
-                      >
-                        {highlight(c.tag, query)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                    {c.kind === 'meeting'
-                      ? (c.title ? highlight(c.title, query) : <span className="text-xs text-slate-400">（会議名未設定）</span>)
-                      : (c.contactName ? highlight(c.contactName, query) : '—')}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="inline-flex items-center justify-center gap-1 text-base whitespace-nowrap">
-                      {c.audio && <span title="録音あり">🎤</span>}
-                      {c.markers && c.markers.length > 0 && <span title={`マーカー ${c.markers.length} 個`}>🔖</span>}
-                      {c.transcript && <span title="文字起こし済">📝</span>}
-                      {c.transcriptStatus === 'queued' && <span title="文字起こし待機">⏳</span>}
-                      {c.transcriptStatus === 'running' && <span title="文字起こし中">⏳</span>}
-                      {c.transcriptStatus === 'error' && (
-                        <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
-                      )}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-300 max-w-xs truncate">
-                    {c.memo
-                      ? highlight(c.memo, query)
-                      : c.transcript?.text
-                        ? highlight(c.transcript.text, query)
-                        : '—'}
-                  </td>
+                  {visibleCols.map((key) => renderCell(c, key))}
                 </tr>
               );
             })}
@@ -427,6 +656,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
         </table>
       </div>
 
+      {/* 行の右クリックメニュー */}
       {ctxMenu && (
         <div
           className="fixed z-[90] min-w-[13rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
@@ -455,12 +685,59 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
         </div>
       )}
 
+      {/* ヘッダー右クリック: 列の表示/非表示 */}
+      {colMenu && (
+        <div
+          className="fixed z-[90] min-w-[12rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+          style={{
+            left: Math.min(colMenu.x, window.innerWidth - 200),
+            top: Math.min(colMenu.y, window.innerHeight - DEFAULT_ORDER.length * 30 - 60),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">表示する列</div>
+          {colOrder.map((key) => (
+            <label
+              key={key}
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <input
+                type="checkbox"
+                checked={!hiddenCols.includes(key)}
+                onChange={() => toggleColumn(key)}
+              />
+              {COL_LABELS[key]}
+            </label>
+          ))}
+          <div className="mt-1 border-t border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => { setColOrder(DEFAULT_ORDER); setHiddenCols([]); setColMenu(null); }}
+              className="block w-full px-3 py-1.5 text-left text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+            >
+              ↺ 列の並び・表示をリセット
+            </button>
+          </div>
+        </div>
+      )}
+
       {editing && (
         <CallEditDialog
           call={editing}
           settings={settings}
           allCalls={calls}
           onClose={() => setEditing(null)}
+        />
+      )}
+
+      {audioImport.open && (
+        <AudioImportDialog
+          settings={settings}
+          initialFile={audioImport.file}
+          onClose={() => setAudioImport({ open: false, file: null })}
+          onImported={(rec) => {
+            toast.success('音声を取り込みました');
+            setEditing(rec);
+          }}
         />
       )}
 

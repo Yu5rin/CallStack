@@ -1,7 +1,7 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, IpcRendererEvent } from 'electron';
 import type {
   CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
-  AudioSourceLabel,
+  AudioSourceLabel, RecordingSourceConfig,
 } from '../shared/types';
 
 type SaveAsResult =
@@ -55,6 +55,7 @@ const api = {
   hud: {
     end: (): Promise<CallRecord | null> => ipcRenderer.invoke('hud:end'),
     openMain: (): Promise<void> => ipcRenderer.invoke('hud:open-main'),
+    openEdit: (callId: string): Promise<void> => ipcRenderer.invoke('hud:open-edit', callId),
     savePosition: (pos: { x: number; y: number }): Promise<void> =>
       ipcRenderer.invoke('hud:save-position', pos),
     getPosition: (): Promise<{ x: number; y: number } | null> =>
@@ -72,17 +73,52 @@ const api = {
       ipcRenderer.invoke('recording:finalize', callId, sourceLabel),
     abort: (callId: string): Promise<boolean> => ipcRenderer.invoke('recording:abort', callId),
     togglePause: (): Promise<boolean> => ipcRenderer.invoke('recording:toggle-pause'),
-    setPaused: (callId: string, paused: boolean): Promise<boolean> =>
-      ipcRenderer.invoke('recording:set-paused', callId, paused),
+    reportState: (recording: boolean, paused: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('recording:report-state', recording, paused),
+    getState: (): Promise<{ recording: boolean; paused: boolean }> =>
+      ipcRenderer.invoke('recording:get-state'),
+    reportError: (message: string): Promise<boolean> =>
+      ipcRenderer.invoke('recording:report-error', message),
     reportLevel: (level: number): Promise<boolean> =>
       ipcRenderer.invoke('recording:report-level', level),
     setCaptureTarget: (target: { type: 'screen' } | { type: 'window'; sourceId: string }): Promise<boolean> =>
       ipcRenderer.invoke('recording:set-capture-target', target),
+    setNextSource: (payload: {
+      config: RecordingSourceConfig;
+      windowId: string | null;
+      micDeviceId: string | null;
+    } | null): Promise<boolean> => ipcRenderer.invoke('recording:set-next-source', payload),
+    getStartConfig: (kind: RecordKind): Promise<{
+      enabled: boolean;
+      config: RecordingSourceConfig;
+      windowId: string | null;
+      micDeviceId: string | null;
+      soundFeedback: boolean;
+    }> => ipcRenderer.invoke('recording:get-start-config', kind),
     saveAs: (callId: string): Promise<SaveAsResult> =>
       ipcRenderer.invoke('recording:save-as', callId),
   },
+  whisper: {
+    binaryStatus: (): Promise<{ installed: boolean }> => ipcRenderer.invoke('whisper:binary-status'),
+    downloadBinary: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('whisper:download-binary'),
+  },
   capture: {
     listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),
+  },
+  audio: {
+    pick: (): Promise<
+      { canceled: true } | { canceled: false; path: string; name: string; sizeBytes: number; mtime: string }
+    > => ipcRenderer.invoke('audio:pick'),
+    import: (opts: {
+      filePath: string;
+      kind: RecordKind;
+      title?: string;
+      contactName?: string;
+      startTime?: string;
+      autoTranscribe: boolean;
+    }): Promise<{ ok: true; record: CallRecord } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('audio:import', opts),
   },
   transcript: {
     saveAs: (callId: string, withTimestamps: boolean): Promise<SaveAsResult> =>
@@ -114,6 +150,10 @@ const api = {
     > => ipcRenderer.invoke('backup:restore'),
     restoreJson: (json: unknown): Promise<{ calls: number; backupPath: string }> =>
       ipcRenderer.invoke('backup:restore-json', json),
+  },
+  util: {
+    /** ドラッグ&ドロップされた File の絶対パスを取得（Electron 32+ で File.path が廃止されたため） */
+    getFilePath: (file: File): string => webUtils.getPathForFile(file),
   },
   onEvent: (cb: (e: AppEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AppEvent) => cb(payload);

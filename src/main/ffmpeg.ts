@@ -51,6 +51,22 @@ export async function convertWebmToMp3(
   });
 }
 
+/** 音声ファイルの長さ（秒）を ffmpeg の解析出力から取得する */
+export async function probeDurationSec(inputPath: string): Promise<number> {
+  const ffmpeg = getFfmpegPath();
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpeg, ['-i', inputPath, '-f', 'null', '-']);
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', () => {
+      const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      if (!m) return reject(new Error('音声ファイルの長さを取得できませんでした（対応していない形式の可能性があります）'));
+      resolve(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
+    });
+  });
+}
+
 export async function convertMp3ToWav16k(
   inputPath: string,
   outputPath: string,

@@ -6,6 +6,7 @@ import { CallTranscript, TranscriptSegment, WhisperModel } from '../shared/types
 import { getDirs } from './paths';
 import { convertMp3ToWav16k } from './ffmpeg';
 import { getModelPath, isModelDownloaded } from './whisperModels';
+import { getUserWhisperDir } from './whisperBinary';
 
 export interface TranscribeOptions {
   audioPath: string;          // absolute path to mp3
@@ -39,7 +40,7 @@ export async function checkSetup(model: WhisperModel): Promise<{ ok: true } | { 
     if (err instanceof WhisperMissingError) {
       return {
         ok: false,
-        error: `whisper.cpp の実行ファイルが見つかりません。\n${err.binaryPath}\nREADME「文字起こしの準備」を参照してください。`,
+        error: 'whisper.cpp の実行ファイルが見つかりません。\n下の「whisper.cpp をダウンロード」ボタンで自動セットアップできます。',
       };
     }
     return { ok: false, error: (err as Error).message };
@@ -48,12 +49,19 @@ export async function checkSetup(model: WhisperModel): Promise<{ ok: true } | { 
 }
 
 async function resolveWhisperBin(): Promise<string> {
+  // 1. アプリ内ダウンロードで配置されたもの (userData/whisper) を最優先
+  const userBin = path.join(getUserWhisperDir(), process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
+  try {
+    await fs.access(userBin);
+    return userBin;
+  } catch { /* fall through */ }
+  // 2. 同梱リソース (resources/whisper)
   const { whisperBin } = getDirs();
   try {
     await fs.access(whisperBin);
     return whisperBin;
   } catch {
-    // Allow override via env (handy in dev)
+    // 3. 環境変数での上書き (開発用)
     const envPath = process.env.TELTIMESTACK_WHISPER_BIN;
     if (envPath) {
       try { await fs.access(envPath); return envPath; } catch { /* fall through */ }

@@ -87,7 +87,8 @@ export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3-turb
 export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 
 export type HudSize = 'mini' | 'compact' | 'full';
-export type HudOpacity = 0.5 | 0.75 | 1.0;
+/** HUD の不透明度 0.3〜1.0（設定のスライダーで変更） */
+export type HudOpacity = number;
 
 /** 録音ソースの構成。mic / system は独立に ON/OFF できる */
 export interface RecordingSourceConfig {
@@ -165,10 +166,20 @@ export type TranscriptionProgressEvent = {
 };
 /** 録音中ウィンドウへの一時停止/再開の指示（HUD・ショートカットから発火） */
 export type RecordingTogglePauseEvent = { type: 'recording:togglePause' };
-/** 一時停止状態の通知（録音を実行しているレンダラが発火） */
-export type RecordingPausedEvent = { type: 'recording:paused'; callId: string; paused: boolean };
-/** 録音レベルの共有（メイン窓のレコーダ → HUD、約5Hzに間引き） */
+/** 録音状態の通知（録音サービスウィンドウが報告し、全ウィンドウへ配信される） */
+export type RecordingStateEvent = { type: 'recording:state'; recording: boolean; paused: boolean };
+/** 録音エラーの通知（録音サービスウィンドウ → メイン窓の表示用） */
+export type RecordingErrorEvent = { type: 'recording:error'; message: string };
+/** 録音レベルの共有（録音サービスウィンドウ → 各ウィンドウ、約5Hzに間引き） */
 export type RecordingLevelEvent = { type: 'recording:level'; level: number };
+/** whisper.cpp 実行ファイルのダウンロード進捗 */
+export type WhisperBinDownloadEvent = {
+  type: 'whisperbin:download';
+  step: 'download' | 'extract' | 'done' | 'error';
+  receivedBytes: number;
+  totalBytes: number | null;
+  error?: string;
+};
 /** マーカー追加の通知 */
 export type MarkerAddedEvent = { type: 'marker:added'; callId: string; marker: Marker; count: number };
 export type ModelDownloadEvent = {
@@ -180,6 +191,8 @@ export type ModelDownloadEvent = {
   error?: string;
 };
 export type NavigateEvent = { type: 'navigate'; page: 'list' | 'stats' | 'settings' };
+/** 指定した記録の編集ダイアログを開く（HUD の編集ボタンなどから） */
+export type EditRecordEvent = { type: 'edit:record'; callId: string };
 export type DataRestoredEvent = { type: 'data:restored' };
 
 export type AppEvent =
@@ -194,11 +207,14 @@ export type AppEvent =
   | TranscriptionStatusEvent
   | TranscriptionProgressEvent
   | RecordingTogglePauseEvent
-  | RecordingPausedEvent
+  | RecordingStateEvent
+  | RecordingErrorEvent
   | RecordingLevelEvent
   | MarkerAddedEvent
   | ModelDownloadEvent
+  | WhisperBinDownloadEvent
   | NavigateEvent
+  | EditRecordEvent
   | DataRestoredEvent;
 
 export interface CsvExportOptions {

@@ -1,6 +1,7 @@
 import { BrowserWindow, screen, app, Menu, MenuItemConstructorOptions, dialog } from 'electron';
 import path from 'node:path';
 import type { HudSize } from '../shared/types';
+import { logInfo } from './log';
 
 /**
  * テキスト編集・選択テキスト用の標準右クリックメニューを取り付ける。
@@ -55,6 +56,7 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
 
 let mainWindow: BrowserWindow | null = null;
 let hudWindow: BrowserWindow | null = null;
+let recorderWindow: BrowserWindow | null = null;
 let minimizeToTrayEnabled = false;
 
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
@@ -127,7 +129,9 @@ export function createMainWindow(): BrowserWindow {
   };
   mainWindow.on('show', wakeRenderer);
   mainWindow.on('focus', wakeRenderer);
+  mainWindow.on('minimize', () => logInfo('window', 'main minimized'));
   mainWindow.on('restore', () => {
+    logInfo('window', 'main restored');
     wakeRenderer();
     // invalidate で回復しない環境向けの最終手段: 1px リサイズで
     // コンポジタに新しいフレームの生成を強制する。
@@ -137,6 +141,19 @@ export function createMainWindow(): BrowserWindow {
       mainWindow.setSize(w, h + 1);
       mainWindow.setSize(w, h);
     }, 60);
+    // 自己修復: 復帰後にレンダラが応答するか確認し、死んでいれば再読み込みする。
+    // 記録データは main プロセス側にあるため失われない。
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+      const wc = mainWindow.webContents;
+      let alive = false;
+      wc.executeJavaScript('1').then(() => { alive = true; }).catch(() => {});
+      setTimeout(() => {
+        if (alive || !mainWindow || mainWindow.isDestroyed()) return;
+        logInfo('window', 'main renderer did not answer ping after restore — reloading');
+        wc.reload();
+      }, 4000);
+    }, 500);
   });
 
   attachEditContextMenu(mainWindow);
@@ -158,8 +175,12 @@ export function createMainWindow(): BrowserWindow {
 function bringToFront(win: BrowserWindow): void {
   if (win.isMinimized()) win.restore();
   if (!win.isVisible()) win.show();
+  // Windows では他アプリにフォーカスがあると focus() だけでは前面に来ない
+  // ことがあるため、一瞬 always-on-top にして確実に最前面へ出す。
+  win.setAlwaysOnTop(true);
   win.moveTop();
   win.focus();
+  win.setAlwaysOnTop(false);
 }
 
 export function toggleMainWindow(): void {
@@ -266,8 +287,61 @@ export function closeHudWindow(): void {
   hudWindow = null;
 }
 
+/**
+ * 録音サービス用の不可視ウィンドウ。
+ * メディアキャプチャ（getUserMedia / getDisplayMedia / MediaRecorder）を
+ * メイン窓から分離することで、メイン窓の最小化・復帰がキャプチャ
+ * パイプラインに影響しない（最小化復帰フリーズの根本対策）。
+ */
+export function createRecorderWindow(): BrowserWindow {
+  if (recorderWindow && !recorderWindow.isDestroyed()) {
+    return recorderWindow;
+  }
+  recorderWindow = new BrowserWindow({
+    width: 320,
+    height: 180,
+    show: false,
+    frame: false,
+    skipTaskbar: true,
+    focusable: false,
+    webPreferences: {
+      preload: PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  recorderWindow.webContents.on('render-process-gone', (_e, details) => {
+    logInfo('window', `recorder renderer gone: ${details.reason} — recreating`);
+    recorderWindow?.destroy();
+    recorderWindow = null;
+    setTimeout(() => createRecorderWindow(), 500);
+  });
+
+  if (DEV_URL) {
+    recorderWindow.loadURL(`${DEV_URL.replace(/\/$/, '')}/recorder.html`);
+  } else {
+    recorderWindow.loadFile(path.join(DIST_DIR, 'recorder.html'));
+  }
+  logInfo('window', 'recorder window created');
+  return recorderWindow;
+}
+
+export function getRecorderWindow(): BrowserWindow | null {
+  return recorderWindow;
+}
+
+export function destroyRecorderWindow(): void {
+  if (recorderWindow && !recorderWindow.isDestroyed()) {
+    recorderWindow.destroy();
+  }
+  recorderWindow = null;
+}
+
 export function broadcast(channel: string, payload: unknown): void {
-  for (const win of [mainWindow, hudWindow]) {
+  for (const win of [mainWindow, hudWindow, recorderWindow]) {
     if (win && !win.isDestroyed()) {
       win.webContents.send(channel, payload);
     }
