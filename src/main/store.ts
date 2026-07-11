@@ -193,12 +193,25 @@ export class Store {
     return total;
   }
 
+  /** 設定された外部フォルダ (autoBackupDir) にもバックアップを複製する */
+  private async copyToAutoBackupDir(sourcePath: string): Promise<void> {
+    const dir = this.data.settings.autoBackupDir;
+    if (!dir) return;
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.copyFile(sourcePath, path.join(dir, path.basename(sourcePath)));
+    } catch (err) {
+      console.error('[store] auto backup copy failed:', err);
+    }
+  }
+
   /** Create a pre-import backup with a custom suffix. */
   async backupNow(suffix: string): Promise<string> {
     await fs.mkdir(this.backupDir, { recursive: true });
     const stamp = localDateStamp(new Date());
     const target = path.join(this.backupDir, `data-${stamp}-${suffix}.json`);
     await fs.writeFile(target, JSON.stringify(this.data, null, 2), 'utf-8');
+    await this.copyToAutoBackupDir(target);
     return target;
   }
 
@@ -254,6 +267,7 @@ export class Store {
         // not present, create
       }
       await fs.writeFile(target, JSON.stringify(this.data, null, 2), 'utf-8');
+      await this.copyToAutoBackupDir(target);
       // keep last 30 backups
       const files = (await fs.readdir(this.backupDir))
         .filter((f) => f.startsWith('data-') && f.endsWith('.json'))

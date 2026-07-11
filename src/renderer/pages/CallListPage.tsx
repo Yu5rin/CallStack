@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Phone, Users, Mic, Bookmark, FileText, AlertTriangle, Loader2,
+  FileAudio, Plus, Upload, Download, SlidersHorizontal, Trash2,
+  Pencil, RefreshCw, Undo2, RotateCcw, ChevronUp, ChevronDown,
+} from 'lucide-react';
 import { AppEvent, CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../shared/types';
 import { CallEditDialog } from '../components/CallEditDialog';
 import { AudioImportDialog, ImportFile } from '../components/AudioImportDialog';
@@ -97,6 +102,44 @@ export function CallListPage({
   // 文字起こしの進捗 (callId -> %)
   const [progress, setProgress] = useState<Record<string, number>>({});
 
+  // 検索はデバウンスして、キー入力ごとの全件走査を避ける
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQuery(query), 200);
+    return () => window.clearTimeout(t);
+  }, [query]);
+
+  // 検索対象テキストは記録ごとに事前結合しておく（文字起こし全文の join を検索のたびに行わない）
+  const haystacks = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of calls) {
+      m.set(c.id, [
+        c.memo,
+        c.contactName ?? '',
+        c.phoneNumber ?? '',
+        c.title ?? '',
+        c.participants?.join(' ') ?? '',
+        c.tag ?? '',
+        c.transcript?.text ?? '',
+      ].join(' ').toLowerCase());
+    }
+    return m;
+  }, [calls]);
+
+  // 仮想スクロール（大量の記録でも一覧が軽いまま）
+  const ROW_H = 45;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(600);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => setViewportH(el.clientHeight));
+    obs.observe(el);
+    setViewportH(el.clientHeight);
+    return () => obs.disconnect();
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(ORDER_KEY, JSON.stringify(colOrder));
   }, [colOrder]);
@@ -187,7 +230,7 @@ export function CallListPage({
   };
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     const source = showTrash ? trashCalls : aliveCalls;
     const fromMs = dateFrom ? new Date(dateFrom).getTime() : null;
     const toMs = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 : null;
@@ -205,16 +248,7 @@ export function CallListPage({
       if (hasTranscript === 'yes' && !c.transcript) return false;
       if (hasTranscript === 'no' && c.transcript) return false;
       if (!q) return true;
-      const hay = [
-        c.memo,
-        c.contactName ?? '',
-        c.phoneNumber ?? '',
-        c.title ?? '',
-        c.participants?.join(' ') ?? '',
-        c.tag ?? '',
-        c.transcript?.text ?? '',
-      ].join(' ').toLowerCase();
-      return hay.includes(q);
+      return (haystacks.get(c.id) ?? '').includes(q);
     });
     const dir = sort.dir === 'asc' ? 1 : -1;
     return base.sort((a, b) => {
@@ -225,7 +259,15 @@ export function CallListPage({
       // 第2キーは開始日時の新しい順で安定させる
       return b.startTime.localeCompare(a.startTime);
     });
-  }, [aliveCalls, trashCalls, showTrash, query, filterKind, filterTag, filterContact, showUntagged, dateFrom, dateTo, hasAudio, hasTranscript, sort]);
+  }, [aliveCalls, trashCalls, showTrash, debouncedQuery, haystacks, filterKind, filterTag, filterContact, showUntagged, dateFrom, dateTo, hasAudio, hasTranscript, sort]);
+
+  // 仮想化の可視範囲（少件数では全件描画）
+  const virtualized = filtered.length > 150;
+  const startIdx = virtualized ? Math.max(0, Math.floor(scrollTop / ROW_H) - 10) : 0;
+  const endIdx = virtualized ? Math.min(filtered.length, Math.ceil((scrollTop + viewportH) / ROW_H) + 10) : filtered.length;
+  const visibleRows = filtered.slice(startIdx, endIdx);
+  const padTop = startIdx * ROW_H;
+  const padBottom = (filtered.length - endIdx) * ROW_H;
 
   // Delete-key handler with focus / dialog awareness.
   useEffect(() => {
@@ -309,19 +351,21 @@ export function CallListPage({
     else toast.success(`保存しました: ${r.path}`);
   };
 
-  const ctxActions: Array<{ label: string; danger?: boolean; run: () => void | Promise<void> }> = !ctxMenu
+  const ctxActions: Array<{ label: string; icon: React.ReactNode; danger?: boolean; run: () => void | Promise<void> }> = !ctxMenu
     ? []
     : showTrash
     ? [
         {
-          label: '♻️ 復元',
+          label: '復元',
+          icon: <Undo2 size={14} />,
           run: async () => {
             await window.api.calls.restore(ctxMenu.call.id);
             toast.success('記録を復元しました');
           },
         },
         {
-          label: '🗑 完全に削除',
+          label: '完全に削除',
+          icon: <Trash2 size={14} />,
           danger: true,
           run: async () => {
             if (!window.confirm('この記録を完全に削除しますか？録音ファイルも削除され、元に戻せません。')) return;
@@ -331,12 +375,14 @@ export function CallListPage({
       ]
     : [
         {
-          label: '✏️ 編集',
+          label: '編集',
+          icon: <Pencil size={14} />,
           run: () => setEditing(ctxMenu.call),
         },
         ...(ctxMenu.call.audio && ctxMenu.call.transcriptStatus !== 'running' && ctxMenu.call.transcriptStatus !== 'queued'
           ? [{
-              label: ctxMenu.call.transcript ? '🔁 再文字起こし' : '📝 文字起こしを開始',
+              label: ctxMenu.call.transcript ? '再文字起こし' : '文字起こしを開始',
+              icon: <RefreshCw size={14} />,
               run: async () => {
                 const r = await window.api.transcription.start(ctxMenu.call.id);
                 if (!r.ok) toast.error(r.error);
@@ -346,22 +392,26 @@ export function CallListPage({
           : []),
         ...(ctxMenu.call.audio
           ? [{
-              label: '⬇ 録音 (MP3) を保存…',
+              label: '録音 (MP3) を保存…',
+              icon: <Download size={14} />,
               run: async () => showSaveResult(await window.api.recording.saveAs(ctxMenu.call.id)),
             }]
           : []),
         ...(ctxMenu.call.transcript
           ? [{
-              label: '⬇ 文字起こしを保存…',
+              label: '文字起こしを保存…',
+              icon: <Download size={14} />,
               run: async () => showSaveResult(await window.api.transcript.saveAs(ctxMenu.call.id, false)),
             }]
           : []),
         {
-          label: '📄 議事録 (MD) を保存…',
+          label: '議事録 (MD) を保存…',
+          icon: <FileText size={14} />,
           run: async () => showSaveResult(await window.api.minutes.saveAs(ctxMenu.call.id)),
         },
         {
-          label: '🗑 削除',
+          label: '削除',
+          icon: <Trash2 size={14} />,
           danger: true,
           run: async () => {
             const removed = await deleteCallWithConfirm(ctxMenu.call.id, settings.confirmCallDelete);
@@ -377,8 +427,10 @@ export function CallListPage({
       case 'start':
         return (
           <td key={key} className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
-            <span className="mr-1" title={c.kind === 'meeting' ? '会議' : '通話'}>
-              {c.kind === 'meeting' ? '👥' : '📞'}
+            <span className="mr-1.5 inline-block align-[-2px]" title={c.kind === 'meeting' ? '会議' : '通話'}>
+              {c.kind === 'meeting'
+                ? <Users size={13} className="text-violet-500" />
+                : <Phone size={13} className="text-brand-600 dark:text-brand-400" />}
             </span>
             {formatDateTime(c.startTime)}
           </td>
@@ -420,7 +472,7 @@ export function CallListPage({
                 className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
                 style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
               >
-                {highlight(c.tag, query)}
+                {highlight(c.tag, debouncedQuery)}
               </span>
             ) : (
               <span className="text-xs text-slate-400">—</span>
@@ -431,8 +483,8 @@ export function CallListPage({
         return (
           <td key={key} className="px-4 py-3 text-slate-700 dark:text-slate-300">
             {c.kind === 'meeting'
-              ? (c.title ? highlight(c.title, query) : <span className="text-xs text-slate-400">（会議名未設定）</span>)
-              : (c.contactName ? highlight(c.contactName, query) : '—')}
+              ? (c.title ? highlight(c.title, debouncedQuery) : <span className="text-xs text-slate-400">（会議名未設定）</span>)
+              : (c.contactName ? highlight(c.contactName, debouncedQuery) : '—')}
           </td>
         );
       case 'media': {
@@ -440,17 +492,17 @@ export function CallListPage({
         return (
           <td key={key} className="px-4 py-3 text-center">
             <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap text-base">
-              {c.audio && <span title="録音あり">🎤</span>}
-              {c.markers && c.markers.length > 0 && <span title={`マーカー ${c.markers.length} 個`}>🔖</span>}
-              {c.transcript && c.transcriptStatus !== 'running' && c.transcriptStatus !== 'queued' && <span title="文字起こし済">📝</span>}
-              {c.transcriptStatus === 'queued' && <span className="text-xs text-slate-500" title="文字起こし待機中">⏳ 待機</span>}
+              {c.audio && <span title="録音あり"><Mic size={14} className="text-slate-500 dark:text-slate-400" /></span>}
+              {c.markers && c.markers.length > 0 && <span className="inline-flex items-center gap-0.5 text-xs text-slate-500 dark:text-slate-400" title={`マーカー ${c.markers.length} 個`}><Bookmark size={13} />{c.markers.length}</span>}
+              {c.transcript && c.transcriptStatus !== 'running' && c.transcriptStatus !== 'queued' && <span title="文字起こし済"><FileText size={14} className="text-emerald-600 dark:text-emerald-400" /></span>}
+              {c.transcriptStatus === 'queued' && <span className="inline-flex items-center gap-1 text-xs text-slate-500" title="文字起こし待機中"><Loader2 size={13} className="animate-spin" /> 待機</span>}
               {c.transcriptStatus === 'running' && (
                 <span className="text-xs font-semibold text-brand-600 dark:text-brand-300" title="文字起こし中">
-                  ⏳ {pct !== undefined ? `${pct}%` : '…'}
+                  <Loader2 size={13} className="mr-0.5 inline animate-spin align-[-2px]" />{pct !== undefined ? `${pct}%` : '…'}
                 </span>
               )}
               {c.transcriptStatus === 'error' && (
-                <span title={c.transcriptError ?? '文字起こしに失敗しました'}>⚠️</span>
+                <span title={c.transcriptError ?? '文字起こしに失敗しました'}><AlertTriangle size={14} className="text-amber-500" /></span>
               )}
             </span>
           </td>
@@ -460,9 +512,9 @@ export function CallListPage({
         return (
           <td key={key} className="max-w-xs truncate px-4 py-3 text-slate-700 dark:text-slate-300">
             {c.memo
-              ? highlight(c.memo, query)
+              ? highlight(c.memo, debouncedQuery)
               : c.transcript?.text
-                ? highlight(c.transcript.text, query)
+                ? highlight(c.transcript.text, debouncedQuery)
                 : '—'}
           </td>
         );
@@ -542,8 +594,8 @@ export function CallListPage({
           className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         >
           <option value="">通話+会議</option>
-          <option value="call">📞 通話のみ</option>
-          <option value="meeting">👥 会議のみ</option>
+          <option value="call">通話のみ</option>
+          <option value="meeting">会議のみ</option>
         </select>
         <select
           value={filterTag}
@@ -582,7 +634,7 @@ export function CallListPage({
           }`}
           title="期間・録音有無などで絞り込み"
         >
-          🔍 詳細
+          <SlidersHorizontal size={14} className="mr-1 inline align-[-2px]" />詳細
         </button>
         <button
           onClick={() => { setShowTrash((v) => !v); setSelectedId(null); }}
@@ -593,7 +645,7 @@ export function CallListPage({
           }`}
           title="削除した記録（30日間保持）"
         >
-          🗑 ゴミ箱 ({trashCalls.length})
+          <Trash2 size={14} className="mr-1 inline align-[-2px]" />ゴミ箱 ({trashCalls.length})
         </button>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -601,7 +653,7 @@ export function CallListPage({
             className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
             title="音声ファイルを通話/会議の記録として取り込み、文字起こしできます"
           >
-            🎵 音声を取り込み
+            <FileAudio size={14} className="mr-1 inline align-[-2px]" />音声を取り込み
           </button>
           <button
             onClick={handleAddManual}
@@ -686,7 +738,7 @@ export function CallListPage({
 
       {showTrash && (
         <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-          <span>🗑 ゴミ箱 — 削除から30日で自動的に完全削除されます。右クリックで復元できます。</span>
+          <span className="inline-flex items-center gap-1.5"><Trash2 size={14} />ゴミ箱 — 削除から30日で自動的に完全削除されます。右クリックで復元できます。</span>
           {trashCalls.length > 0 && (
             <button
               onClick={async () => {
@@ -702,9 +754,13 @@ export function CallListPage({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div
+        ref={scrollRef}
+        onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+        className="max-h-[calc(100vh-16rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
+      >
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-400">
             <tr
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -744,7 +800,9 @@ export function CallListPage({
                   <span className="inline-flex items-center gap-1">
                     {COL_LABELS[key]}
                     {sort.key === key && (
-                      <span className="text-brand-600 dark:text-brand-300">{sort.dir === 'asc' ? '▲' : '▼'}</span>
+                      sort.dir === 'asc'
+                        ? <ChevronUp size={13} className="text-brand-600 dark:text-brand-300" />
+                        : <ChevronDown size={13} className="text-brand-600 dark:text-brand-300" />
                     )}
                   </span>
                 </th>
@@ -759,7 +817,7 @@ export function CallListPage({
                     <div className="text-slate-400 dark:text-slate-500">ゴミ箱は空です</div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-3xl">📞</div>
+                      <div className="flex justify-center"><Phone size={32} strokeWidth={1.5} className="text-slate-300 dark:text-slate-600" /></div>
                       <div className="text-sm text-slate-500 dark:text-slate-400">
                         {calls.length === 0 ? 'まだ記録がありません' : '条件に一致する記録がありません'}
                       </div>
@@ -774,7 +832,8 @@ export function CallListPage({
                 </td>
               </tr>
             )}
-            {filtered.map((c) => {
+            {padTop > 0 && <tr aria-hidden style={{ height: padTop }} />}
+            {visibleRows.map((c) => {
               const selected = c.id === selectedId;
               return (
                 <tr
@@ -797,6 +856,7 @@ export function CallListPage({
                 </tr>
               );
             })}
+            {padBottom > 0 && <tr aria-hidden style={{ height: padBottom }} />}
           </tbody>
         </table>
       </div>
@@ -818,12 +878,13 @@ export function CallListPage({
                 setCtxMenu(null);
                 void a.run();
               }}
-              className={`block w-full px-3 py-1.5 text-left text-sm ${
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
                 a.danger
                   ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950'
                   : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700'
               }`}
             >
+              <span className="text-slate-400">{a.icon}</span>
               {a.label}
             </button>
           ))}
@@ -859,7 +920,7 @@ export function CallListPage({
               onClick={() => { setColOrder(DEFAULT_ORDER); setHiddenCols([]); setColMenu(null); }}
               className="block w-full px-3 py-1.5 text-left text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
-              ↺ 列の並び・表示をリセット
+              <RotateCcw size={12} className="mr-1 inline align-[-1px]" />列の並び・表示をリセット
             </button>
           </div>
         </div>
@@ -897,10 +958,10 @@ export function CallListPage({
           >
             <h3 className="mb-3 text-lg font-bold">CSV インポート完了</h3>
             <ul className="space-y-1 text-sm text-slate-800 dark:text-slate-200">
-              <li>✅ 新規追加: <span className="font-semibold">{importResult.inserted}</span></li>
-              <li>🔄 更新: <span className="font-semibold">{importResult.updated}</span></li>
-              <li>⏭ スキップ: <span className="font-semibold">{importResult.skipped}</span></li>
-              <li>⚠️ エラー: <span className="font-semibold">{importResult.errors.length}</span></li>
+              <li>新規追加: <span className="font-semibold">{importResult.inserted}</span></li>
+              <li>更新: <span className="font-semibold">{importResult.updated}</span></li>
+              <li>スキップ: <span className="font-semibold">{importResult.skipped}</span></li>
+              <li>エラー: <span className="font-semibold">{importResult.errors.length}</span></li>
             </ul>
             {importResult.errors.length > 0 && (
               <div className="mt-3 max-h-40 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-xs dark:border-red-900 dark:bg-red-950 dark:text-red-200">
@@ -932,7 +993,7 @@ export function CallListPage({
           >
             <h3 className="mb-3 text-lg font-bold">JSON 復元完了</h3>
             <div className="space-y-2 text-sm text-slate-800 dark:text-slate-200">
-              <p>📦 {restoreResult.calls} 件の通話記録を読み込みました。</p>
+              <p>{restoreResult.calls} 件の通話記録を読み込みました。</p>
               <p className="break-all text-xs text-slate-500 dark:text-slate-400">
                 復元前のデータは {restoreResult.backupPath} にバックアップ済みです。
               </p>

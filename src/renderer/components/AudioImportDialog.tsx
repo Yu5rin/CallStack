@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CallRecord, RecordKind, Settings } from '../../shared/types';
+import { FileAudio, FolderOpen, Phone, Users } from 'lucide-react';
 import { toDatetimeLocalValue, fromDatetimeLocalValue } from '../utils/format';
 
 export interface ImportFile {
@@ -81,7 +82,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
         className="w-[min(94vw,38rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-1 text-lg font-bold text-slate-900 dark:text-slate-100">🎵 音声ファイルを取り込む</h2>
+        <h2 className="mb-1 inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><FileAudio size={18} className="text-brand-600" />音声ファイルを取り込む</h2>
         <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
           録音済みの音声ファイル（会議の録音など）を通話/会議の記録として登録し、文字起こしできます。
           MP3 以外は自動で MP3 に変換されます。
@@ -93,7 +94,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
             disabled={busy}
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            📂 ファイルを選択…
+            <FolderOpen size={14} className="mr-1.5 inline align-[-2px]" />ファイルを選択…
           </button>
           <span className="min-w-0 flex-1 truncate text-sm text-slate-600 dark:text-slate-300">
             {file ? file.name : '未選択（ドラッグ&ドロップでも取り込めます）'}
@@ -103,11 +104,11 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
         <div className="mb-3 flex gap-4 text-sm text-slate-700 dark:text-slate-300">
           <label className="inline-flex items-center gap-1.5">
             <input type="radio" checked={kind === 'meeting'} onChange={() => setKind('meeting')} />
-            👥 会議として取り込む
+            <Users size={14} className="text-violet-500" /> 会議として取り込む
           </label>
           <label className="inline-flex items-center gap-1.5">
             <input type="radio" checked={kind === 'call'} onChange={() => setKind('call')} />
-            📞 通話として取り込む
+            <Phone size={14} className="text-brand-600" /> 通話として取り込む
           </label>
         </div>
 
@@ -156,7 +157,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
 
         {error && (
           <div className="mt-3 whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-            ⚠️ {error}
+            {error}
           </div>
         )}
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { CallRecord, RecordKind, Settings } from '../../shared/types';
 import { computeOverview, computeDaily, computeByTag, computeHourHistogram, computeByContact, computeByTitle } from '../utils/stats';
 import { formatHMS, formatHMShort, formatDateTime } from '../utils/format';
+import { Phone, Users } from 'lucide-react';
 import { HeatmapCalendar } from '../components/HeatmapCalendar';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -60,7 +61,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
           }`}
         >
-          📞 通話
+          <Phone size={14} className="mr-1.5 inline align-[-2px]" />通話
         </button>
         <button
           onClick={() => setKindTab('meeting')}
@@ -70,7 +71,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
           }`}
         >
-          👥 会議 ({meetingCount})
+          <Users size={14} className="mr-1.5 inline align-[-2px]" />会議 ({meetingCount})
         </button>
       </div>
 

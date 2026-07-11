@@ -145,6 +145,8 @@ export interface Settings {
   hudSize: HudSize;
   hudOpacity: HudOpacity;
   transcriptSeekOffsetSec: number;
+  /** 保存ダイアログで前回使ったフォルダ（内部用・UI なし） */
+  lastSaveDir?: string | null;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -191,6 +193,8 @@ export type WhisperBinDownloadEvent = {
 };
 /** マーカー追加の通知 */
 export type MarkerAddedEvent = { type: 'marker:added'; callId: string; marker: Marker; count: number };
+/** HUD 上にカーソルがあるか（main がカーソル位置を監視して通知。drag 領域では DOM イベントが発火しないため） */
+export type HudHoverEvent = { type: 'hud:hover'; hovered: boolean };
 export type ModelDownloadEvent = {
   type: 'model:download';
   model: WhisperModel;
@@ -220,6 +224,7 @@ export type AppEvent =
   | RecordingErrorEvent
   | RecordingLevelEvent
   | MarkerAddedEvent
+  | HudHoverEvent
   | ModelDownloadEvent
   | WhisperBinDownloadEvent
   | NavigateEvent

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Phone, Users, Bookmark, Mic, FileText, Square } from 'lucide-react';
 import { Settings } from '../../shared/types';
 
 interface Props {
@@ -50,16 +51,16 @@ export function OnboardingDialog({ settings, onFinish }: Props) {
 
     // Step 1: ショートカット
     <div key="shortcuts" className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">⌨️ 基本のショートカット</h2>
+      <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">基本のショートカット</h2>
       <p className="text-sm text-slate-600 dark:text-slate-300">
         どのアプリを使っていても、キー1つで記録を開始できます。
       </p>
       <ul className="space-y-2.5 text-sm text-slate-700 dark:text-slate-200">
-        <li className="flex items-center gap-3">{kbd(settings.shortcuts.startCall)} <span>📞 通話を開始</span></li>
-        <li className="flex items-center gap-3">{kbd(settings.shortcuts.startMeeting)} <span>👥 会議を開始</span></li>
-        <li className="flex items-center gap-3">{kbd(settings.shortcuts.endCall)} <span>記録を終了</span></li>
+        <li className="flex items-center gap-3">{kbd(settings.shortcuts.startCall)} <span className="inline-flex items-center gap-1.5"><Phone size={14} className="text-brand-600" />通話を開始</span></li>
+        <li className="flex items-center gap-3">{kbd(settings.shortcuts.startMeeting)} <span className="inline-flex items-center gap-1.5"><Users size={14} className="text-violet-500" />会議を開始</span></li>
+        <li className="flex items-center gap-3">{kbd(settings.shortcuts.endCall)} <span className="inline-flex items-center gap-1.5"><Square size={12} className="text-red-500" />記録を終了</span></li>
         <li className="flex items-center gap-3">{kbd(settings.shortcuts.toggleHold)} <span>保留（通話のみ）</span></li>
-        <li className="flex items-center gap-3">{kbd(settings.shortcuts.addMarker)} <span>🔖 マーカーを打つ</span></li>
+        <li className="flex items-center gap-3">{kbd(settings.shortcuts.addMarker)} <span className="inline-flex items-center gap-1.5"><Bookmark size={14} className="text-slate-500" />マーカーを打つ</span></li>
         <li className="flex items-center gap-3">{kbd(settings.shortcuts.togglePauseRecording)} <span>録音の一時停止/再開</span></li>
       </ul>
       <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -69,7 +70,7 @@ export function OnboardingDialog({ settings, onFinish }: Props) {
 
     // Step 2: 録音
     <div key="recording" className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">🎙 録音を使いますか？</h2>
+      <h2 className="inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><Mic size={18} className="text-slate-400" />録音を使いますか？</h2>
       <p className="text-sm text-slate-600 dark:text-slate-300">
         記録の開始と同時に、マイクや PC の音声（通話相手・会議アプリの音）を MP3 で録音できます。
       </p>
@@ -99,7 +100,7 @@ export function OnboardingDialog({ settings, onFinish }: Props) {
 
     // Step 3: 文字起こし
     <div key="transcribe" className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">📝 文字起こし（オフライン）</h2>
+      <h2 className="inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><FileText size={18} className="text-slate-400" />文字起こし（オフライン）</h2>
       <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         録音した音声は whisper.cpp で<strong>完全オフライン</strong>文字起こしできます。
         利用には初回のみ2つのダウンロードが必要です（設定画面のボタンで完結します）:

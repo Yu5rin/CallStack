@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Pencil, X } from 'lucide-react';
 import { CallTranscript } from '../../shared/types';
 import { formatHMS } from '../utils/format';
 
@@ -35,7 +36,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment }: Props) {
       <div className="text-xs text-slate-500 dark:text-slate-400">
         モデル: {transcript.model} / 言語: {transcript.language || '自動'} / 生成: {new Date(transcript.createdAt).toLocaleString()}
         {onEditSegment && segments.length > 0 && (
-          <span className="ml-2 text-slate-400 dark:text-slate-500">— ✏️ で誤認識を修正できます</span>
+          <span className="ml-2 text-slate-400 dark:text-slate-500">— 各行の鉛筆アイコンで誤認識を修正できます</span>
         )}
       </div>
       {segments.length > 0 ? (
@@ -77,7 +78,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment }: Props) {
                     className="shrink-0 rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
                     title="キャンセル (Esc)"
                   >
-                    ✕
+                    <X size={12} />
                   </button>
                 </span>
               ) : (
@@ -95,7 +96,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment }: Props) {
                       className="invisible shrink-0 rounded px-1 text-xs text-slate-400 hover:text-brand-600 group-hover:visible dark:hover:text-brand-300"
                       title="このセグメントを修正"
                     >
-                      ✏️
+                      <Pencil size={12} />
                     </button>
                   )}
                 </>

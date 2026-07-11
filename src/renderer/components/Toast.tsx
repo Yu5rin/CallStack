@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { CircleCheck, AlertTriangle, Info, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -24,7 +25,11 @@ export function useToast(): ToastApi {
   return ctx;
 }
 
-const ICONS: Record<ToastType, string> = { success: '✅', error: '⚠️', info: 'ℹ️' };
+const ICONS: Record<ToastType, React.ReactNode> = {
+  success: <CircleCheck size={16} className="text-emerald-600 dark:text-emerald-400" />,
+  error: <AlertTriangle size={16} className="text-red-600 dark:text-red-400" />,
+  info: <Info size={16} className="text-slate-500 dark:text-slate-400" />,
+};
 const STYLES: Record<ToastType, string> = {
   success:
     'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
@@ -74,14 +79,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             }`}
             role="status"
           >
-            <span className="shrink-0">{ICONS[t.type]}</span>
+            <span className="mt-0.5 shrink-0">{ICONS[t.type]}</span>
             <span className="min-w-0 flex-1 break-all whitespace-pre-wrap">{t.message}</span>
             <button
               onClick={() => dismiss(t.id)}
-              className="shrink-0 rounded px-1 text-xs opacity-60 hover:opacity-100"
+              className="shrink-0 rounded p-0.5 opacity-60 hover:opacity-100"
               title="閉じる"
             >
-              ✕
+              <X size={14} />
             </button>
           </div>
         ))}

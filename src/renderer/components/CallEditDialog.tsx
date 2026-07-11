@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Phone, Users, Bookmark, Play, Trash2, FileText, Download, Clock3, X,
+  RefreshCw, Ban, Mic,
+} from 'lucide-react';
 import { CallRecord, Settings } from '../../shared/types';
 import { formatHMS, toDatetimeLocalValue, fromDatetimeLocalValue, formatDateTime } from '../utils/format';
 import { AudioPlayer, AudioPlayerHandle } from './AudioPlayer';
@@ -7,6 +11,8 @@ import { deleteCallWithConfirm } from '../hooks/useCalls';
 
 const inputClass =
   'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
+const smallBtn =
+  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700';
 
 export function CallEditDialog({
   call,
@@ -154,7 +160,7 @@ export function CallEditDialog({
 
   const showExportResult = (r: { canceled: boolean; path?: string; error?: string }) => {
     if (r.canceled) return;
-    setExportMessage(r.error ? `⚠️ ${r.error}` : `✅ 保存しました: ${r.path}`);
+    setExportMessage(r.error ? `エラー: ${r.error}` : `保存しました: ${r.path}`);
     window.setTimeout(() => setExportMessage(null), 6000);
   };
 
@@ -200,353 +206,370 @@ export function CallEditDialog({
   const audioSrc = current.audio ? `app://recordings/${current.audio.path}` : null;
   const transcriptBusy = current.transcriptStatus === 'running' || current.transcriptStatus === 'queued';
 
+  const kindToggle = (
+    <div className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold dark:border-slate-600">
+      <button
+        onClick={() => setKind('call')}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
+          !isMeeting
+            ? 'bg-brand-600 text-white'
+            : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+        }`}
+        title="この記録を通話として扱う"
+      >
+        <Phone size={12} /> 通話
+      </button>
+      <button
+        onClick={() => setKind('meeting')}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
+          isMeeting
+            ? 'bg-violet-600 text-white'
+            : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+        }`}
+        title="この記録を会議として扱う"
+      >
+        <Users size={12} /> 会議
+      </button>
+    </div>
+  );
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3"
       onClick={onClose}
     >
       <div
-        className="w-[min(96vw,60rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        className="flex h-[94vh] w-[96vw] max-w-[110rem] flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            {isMeeting ? '👥 会議記録の編集' : '📞 通話記録の編集'}
+        {/* ヘッダー */}
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-slate-200 px-6 py-3 dark:border-slate-800">
+          <h2 className="inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
+            {isMeeting ? <Users size={18} className="text-violet-500" /> : <Phone size={18} className="text-brand-600" />}
+            {isMeeting ? '会議記録の編集' : '通話記録の編集'}
           </h2>
-          {/* 種別の事後変更: 間違えて開始しても後から直せる */}
-          <div className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold dark:border-slate-600">
+          <div className="flex items-center gap-3">
+            {kind !== (current.kind ?? 'call') && (
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                種別を{isMeeting ? '会議' : '通話'}に変更します（保存で確定）
+              </span>
+            )}
+            {kindToggle}
             <button
-              onClick={() => setKind('call')}
-              className={`px-3 py-1.5 transition ${
-                !isMeeting
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-              title="この記録を通話として扱う"
+              onClick={onClose}
+              className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              title="閉じる (Esc)"
             >
-              📞 通話
-            </button>
-            <button
-              onClick={() => setKind('meeting')}
-              className={`px-3 py-1.5 transition ${
-                isMeeting
-                  ? 'bg-violet-600 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-              title="この記録を会議として扱う"
-            >
-              👥 会議
+              <X size={18} />
             </button>
           </div>
         </div>
-        {kind !== (current.kind ?? 'call') && (
-          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-            種別を{isMeeting ? '会議' : '通話'}に変更します（「保存」で確定）。入力済みの連絡先・タイトルは保持されます。
-          </p>
-        )}
 
-        {/* 通話: 連絡先名 / 電話番号、会議: タイトル / 参加者 を最上段に */}
-        {isMeeting ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="会議タイトル">
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className={inputClass}
-                placeholder="例: 週次定例"
-              />
-            </Field>
-            <Field label="参加者（読点・カンマ区切り）">
-              <input
-                value={participants}
-                onChange={(e) => setParticipants(e.target.value)}
-                className={inputClass}
-                placeholder="例: 山田、佐藤、鈴木"
-              />
-            </Field>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="連絡先名">
-              <input
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                list="contact-name-suggestions"
-                className={inputClass}
-                placeholder="例: 山田太郎"
-              />
-              <datalist id="contact-name-suggestions">
-                {contactSuggestions.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </Field>
-            <Field label="電話番号">
-              <input
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                onBlur={onPhoneBlur}
-                list="phone-number-suggestions"
-                className={inputClass}
-                placeholder="例: 090-1234-5678"
-              />
-              <datalist id="phone-number-suggestions">
-                {phoneSuggestions.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
-            </Field>
-          </div>
-        )}
-
-        {/* 時刻系を 3 列でコンパクトに */}
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="開始時刻">
-            <input
-              type="datetime-local"
-              step={1}
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="終了時刻">
-            <input
-              type="datetime-local"
-              step={1}
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={isMeeting ? '会議時間' : '通話時間'}>
-            <div className="font-mono text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-              {computedDuration !== null ? formatHMS(computedDuration) : '—'}
-            </div>
-          </Field>
-        </div>
-
-        <div className="mt-3">
-          <Field label="タグ">
-            <div className="flex flex-wrap gap-1.5">
-              {settings.tags.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => setTag(tag === t.name ? '' : t.name)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
-                    tag === t.name
-                      ? 'text-white ring-transparent'
-                      : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700'
-                  }`}
-                  style={tag === t.name ? { backgroundColor: t.color } : {}}
-                >
-                  {t.name}
-                </button>
-              ))}
-              {tag && !settings.tags.find((t) => t.name === tag) && (
-                <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs dark:bg-slate-700 dark:text-slate-200">{tag}</span>
-              )}
-            </div>
-          </Field>
-        </div>
-
-        <div className="mt-3">
-          <Field label="メモ">
-            <textarea
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              rows={3}
-              className={inputClass}
-              placeholder="通話内容のメモ"
-            />
-          </Field>
-        </div>
-
-        {/* 保留区間 — 折りたたみ */}
-        {current.holds && current.holds.length > 0 && (
-          <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-            <summary className="cursor-pointer select-none text-xs font-medium text-slate-700 dark:text-slate-300">
-              保留区間 ({current.holds.length} 件 / 合計 {formatHMS(holdTotal)})
-            </summary>
-            <ul className="mt-2 space-y-1 text-xs">
-              {current.holds.map((h, i) => (
-                <li
-                  key={i}
-                  className="flex items-center gap-3 rounded border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  <span className="font-mono text-slate-600 dark:text-slate-300">{formatDateTime(h.start)}</span>
-                  <span className="text-slate-400">→</span>
-                  <span className="font-mono text-slate-600 dark:text-slate-300">{h.end ? formatDateTime(h.end) : '進行中'}</span>
-                  <span className="ml-auto font-mono text-amber-600 dark:text-amber-400">{formatHMS(h.sec)}</span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-
-        {/* マーカー（録音中に打ったブックマーク） */}
-        {(current.markers?.length ?? 0) > 0 && (
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-            <div className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              🔖 マーカー ({current.markers!.length})
-            </div>
-            <ul className="space-y-1.5">
-              {current.markers!.map((m, i) => (
-                <li key={`${m.at}-${i}`} className="flex items-center gap-2">
-                  <button
-                    onClick={() => playerRef.current?.seekTo(Math.max(0, m.at - settings.transcriptSeekOffsetSec))}
-                    disabled={!audioSrc}
-                    className="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs tabular-nums text-brand-700 hover:bg-brand-50 disabled:cursor-default disabled:text-slate-400 disabled:hover:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
-                    title={audioSrc ? 'クリックで該当位置を再生' : '録音がないため再生できません'}
-                  >
-                    ▶ {formatHMS(m.at)}
-                  </button>
+        {/* 本文 2 カラム */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(22rem,28rem)_1fr]">
+          {/* 左: 記録情報 */}
+          <div className="min-h-0 overflow-y-auto border-b border-slate-200 px-6 py-4 lg:border-b-0 lg:border-r dark:border-slate-800">
+            {isMeeting ? (
+              <div className="grid grid-cols-1 gap-3">
+                <Field label="会議タイトル">
                   <input
-                    defaultValue={m.label ?? ''}
-                    onBlur={(e) => {
-                      if (e.target.value !== (m.label ?? '')) handleMarkerLabel(i, e.target.value.trim());
-                    }}
-                    placeholder="ラベルを入力（例: 決定事項、宿題）"
-                    className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className={inputClass}
+                    placeholder="例: 週次定例"
                   />
-                  <button
-                    onClick={() => handleMarkerDelete(i)}
-                    className="shrink-0 rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                    title="このマーカーを削除"
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+                </Field>
+                <Field label="参加者（読点・カンマ区切り）">
+                  <input
+                    value={participants}
+                    onChange={(e) => setParticipants(e.target.value)}
+                    className={inputClass}
+                    placeholder="例: 山田、佐藤、鈴木"
+                  />
+                </Field>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                <Field label="連絡先名">
+                  <input
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                    list="contact-name-suggestions"
+                    className={inputClass}
+                    placeholder="例: 山田太郎"
+                  />
+                  <datalist id="contact-name-suggestions">
+                    {contactSuggestions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </Field>
+                <Field label="電話番号">
+                  <input
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onBlur={onPhoneBlur}
+                    list="phone-number-suggestions"
+                    className={inputClass}
+                    placeholder="例: 090-1234-5678"
+                  />
+                  <datalist id="phone-number-suggestions">
+                    {phoneSuggestions.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                </Field>
+              </div>
+            )}
 
-        {/* 録音 — 折りたたみ可（既定で展開） */}
-        {audioSrc && (
-          <details
-            open
-            className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800"
-          >
-            <summary className="flex cursor-pointer select-none items-center justify-between">
-              <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                🎙 録音 ({current.audio?.source === 'mic+system' ? 'マイク+システム' : 'マイク'})
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                {formatHMS(current.audio?.durationSec ?? 0)} / {((current.audio?.bytes ?? 0) / 1024 / 1024).toFixed(2)} MB
-              </div>
-            </summary>
-            <div className="mt-2">
-              <AudioPlayer ref={playerRef} src={audioSrc} />
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  onClick={handleSaveAudio}
-                  className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
-                  title="録音 (MP3) を名前を付けて保存"
-                >
-                  ⬇ 録音を保存…
-                </button>
-              </div>
-              <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">文字起こし</div>
-                  <div className="flex items-center gap-2">
-                    {current.transcriptStatus === 'running' && (
-                      <span className="text-xs text-brand-600 dark:text-brand-300">
-                        処理中… {transcribeProgress !== null ? `${transcribeProgress}%` : ''}
-                      </span>
-                    )}
-                    {current.transcriptStatus === 'queued' && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">待機中…</span>
-                    )}
-                    {transcriptBusy && (
-                      <button
-                        onClick={handleCancelTranscribe}
-                        className="rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
-                      >
-                        キャンセル
-                      </button>
-                    )}
-                    {current.transcript && !transcriptBusy && (
-                      <>
-                        <button
-                          onClick={() => handleSaveTranscript(false)}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
-                          title="文字起こしをテキストファイルとして保存"
-                        >
-                          ⬇ テキスト保存…
-                        </button>
-                        <button
-                          onClick={() => handleSaveTranscript(true)}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
-                          title="[00:01:23] 形式のタイムスタンプ付きで保存"
-                        >
-                          ⬇ 時刻付き…
-                        </button>
-                      </>
-                    )}
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="開始時刻">
+                <input
+                  type="datetime-local"
+                  step={1}
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="終了時刻">
+                <input
+                  type="datetime-local"
+                  step={1}
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+            <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <Clock3 size={14} className="text-slate-400" />
+              {isMeeting ? '会議時間' : '通話時間'}:
+              <span className="font-mono text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {computedDuration !== null ? formatHMS(computedDuration) : '—'}
+              </span>
+            </div>
+
+            <div className="mt-4">
+              <Field label="タグ">
+                <div className="flex flex-wrap gap-1.5">
+                  {settings.tags.map((t) => (
                     <button
-                      onClick={handleTranscribe}
-                      disabled={transcribing || transcriptBusy}
-                      className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                      key={t.name}
+                      onClick={() => setTag(tag === t.name ? '' : t.name)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
+                        tag === t.name
+                          ? 'text-white ring-transparent'
+                          : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700'
+                      }`}
+                      style={tag === t.name ? { backgroundColor: t.color } : {}}
                     >
-                      {current.transcript ? '再文字起こし' : '文字起こし'}
+                      {t.name}
+                    </button>
+                  ))}
+                  {tag && !settings.tags.find((t) => t.name === tag) && (
+                    <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs dark:bg-slate-700 dark:text-slate-200">{tag}</span>
+                  )}
+                </div>
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <Field label="メモ">
+                <textarea
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  rows={5}
+                  className={inputClass}
+                  placeholder={isMeeting ? '会議の要点・決定事項など' : '通話内容のメモ'}
+                />
+              </Field>
+            </div>
+
+            {/* 保留区間 — 折りたたみ */}
+            {current.holds && current.holds.length > 0 && (
+              <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+                <summary className="cursor-pointer select-none text-xs font-medium text-slate-700 dark:text-slate-300">
+                  保留区間 ({current.holds.length} 件 / 合計 {formatHMS(holdTotal)})
+                </summary>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {current.holds.map((h, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-3 rounded border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <span className="font-mono text-slate-600 dark:text-slate-300">{formatDateTime(h.start)}</span>
+                      <span className="text-slate-400">→</span>
+                      <span className="font-mono text-slate-600 dark:text-slate-300">{h.end ? formatDateTime(h.end) : '進行中'}</span>
+                      <span className="ml-auto font-mono text-amber-600 dark:text-amber-400">{formatHMS(h.sec)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {/* マーカー */}
+            {(current.markers?.length ?? 0) > 0 && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                <div className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  <Bookmark size={14} className="text-brand-600 dark:text-brand-300" />
+                  マーカー ({current.markers!.length})
+                </div>
+                <ul className="space-y-1.5">
+                  {current.markers!.map((m, i) => (
+                    <li key={`${m.at}-${i}`} className="flex items-center gap-2">
+                      <button
+                        onClick={() => playerRef.current?.seekTo(Math.max(0, m.at - settings.transcriptSeekOffsetSec))}
+                        disabled={!audioSrc}
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs tabular-nums text-brand-700 hover:bg-brand-50 disabled:cursor-default disabled:text-slate-400 disabled:hover:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
+                        title={audioSrc ? 'クリックで該当位置を再生' : '録音がないため再生できません'}
+                      >
+                        <Play size={10} /> {formatHMS(m.at)}
+                      </button>
+                      <input
+                        defaultValue={m.label ?? ''}
+                        onBlur={(e) => {
+                          if (e.target.value !== (m.label ?? '')) handleMarkerLabel(i, e.target.value.trim());
+                        }}
+                        placeholder="ラベルを入力（例: 決定事項、宿題）"
+                        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                      <button
+                        onClick={() => handleMarkerDelete(i)}
+                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                        title="このマーカーを削除"
+                      >
+                        <X size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* 右: 録音・文字起こし（広い領域で確認できる） */}
+          <div className="flex min-h-0 flex-col px-6 py-4">
+            {audioSrc ? (
+              <>
+                <div className="flex-none">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      <Mic size={14} className="text-slate-400" />
+                      録音 ({current.audio?.source === 'mic+system' ? 'マイク+システム' : current.audio?.source === 'system' ? 'システム音声' : 'マイク'})
+                      <span className="ml-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                        {formatHMS(current.audio?.durationSec ?? 0)} / {((current.audio?.bytes ?? 0) / 1024 / 1024).toFixed(2)} MB
+                      </span>
+                    </div>
+                    <button onClick={handleSaveAudio} className={smallBtn} title="録音 (MP3) を名前を付けて保存">
+                      <Download size={12} /> 録音を保存
                     </button>
                   </div>
+                  <AudioPlayer ref={playerRef} src={audioSrc} />
                 </div>
-                {current.transcriptStatus === 'running' && transcribeProgress !== null && (
-                  <div className="mb-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-                    <div
-                      className="h-full bg-brand-500 transition-all"
-                      style={{ width: `${transcribeProgress}%` }}
+
+                <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-slate-200 pt-3 dark:border-slate-700">
+                  <div className="mb-2 flex flex-none flex-wrap items-center justify-between gap-2">
+                    <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      <FileText size={14} className="text-slate-400" />
+                      文字起こし
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {current.transcriptStatus === 'running' && (
+                        <span className="text-xs text-brand-600 dark:text-brand-300">
+                          処理中… {transcribeProgress !== null ? `${transcribeProgress}%` : ''}
+                        </span>
+                      )}
+                      {current.transcriptStatus === 'queued' && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">待機中…</span>
+                      )}
+                      {transcriptBusy && (
+                        <button
+                          onClick={handleCancelTranscribe}
+                          className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+                        >
+                          <Ban size={12} /> キャンセル
+                        </button>
+                      )}
+                      {current.transcript && !transcriptBusy && (
+                        <>
+                          <button onClick={() => handleSaveTranscript(false)} className={smallBtn} title="文字起こしをテキストファイルとして保存">
+                            <Download size={12} /> テキスト
+                          </button>
+                          <button onClick={() => handleSaveTranscript(true)} className={smallBtn} title="[00:01:23] 形式のタイムスタンプ付きで保存">
+                            <Download size={12} /> 時刻付き
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={handleTranscribe}
+                        disabled={transcribing || transcriptBusy}
+                        className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                      >
+                        <RefreshCw size={12} />
+                        {current.transcript ? '再文字起こし' : '文字起こし'}
+                      </button>
+                    </div>
+                  </div>
+                  {current.transcriptStatus === 'running' && transcribeProgress !== null && (
+                    <div className="mb-2 h-1.5 w-full flex-none overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                      <div
+                        className="h-full bg-brand-500 transition-all"
+                        style={{ width: `${transcribeProgress}%` }}
+                      />
+                    </div>
+                  )}
+                  {current.transcriptStatus === 'error' && current.transcriptError && (
+                    <div className="mb-2 flex-none rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                      {current.transcriptError}
+                    </div>
+                  )}
+                  {transcribeError && (
+                    <div className="mb-2 flex-none rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                      {transcribeError}
+                    </div>
+                  )}
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                    <TranscriptView
+                      transcript={current.transcript}
+                      onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
+                      onEditSegment={(i, text) => void handleEditSegment(i, text)}
                     />
                   </div>
-                )}
-                {current.transcriptStatus === 'error' && current.transcriptError && (
-                  <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-                    {current.transcriptError}
-                  </div>
-                )}
-                {transcribeError && (
-                  <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-                    {transcribeError}
-                  </div>
-                )}
-                <div>
-                  <TranscriptView
-                    transcript={current.transcript}
-                    onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
-                    onEditSegment={(i, text) => void handleEditSegment(i, text)}
-                  />
                 </div>
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
+                <Mic size={32} strokeWidth={1.5} />
+                <div className="text-sm">この記録には録音がありません</div>
               </div>
-            </div>
-          </details>
-        )}
-
-        {exportMessage && (
-          <div className="mt-3 break-all rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-            {exportMessage}
+            )}
           </div>
-        )}
+        </div>
 
-        <div className="mt-5 flex justify-between">
-          <div className="flex gap-2">
+        {/* フッター */}
+        <div className="flex flex-none items-center justify-between gap-3 border-t border-slate-200 px-6 py-3 dark:border-slate-800">
+          <div className="flex items-center gap-2">
             <button
               onClick={handleDelete}
               disabled={saving}
-              className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
             >
-              削除
+              <Trash2 size={14} /> 削除
             </button>
             {isMeeting && (
               <button
                 onClick={handleSaveMinutes}
-                className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
+                className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
                 title="タイトル・参加者・メモ・マーカー・文字起こしをまとめた議事録を Markdown で保存"
               >
-                📄 議事録 (MD) を保存…
+                <FileText size={14} /> 議事録 (MD) を保存
               </button>
+            )}
+            {exportMessage && (
+              <span className="max-w-md truncate text-xs text-emerald-700 dark:text-emerald-300" title={exportMessage}>
+                {exportMessage}
+              </span>
             )}
           </div>
           <div className="flex gap-2">
@@ -560,7 +583,7 @@ export function CallEditDialog({
             <button
               onClick={handleSave}
               disabled={saving}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
               保存
             </button>

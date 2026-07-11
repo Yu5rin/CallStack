@@ -219,6 +219,45 @@ export function markForceQuit(): void {
   if (mainWindow) (mainWindow as unknown as { _forceQuit?: boolean })._forceQuit = true;
 }
 
+/**
+ * 保存された HUD 位置を現在のディスプレイ構成の作業領域内へ収める。
+ * モニタ構成が変わって画面外座標になっていても HUD が見えなくならないように。
+ */
+function clampHudPosition(pos: { x: number; y: number }, width: number, height: number): { x: number; y: number } {
+  const display = screen.getDisplayNearestPoint(pos);
+  const wa = display.workArea;
+  return {
+    x: Math.min(Math.max(pos.x, wa.x), wa.x + wa.width - width),
+    y: Math.min(Math.max(pos.y, wa.y), wa.y + wa.height - height),
+  };
+}
+
+/** HUD 上のカーソル監視。drag 領域では DOM の mouseenter が発火しないため main 側で判定する */
+let hudHoverTimer: NodeJS.Timeout | null = null;
+let hudHovered = false;
+
+function startHudHoverWatch(): void {
+  stopHudHoverWatch();
+  hudHovered = false;
+  hudHoverTimer = setInterval(() => {
+    if (!hudWindow || hudWindow.isDestroyed()) return;
+    const cur = screen.getCursorScreenPoint();
+    const b = hudWindow.getBounds();
+    const inside = cur.x >= b.x && cur.x < b.x + b.width && cur.y >= b.y && cur.y < b.y + b.height;
+    if (inside !== hudHovered) {
+      hudHovered = inside;
+      hudWindow.webContents.send('app-event', { type: 'hud:hover', hovered: inside });
+    }
+  }, 200);
+}
+
+function stopHudHoverWatch(): void {
+  if (hudHoverTimer) {
+    clearInterval(hudHoverTimer);
+    hudHoverTimer = null;
+  }
+}
+
 export function createHudWindow(
   position: { x: number; y: number } | null,
   size: HudSize = 'compact',
@@ -232,12 +271,15 @@ export function createHudWindow(
   const { width, height } = HUD_SIZES[size];
   const defaultX = workArea.x + workArea.width - width - 20;
   const defaultY = workArea.y + 20;
+  const pos = position
+    ? clampHudPosition(position, width, height)
+    : { x: defaultX, y: defaultY };
 
   hudWindow = new BrowserWindow({
     width,
     height,
-    x: position?.x ?? defaultX,
-    y: position?.y ?? defaultY,
+    x: pos.x,
+    y: pos.y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -258,6 +300,8 @@ export function createHudWindow(
   hudWindow.setAlwaysOnTop(true, 'screen-saver');
 
   attachEditContextMenu(hudWindow);
+  startHudHoverWatch();
+  hudWindow.on('closed', () => stopHudHoverWatch());
 
   hudWindow.once('ready-to-show', () => {
     hudWindow?.show();

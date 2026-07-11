@@ -71,7 +71,7 @@ const api = {
   hud: {
     end: (): Promise<CallRecord | null> => ipcRenderer.invoke('hud:end'),
     openMain: (): Promise<void> => ipcRenderer.invoke('hud:open-main'),
-    openEdit: (callId: string): Promise<void> => ipcRenderer.invoke('hud:open-edit', callId),
+    openEdit: (callId?: string): Promise<void> => ipcRenderer.invoke('hud:open-edit', callId),
     savePosition: (pos: { x: number; y: number }): Promise<void> =>
       ipcRenderer.invoke('hud:save-position', pos),
     getPosition: (): Promise<{ x: number; y: number } | null> =>
@@ -155,12 +155,16 @@ const api = {
       ipcRenderer.invoke('transcription:download-model', model),
     modelStatus: (model: WhisperModel): Promise<{ downloaded: boolean; path: string }> =>
       ipcRenderer.invoke('transcription:model-status', model),
+    deleteModel: (model: WhisperModel): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('transcription:delete-model', model),
   },
   retention: {
     runNow: (): Promise<number> => ipcRenderer.invoke('retention:run-now'),
   },
   backup: {
     create: (): Promise<string> => ipcRenderer.invoke('backup:create'),
+    chooseDir: (): Promise<{ canceled: true } | { canceled: false; dir: string }> =>
+      ipcRenderer.invoke('backup:choose-dir'),
     restore: (): Promise<
       { canceled: true } | { canceled: false; calls: number; backupPath: string }
     > => ipcRenderer.invoke('backup:restore'),

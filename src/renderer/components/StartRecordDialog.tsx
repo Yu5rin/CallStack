@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CallRecord, RecordKind, RecordingSourceConfig, Settings } from '../../shared/types';
+import { Phone, Users, Mic, Volume2, RefreshCw, AppWindow, Circle, Play } from 'lucide-react';
 import { AudioDeviceSelect } from './AudioDeviceSelect';
 
 interface CaptureWindow {
@@ -143,10 +144,10 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
         {/* 種別タブ */}
         <div className="mb-4 flex gap-2">
           <button onClick={() => setKind('call')} className={tabClass(!isMeeting, false)}>
-            📞 通話
+            <Phone size={14} className="mr-1.5 inline align-[-2px]" />通話
           </button>
           <button onClick={() => setKind('meeting')} className={tabClass(isMeeting, true)}>
-            👥 会議
+            <Users size={14} className="mr-1.5 inline align-[-2px]" />会議
           </button>
         </div>
 
@@ -206,7 +207,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
         {/* 録音ソース */}
         {recordingEnabled ? (
           <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-            <div className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">🎙 録音ソース</div>
+            <div className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><Mic size={13} />録音ソース</div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-slate-700 dark:text-slate-300">
               <label className="inline-flex items-center gap-1.5">
                 <input
@@ -214,7 +215,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                   checked={cfg.mic}
                   onChange={(e) => setCfg({ mic: e.target.checked })}
                 />
-                🎤 マイク
+                <Mic size={14} className="text-slate-500" /> マイク
               </label>
               <label className="inline-flex items-center gap-1.5">
                 <input
@@ -222,7 +223,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                   checked={cfg.system}
                   onChange={(e) => setCfg({ system: e.target.checked })}
                 />
-                🔊 システム音声
+                <Volume2 size={14} className="text-slate-500" /> システム音声
               </label>
               {cfg.system && (
                 <span className="inline-flex items-center gap-3 rounded-md bg-white px-2 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700">
@@ -262,7 +263,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                     disabled={loadingWindows}
                     className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
-                    {loadingWindows ? '更新中…' : '🔄 更新'}
+                    {loadingWindows ? '更新中…' : <><RefreshCw size={11} className="mr-0.5 inline align-[-1px]" />更新</>}
                   </button>
                 </div>
                 <div className="grid max-h-44 grid-cols-2 gap-2 overflow-auto">
@@ -280,7 +281,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                       {w.thumbnail ? (
                         <img src={w.thumbnail} alt="" className="h-14 w-full rounded object-cover" />
                       ) : (
-                        <div className="flex h-14 w-full items-center justify-center rounded bg-slate-100 text-2xl dark:bg-slate-700">🪟</div>
+                        <div className="flex h-14 w-full items-center justify-center rounded bg-slate-100 dark:bg-slate-700"><AppWindow size={24} className="text-slate-400" /></div>
                       )}
                       <div className="mt-1 truncate text-[11px] text-slate-700 dark:text-slate-300">{w.name}</div>
                     </button>
@@ -292,13 +293,13 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                   )}
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                  ⚠️ 実験的機能: Windows の仕様上、環境によっては全体の音声が録音される場合があります。
+                  実験的機能: Windows の仕様上、環境によっては全体の音声が録音される場合があります。
                 </p>
               </div>
             )}
             {nothingSelected && (
               <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                ⚠️ ソースが未選択のため、録音なしで時間だけを記録します。
+                ソースが未選択のため、録音なしで時間だけを記録します。
               </p>
             )}
             <label className="mt-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -333,7 +334,9 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                 isMeeting ? 'bg-violet-600 hover:bg-violet-700' : 'bg-brand-600 hover:bg-brand-700'
               }`}
             >
-              {recordingEnabled && !nothingSelected ? '🔴 録音して開始' : '▶ 開始'}
+              {recordingEnabled && !nothingSelected
+                ? <><Circle size={10} fill="currentColor" className="mr-1.5 inline animate-pulse align-[-1px]" />録音して開始</>
+                : <><Play size={12} fill="currentColor" className="mr-1.5 inline align-[-1px]" />開始</>}
             </button>
           </div>
         </div>

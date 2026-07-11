@@ -37,8 +37,10 @@ export function useActiveCall() {
       } else if (e.type === 'hold:changed') {
         setHolding(e.holding);
         setHoldSec(e.holdSec);
-      } else if (e.type === 'call:updated' && active && e.record.id === active.id) {
-        setActive(e.record);
+      } else if (e.type === 'call:updated') {
+        // クロージャの active は古いので関数型更新で照合する。
+        // 進行中の記録に対する更新（種別変更・タイトル入力など）のみ反映する。
+        setActive((prev) => (prev && e.record.id === prev.id && !e.record.endTime ? e.record : prev));
       }
     });
     return () => {

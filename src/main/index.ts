@@ -93,18 +93,19 @@ function getActive(): CallRecord | null {
   return store.getActiveCall();
 }
 
-function todayStats(): { count: number; totalSec: number } {
+function todayStats(): { calls: { count: number; totalSec: number }; meetings: { count: number; totalSec: number } } {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  let count = 0;
-  let totalSec = 0;
+  const calls = { count: 0, totalSec: 0 };
+  const meetings = { count: 0, totalSec: 0 };
   for (const c of store.getCalls()) {
     if (!c.endTime || c.deletedAt) continue;
     if (new Date(c.startTime).getTime() < start) continue;
-    count++;
-    totalSec += c.durationSec ?? 0;
+    const bucket = c.kind === 'meeting' ? meetings : calls;
+    bucket.count++;
+    bucket.totalSec += c.durationSec ?? 0;
   }
-  return { count, totalSec };
+  return { calls, meetings };
 }
 
 function startTickLoop() {
@@ -243,15 +244,36 @@ function formatHMS(sec: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(rs).padStart(2, '0')}`;
 }
 
-async function chooseAndExport(): Promise<{ count: number; path: string } | null> {
+/**
+ * 前回の保存先フォルダを既定にする保存ダイアログ。
+ * 保存が確定したらフォルダを記憶する。
+ */
+async function showSaveDialogRemembered(
+  title: string,
+  fileName: string,
+  filters: Electron.FileFilter[],
+): Promise<string | null> {
+  const s = store.getSettings();
+  const baseDir = s.lastSaveDir ?? app.getPath('documents');
   const result = await dialog.showSaveDialog({
-    title: 'CSV をエクスポート',
-    defaultPath: `callstack-${localDate(new Date())}.csv`,
-    filters: [{ name: 'CSV', extensions: ['csv'] }],
+    title,
+    defaultPath: path.join(baseDir, fileName),
+    filters,
   });
   if (result.canceled || !result.filePath) return null;
-  const count = await exportCsv(result.filePath, store.getCalls().filter((c) => !c.deletedAt), { range: 'all' });
-  return { count, path: result.filePath };
+  store.setSettings({ ...store.getSettings(), lastSaveDir: path.dirname(result.filePath) });
+  return result.filePath;
+}
+
+async function chooseAndExport(): Promise<{ count: number; path: string } | null> {
+  const filePath = await showSaveDialogRemembered(
+    'CSV をエクスポート',
+    `callstack-${localDate(new Date())}.csv`,
+    [{ name: 'CSV', extensions: ['csv'] }],
+  );
+  if (!filePath) return null;
+  const count = await exportCsv(filePath, store.getCalls().filter((c) => !c.deletedAt), { range: 'all' });
+  return { count, path: filePath };
 }
 
 const trayHandlers: TrayHandlers = {
@@ -434,14 +456,14 @@ function setupIpc(): void {
   });
 
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
-    const result = await dialog.showSaveDialog({
-      title: 'CSV をエクスポート',
-      defaultPath: `callstack-${localDate(new Date())}.csv`,
-      filters: [{ name: 'CSV', extensions: ['csv'] }],
-    });
-    if (result.canceled || !result.filePath) return { canceled: true } as const;
-    const count = await exportCsv(result.filePath, store.getCalls().filter((c) => !c.deletedAt), opts);
-    return { canceled: false, count, path: result.filePath } as const;
+    const filePath = await showSaveDialogRemembered(
+      'CSV をエクスポート',
+      `callstack-${localDate(new Date())}.csv`,
+      [{ name: 'CSV', extensions: ['csv'] }],
+    );
+    if (!filePath) return { canceled: true } as const;
+    const count = await exportCsv(filePath, store.getCalls().filter((c) => !c.deletedAt), opts);
+    return { canceled: false, count, path: filePath } as const;
   });
 
   const importCsvText = async (raw: string): Promise<{ result: CsvImportResult; backupPath: string }> => {
@@ -493,22 +515,26 @@ function setupIpc(): void {
 
   ipcMain.handle('report:weekly', async () => {
     const md = buildWeeklyReport(store.getCalls().filter((c) => !c.deletedAt));
-    const result = await dialog.showSaveDialog({
-      title: '週次レポートを保存',
-      defaultPath: `report-${weekStamp()}.md`,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    });
-    if (result.canceled || !result.filePath) return { canceled: true } as const;
-    await fs.writeFile(result.filePath, md, 'utf-8');
-    return { canceled: false, path: result.filePath } as const;
+    const filePath = await showSaveDialogRemembered(
+      '週次レポートを保存',
+      `report-${weekStamp()}.md`,
+      [{ name: 'Markdown', extensions: ['md'] }],
+    );
+    if (!filePath) return { canceled: true } as const;
+    await fs.writeFile(filePath, md, 'utf-8');
+    return { canceled: false, path: filePath } as const;
   });
 
   ipcMain.handle('hud:end', () => endCall());
   ipcMain.handle('hud:open-main', () => showMainWindow());
   // HUD の編集ボタン: メイン窓を前面に出して該当記録の編集ダイアログを開く
-  ipcMain.handle('hud:open-edit', (_e, callId: string) => {
+  ipcMain.handle('hud:open-edit', (_e, callId?: string) => {
+    const id = callId ?? getActive()?.id;
+    if (!id) return;
     showMainWindow();
-    broadcast('app-event', { type: 'edit:record', callId });
+    broadcast('app-event', { type: 'edit:record', callId: id });
+    // ウィンドウ復帰直後の取りこぼしに備えて少し遅れて再送する
+    setTimeout(() => broadcast('app-event', { type: 'edit:record', callId: id }), 400);
   });
   ipcMain.handle('hud:save-position', (_e, pos: { x: number; y: number }) => {
     const s = store.getSettings();
@@ -675,14 +701,14 @@ function setupIpc(): void {
     } catch {
       return { canceled: false, error: '録音ファイルが見つかりません（削除済みの可能性があります）。' };
     }
-    const result = await dialog.showSaveDialog({
-      title: '録音を保存',
-      defaultPath: `${exportBaseName(rec)}.mp3`,
-      filters: [{ name: 'MP3 音声', extensions: ['mp3'] }],
-    });
-    if (result.canceled || !result.filePath) return { canceled: true };
-    await fs.copyFile(src, result.filePath);
-    return { canceled: false, path: result.filePath };
+    const filePath = await showSaveDialogRemembered(
+      '録音を保存',
+      `${exportBaseName(rec)}.mp3`,
+      [{ name: 'MP3 音声', extensions: ['mp3'] }],
+    );
+    if (!filePath) return { canceled: true };
+    await fs.copyFile(src, filePath);
+    return { canceled: false, path: filePath };
   });
 
   // 文字起こしをテキストファイルとして保存
@@ -691,14 +717,14 @@ function setupIpc(): void {
   > => {
     const rec = store.getCall(callId);
     if (!rec?.transcript) return { canceled: false, error: 'この記録には文字起こしがありません。' };
-    const result = await dialog.showSaveDialog({
-      title: '文字起こしを保存',
-      defaultPath: `${exportBaseName(rec)}${withTimestamps ? '-時刻付き' : ''}.txt`,
-      filters: [{ name: 'テキスト', extensions: ['txt'] }],
-    });
-    if (result.canceled || !result.filePath) return { canceled: true };
-    await fs.writeFile(result.filePath, buildTranscriptText(rec, withTimestamps), 'utf-8');
-    return { canceled: false, path: result.filePath };
+    const filePath = await showSaveDialogRemembered(
+      '文字起こしを保存',
+      `${exportBaseName(rec)}${withTimestamps ? '-時刻付き' : ''}.txt`,
+      [{ name: 'テキスト', extensions: ['txt'] }],
+    );
+    if (!filePath) return { canceled: true };
+    await fs.writeFile(filePath, buildTranscriptText(rec, withTimestamps), 'utf-8');
+    return { canceled: false, path: filePath };
   });
 
   // 議事録 (Markdown) を保存 — メモ・マーカー・文字起こしをまとめて出力
@@ -707,14 +733,14 @@ function setupIpc(): void {
   > => {
     const rec = store.getCall(callId);
     if (!rec) return { canceled: false, error: '記録が見つかりません。' };
-    const result = await dialog.showSaveDialog({
-      title: '議事録を保存',
-      defaultPath: `議事録-${exportBaseName(rec).replace(/^(会議|通話)-/, '')}.md`,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    });
-    if (result.canceled || !result.filePath) return { canceled: true };
-    await fs.writeFile(result.filePath, buildMinutesMd(rec), 'utf-8');
-    return { canceled: false, path: result.filePath };
+    const filePath = await showSaveDialogRemembered(
+      '議事録を保存',
+      `議事録-${exportBaseName(rec).replace(/^(会議|通話)-/, '')}.md`,
+      [{ name: 'Markdown', extensions: ['md'] }],
+    );
+    if (!filePath) return { canceled: true };
+    await fs.writeFile(filePath, buildMinutesMd(rec), 'utf-8');
+    return { canceled: false, path: filePath };
   });
 
   // ============ Transcription ============
@@ -776,6 +802,20 @@ function setupIpc(): void {
 
   ipcMain.handle('transcription:model-status', async (_e, model: WhisperModel) => {
     return { downloaded: await isModelDownloaded(model), path: getModelPath(model) };
+  });
+
+  // モデルファイルの削除（ディスク節約）
+  ipcMain.handle('transcription:delete-model', async (_e, model: WhisperModel) => {
+    try {
+      await fs.unlink(getModelPath(model));
+      const s = store.getSettings();
+      s.transcription.modelDownloaded = { ...s.transcription.modelDownloaded, [model]: false };
+      store.setSettings(s);
+      logInfo('model', `deleted ${model}`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   });
 
   // ============ 音声ファイルの取り込み ============
@@ -893,6 +933,16 @@ function setupIpc(): void {
   // ============ Backup / Restore ============
   ipcMain.handle('backup:create', async () => {
     return store.backupNow('manual');
+  });
+
+  // 自動バックアップの複製先フォルダを選択（OneDrive 等を指定すれば実質クラウドバックアップになる）
+  ipcMain.handle('backup:choose-dir', async (): Promise<{ canceled: true } | { canceled: false; dir: string }> => {
+    const r = await dialog.showOpenDialog({
+      title: '自動バックアップの複製先フォルダを選択',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (r.canceled || r.filePaths.length === 0) return { canceled: true };
+    return { canceled: false, dir: r.filePaths[0] };
   });
 
   ipcMain.handle('backup:restore', async (): Promise<

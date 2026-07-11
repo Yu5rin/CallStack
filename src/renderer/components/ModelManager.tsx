@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CircleCheck, Trash2 } from 'lucide-react';
 import { WhisperModel, WHISPER_MODELS, AppEvent } from '../../shared/types';
 
 interface Props {
@@ -6,9 +7,10 @@ interface Props {
   onSelect: (m: WhisperModel) => void;
   downloaded: Partial<Record<WhisperModel, boolean>>;
   onDownloaded: (m: WhisperModel) => void;
+  onDeleted?: (m: WhisperModel) => void;
 }
 
-export function ModelManager({ selected, onSelect, downloaded, onDownloaded }: Props) {
+export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onDeleted }: Props) {
   const [progress, setProgress] = useState<Partial<Record<WhisperModel, { rec: number; total: number | null; done?: boolean; error?: string }>>>({});
 
   useEffect(() => {
@@ -27,6 +29,12 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded }: P
   const download = async (m: WhisperModel) => {
     setProgress((prev) => ({ ...prev, [m]: { rec: 0, total: null } }));
     await window.api.transcription.downloadModel(m);
+  };
+
+  const remove = async (m: WhisperModel) => {
+    if (!window.confirm(`モデル '${m}' を削除しますか？（再ダウンロードすれば再び使えます）`)) return;
+    const r = await window.api.transcription.deleteModel(m);
+    if (r.ok) onDeleted?.(m);
   };
 
   return (
@@ -57,7 +65,18 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded }: P
               {p?.error && <div className="text-xs text-red-600 dark:text-red-400">{p.error}</div>}
             </div>
             {isDl ? (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400">ダウンロード済</span>
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CircleCheck size={13} />ダウンロード済
+                </span>
+                <button
+                  onClick={() => remove(m.id)}
+                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                  title="モデルファイルを削除してディスクを空ける"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </span>
             ) : (
               <button
                 onClick={() => download(m.id)}

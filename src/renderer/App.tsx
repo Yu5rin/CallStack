@@ -10,6 +10,7 @@ import { formatHMS } from './utils/format';
 import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared/types';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
+import { Phone, Users, Bookmark, Play, Pause, Square } from 'lucide-react';
 import { ToastProvider, useToast } from './components/Toast';
 import { StartRecordDialog, StartMeta } from './components/StartRecordDialog';
 import { OnboardingDialog } from './components/OnboardingDialog';
@@ -70,7 +71,7 @@ function AppContent() {
         return;
       }
       if (e.type === 'marker:added') {
-        toast.info(`🔖 マーカーを追加しました（${e.count} 個目 / ${formatHMS(e.marker.at)}）`);
+        toast.info(`マーカーを追加しました（${e.count} 個目 / ${formatHMS(e.marker.at)}）`);
         return;
       }
       if (e.type === 'recording:state') {
@@ -173,7 +174,8 @@ function AppContent() {
               }`}
             >
               <span className={`inline-block h-2 w-2 animate-pulse rounded-full ${isMeeting ? 'bg-violet-500' : 'bg-emerald-500'}`} />
-              {isMeeting ? '👥 会議中' : '📞 通話中'}
+              {isMeeting ? <Users size={14} /> : <Phone size={14} />}
+              {isMeeting ? '会議中' : '通話中'}
               <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
             </span>
           ) : (
@@ -195,7 +197,7 @@ function AppContent() {
                 className="rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
                 title={recState.paused ? `録音を再開 (${settings.shortcuts.togglePauseRecording})` : `録音を一時停止 (${settings.shortcuts.togglePauseRecording})`}
               >
-                {recState.paused ? '▶' : '⏸'}
+                {recState.paused ? <Play size={12} /> : <Pause size={12} />}
               </button>
             </span>
           )}
@@ -205,7 +207,7 @@ function AppContent() {
               className="max-w-[14rem] truncate rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900 dark:hover:bg-amber-900"
               title={`${recError}\n(クリックで閉じる)`}
             >
-              録音エラー: {recError} ✕
+              録音エラー: {recError}
             </button>
           )}
           {active ? (
@@ -215,13 +217,13 @@ function AppContent() {
                 className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 title="現在時刻にマーカーを打つ（あとで該当箇所へジャンプできます）"
               >
-                🔖 マーカー
+                <Bookmark size={14} className="mr-1 inline align-[-2px]" />マーカー
               </button>
               <button
                 onClick={() => window.api.calls.endNow()}
                 className="rounded-md bg-red-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
               >
-                終了 ({settings.shortcuts.endCall})
+                <Square size={12} fill="currentColor" className="mr-1 inline align-[-1px]" />終了 ({settings.shortcuts.endCall})
               </button>
             </>
           ) : (
@@ -230,7 +232,7 @@ function AppContent() {
               className="rounded-md bg-brand-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
               title={`記録を開始（ダイアログで通話/会議を選択）\nショートカット即開始: 通話 ${settings.shortcuts.startCall} / 会議 ${settings.shortcuts.startMeeting}`}
             >
-              ▶ 開始
+              <Play size={14} fill="currentColor" className="mr-1 inline align-[-2px]" />開始
             </button>
           )}
         </div>

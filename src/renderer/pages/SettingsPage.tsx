@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
+import {
+  Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
+  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2,
+} from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
@@ -71,11 +75,11 @@ function WhisperSetup() {
       </div>
       {status === null && <div className="text-xs text-slate-500">確認中…</div>}
       {status && status.ok && (
-        <div className="text-xs text-emerald-700 dark:text-emerald-300">✅ 文字起こしの準備が整っています。</div>
+        <div className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-300"><CircleCheck size={13} />文字起こしの準備が整っています。</div>
       )}
       {status && !status.ok && (
         <div className="space-y-2">
-          <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">⚠️ {status.error}</div>
+          <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{status.error}</div>
         </div>
       )}
       <div className="mt-2 flex items-center gap-2">
@@ -85,7 +89,7 @@ function WhisperSetup() {
           className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           title="whisper.cpp の Windows ビルドを GitHub から取得して自動配置します"
         >
-          {downloading ? '取得中…' : '⬇ whisper.cpp をダウンロード'}
+          {downloading ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
         </button>
         {progress && (
           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -103,7 +107,7 @@ function WhisperSetup() {
         </div>
       )}
       {dlError && (
-        <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">⚠️ {dlError}</div>
+        <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{dlError}</div>
       )}
     </div>
   );
@@ -172,7 +176,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       {/* ============ 外観 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">🎨 外観</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Palette size={16} className="text-slate-400" />外観</h3>
         <Row label="テーマ">
           <div className="flex gap-3 text-sm">
             {(['system', 'light', 'dark', 'black'] as ThemePref[]).map((t) => (
@@ -192,7 +196,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ ウィンドウと HUD ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">🪟 ウィンドウと HUD</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><AppWindow size={16} className="text-slate-400" />ウィンドウと HUD</h3>
         <Row label="自動起動">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
@@ -256,7 +260,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ ショートカット ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">⌨️ グローバルショートカット</h3>
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Keyboard size={16} className="text-slate-400" />グローバルショートカット</h3>
         <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
           システム全体で有効。フォーカス中の入力欄にキーを押すと記録できます。
         </p>
@@ -303,7 +307,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
       {/* ============ タグ ============ */}
       <section className={sectionClass}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">🏷 タグ</h3>
+          <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Tag size={16} className="text-slate-400" />タグ</h3>
           <button onClick={addTag} className={ghostBtn}>＋ タグを追加</button>
         </div>
         <div className="space-y-2">
@@ -333,7 +337,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ 録音 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">🎙 録音</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Mic size={16} className="text-slate-400" />録音</h3>
         <Row label="通話と同時に録音">
           <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
             <input
@@ -417,7 +421,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ 文字起こし ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">📝 文字起こし (whisper.cpp ローカル)</h3>
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><FileText size={16} className="text-slate-400" />文字起こし (whisper.cpp ローカル)</h3>
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           すべてオフラインで動作します。初回のみ whisper.cpp 本体とモデルのダウンロードが必要です（下のボタンで完結します）。
         </p>
@@ -466,13 +470,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             onDownloaded={(m) => updateTranscription({
               modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: true },
             })}
+            onDeleted={(m) => updateTranscription({
+              modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: false },
+            })}
           />
         </div>
       </section>
 
       {/* ============ 通知と確認 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">🔔 通知と確認</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Bell size={16} className="text-slate-400" />通知と確認</h3>
         <Row label="長電話アラート（分）">
           <input
             type="number"
@@ -528,16 +535,43 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ データ ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-slate-100">💾 データのバックアップ</h3>
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Database size={16} className="text-slate-400" />データのバックアップ</h3>
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。
         </p>
+        <Row label="バックアップの複製先">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="max-w-md truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {draft.autoBackupDir ?? '（未設定）'}
+            </span>
+            <button
+              onClick={async () => {
+                const r = await window.api.backup.chooseDir();
+                if (!r.canceled) update({ autoBackupDir: r.dir });
+              }}
+              className={ghostBtn}
+            >
+              <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
+            </button>
+            {draft.autoBackupDir && (
+              <button
+                onClick={() => update({ autoBackupDir: null })}
+                className="text-xs text-slate-500 underline hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                解除
+              </button>
+            )}
+          </div>
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            日次・手動バックアップをこのフォルダにも複製します。OneDrive / Google Drive のフォルダを指定すれば実質クラウドバックアップになります
+          </span>
+        </Row>
         <BackupRestoreRow />
       </section>
 
       {/* ============ バージョン情報 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">ℹ️ バージョン情報</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Info size={16} className="text-slate-400" />バージョン情報</h3>
         <AboutSection
           checkOnStartup={draft.checkUpdatesOnStartup}
           onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
@@ -547,7 +581,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
       {showRecordingWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-[min(94vw,32rem)] rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
-            <h3 className="mb-2 text-lg font-bold text-slate-900 dark:text-slate-100">⚠️ 録音に関する重要な注意</h3>
+            <h3 className="mb-2 inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><AlertTriangle size={18} className="text-amber-500" />録音に関する重要な注意</h3>
             <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-300">
               <li>通話の録音には<strong>相手の同意が必要</strong>な場合があります（地域・業務上のルールを確認してください）</li>
               <li>録音ファイルはこの PC 内にのみ保存され、外部に送信されません</li>
@@ -604,10 +638,10 @@ function AboutSection({
         setResult(`更新を確認できませんでした（${r.error ?? '不明なエラー'}）。リリースページで直接確認してください。`);
         setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
       } else if (r.hasUpdate) {
-        setResult(`🎉 新しいバージョン v${r.latest} が利用できます（現在 v${r.current}）`);
+        setResult(`新しいバージョン v${r.latest} が利用できます（現在 v${r.current}）`);
         setUpdateUrl(r.url ?? null);
       } else {
-        setResult(`✅ 最新です（v${r.current}）`);
+        setResult(`最新です（v${r.current}）`);
       }
     } finally {
       setChecking(false);
@@ -626,7 +660,7 @@ function AboutSection({
             disabled={checking}
             className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            {checking ? '確認中…' : '🔄 更新を確認'}
+            {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
           </button>
           {updateUrl && (
             <button
@@ -655,19 +689,19 @@ function AboutSection({
             onClick={() => void window.api.app.openPath('data')}
             className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            📁 データフォルダを開く
+            <FolderOpen size={12} className="mr-1 inline align-[-1px]" />データフォルダを開く
           </button>
           <button
             onClick={() => void window.api.app.openPath('recordings')}
             className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            🎙 録音フォルダを開く
+            <Mic size={12} className="mr-1 inline align-[-1px]" />録音フォルダを開く
           </button>
           <button
             onClick={() => void window.api.app.openPath('logs')}
             className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            📋 ログフォルダを開く
+            <FileText size={12} className="mr-1 inline align-[-1px]" />ログフォルダを開く
           </button>
         </div>
         <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
@@ -766,7 +800,7 @@ function SourceConfigRow({
             onChange={(e) => onChange({ ...value, mic: e.target.checked })}
             disabled={disabled}
           />
-          🎤 マイク
+          <Mic size={14} className="text-slate-500" /> マイク
         </label>
         <label className="inline-flex items-center gap-1.5">
           <input
@@ -775,7 +809,7 @@ function SourceConfigRow({
             onChange={(e) => onChange({ ...value, system: e.target.checked })}
             disabled={disabled}
           />
-          🔊 システム音声
+          <Volume2 size={14} className="text-slate-500" /> システム音声
         </label>
         {value.system && (
           <span className="inline-flex items-center gap-3 rounded-md bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
@@ -800,7 +834,7 @@ function SourceConfigRow({
           </span>
         )}
         {!value.mic && !value.system && (
-          <span className="text-xs text-amber-600 dark:text-amber-400">⚠️ 両方 OFF のため録音されません</span>
+          <span className="text-xs text-amber-600 dark:text-amber-400">両方 OFF のため録音されません</span>
         )}
       </div>
     </Row>
