@@ -3,9 +3,11 @@ import { ShortcutSettings } from '../shared/types';
 
 export interface ShortcutHandlers {
   start: () => void;
+  startMeeting: () => void;
   end: () => void;
   toggle: () => void;
   toggleHold: () => void;
+  togglePauseRecording: () => void;
   openSettings: () => void;
   assignTag: (idx: number) => void;
 }
@@ -15,9 +17,11 @@ export function registerShortcuts(shortcuts: ShortcutSettings, handlers: Shortcu
   const failures: string[] = [];
   const attempts: Array<[string, () => void, string]> = [
     [shortcuts.startCall, handlers.start, 'startCall'],
+    [shortcuts.startMeeting, handlers.startMeeting, 'startMeeting'],
     [shortcuts.endCall, handlers.end, 'endCall'],
     [shortcuts.toggleWindow, handlers.toggle, 'toggleWindow'],
     [shortcuts.toggleHold, handlers.toggleHold, 'toggleHold'],
+    [shortcuts.togglePauseRecording, handlers.togglePauseRecording, 'togglePauseRecording'],
     [shortcuts.openSettings, handlers.openSettings, 'openSettings'],
     [shortcuts.assignTag1, () => handlers.assignTag(0), 'assignTag1'],
     [shortcuts.assignTag2, () => handlers.assignTag(1), 'assignTag2'],

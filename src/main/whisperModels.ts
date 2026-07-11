@@ -11,6 +11,7 @@ const MODEL_FILES: Record<WhisperModel, string> = {
   base:   'ggml-base.bin',
   small:  'ggml-small.bin',
   medium: 'ggml-medium.bin',
+  'large-v3-turbo': 'ggml-large-v3-turbo.bin',
 };
 
 export function getModelPath(model: WhisperModel): string {

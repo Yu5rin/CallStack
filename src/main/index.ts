@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { Store } from './store';
 import {
   CallRecord, CsvExportOptions, CsvImportResult, Settings,
-  CallTranscript, WhisperModel,
+  CallTranscript, WhisperModel, RecordKind,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -29,7 +29,10 @@ import { notify } from './notifications';
 import { ensureAppDirs, getDirs } from './paths';
 import { registerAppProtocol, registerAppProtocolPrivilege } from './protocol';
 import * as recording from './recording';
-import { enqueue as enqueueTranscription, setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup } from './transcription';
+import {
+  enqueue as enqueueTranscription, cancel as cancelTranscription,
+  setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup,
+} from './transcription';
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
@@ -73,8 +76,9 @@ function startTickLoop() {
       trayHandlers,
     );
 
+    // 長電話アラートは通話のみ（会議は長時間が通常のため対象外）
     const alertMin = store.getSettings().longCallAlertMin;
-    if (alertMin && alertMin > 0 && !longCallAlertFired && elapsedSec >= alertMin * 60) {
+    if (alertMin && alertMin > 0 && !longCallAlertFired && elapsedSec >= alertMin * 60 && active.kind !== 'meeting') {
       longCallAlertFired = true;
       notify('長電話アラート', `${alertMin} 分経過しました。`, () => showMainWindow());
     }
@@ -88,14 +92,15 @@ function stopTickLoop() {
   }
 }
 
-function startCall(): CallRecord | null {
+function startCall(kind: RecordKind = 'call'): CallRecord | null {
   if (getActive()) {
-    notify('CallStack', '進行中の通話があります。先に終了してください。');
+    notify('CallStack', '進行中の記録があります。先に終了してください。');
     return null;
   }
   const now = new Date().toISOString();
   const rec: CallRecord = {
     id: nanoid(),
+    kind,
     startTime: now,
     endTime: null,
     durationSec: null,
@@ -135,9 +140,17 @@ async function endCall(): Promise<CallRecord | null> {
   updateTray({ active: false, today: todayStats() }, trayHandlers);
   if (updated) {
     broadcast('app-event', { type: 'call:ended', record: updated });
-    notify('通話を記録しました', `${formatHMS(durationSec)} — クリックで詳細編集`, () => showMainWindow());
+    const label = updated.kind === 'meeting' ? '会議を記録しました' : '通話を記録しました';
+    notify(label, `${formatHMS(durationSec)} — クリックで詳細編集`, () => showMainWindow());
   }
   return updated;
+}
+
+/** 録音中のレンダラへ一時停止/再開のトグルを指示する */
+function togglePauseRecording(): void {
+  if (!getActive()) return;
+  if (!store.getSettings().recording.enabled) return;
+  broadcast('app-event', { type: 'recording:togglePause' });
 }
 
 function toggleHold(): void {
@@ -172,6 +185,7 @@ async function chooseAndExport(): Promise<{ count: number; path: string } | null
 
 const trayHandlers: TrayHandlers = {
   onStart: () => startCall(),
+  onStartMeeting: () => startCall('meeting'),
   onEnd: () => { void endCall(); },
   onOpen: () => showMainWindow(),
   onExport: async () => {
@@ -214,9 +228,11 @@ function reRegisterShortcuts(): void {
   const s = store.getSettings();
   const failures = registerShortcuts(s.shortcuts, {
     start: () => startCall(),
+    startMeeting: () => startCall('meeting'),
     end: () => { void endCall(); },
     toggle: () => toggleMainWindow(),
     toggleHold: () => toggleHold(),
+    togglePauseRecording: () => togglePauseRecording(),
     openSettings: () => showMainWindowAt('settings'),
     assignTag: (idx) => assignTagByIndex(idx),
   });
@@ -230,7 +246,7 @@ function setupIpc(): void {
   ipcMain.handle('calls:getActive', () => store.getActiveCall());
   ipcMain.handle('calls:get', (_e, id: string) => store.getCall(id));
 
-  ipcMain.handle('calls:startNow', () => startCall());
+  ipcMain.handle('calls:startNow', (_e, kind?: RecordKind) => startCall(kind ?? 'call'));
   ipcMain.handle('calls:endNow', () => endCall());
   ipcMain.handle('calls:toggleHold', () => toggleHold());
 
@@ -253,6 +269,7 @@ function setupIpc(): void {
   ipcMain.handle('calls:create', (_e, partial: Partial<CallRecord>) => {
     const rec: CallRecord = {
       id: nanoid(),
+      kind: partial.kind ?? 'call',
       startTime: partial.startTime ?? new Date().toISOString(),
       endTime: partial.endTime ?? null,
       durationSec: partial.durationSec ?? null,
@@ -260,6 +277,8 @@ function setupIpc(): void {
       memo: partial.memo ?? '',
       contactName: partial.contactName,
       phoneNumber: partial.phoneNumber,
+      title: partial.title,
+      participants: partial.participants,
       holds: partial.holds ?? [],
       holdSec: partial.holdSec ?? 0,
     };
@@ -306,6 +325,7 @@ function setupIpc(): void {
       if (!p.record || !p.record.startTime) { skipped += 1; continue; }
       const r: CallRecord = {
         id: p.record.id ?? nanoid(),
+        kind: p.record.kind ?? 'call',
         startTime: p.record.startTime,
         endTime: p.record.endTime ?? null,
         durationSec: p.record.durationSec ?? null,
@@ -313,6 +333,8 @@ function setupIpc(): void {
         memo: p.record.memo ?? '',
         contactName: p.record.contactName,
         phoneNumber: p.record.phoneNumber,
+        title: p.record.title,
+        participants: p.record.participants,
         holdSec: p.record.holdSec ?? 0,
       };
       ok.push(r);
@@ -420,6 +442,57 @@ function setupIpc(): void {
     return true;
   });
 
+  // HUD やショートカットからの一時停止指示を、録音中のレンダラへ中継する
+  ipcMain.handle('recording:toggle-pause', () => {
+    togglePauseRecording();
+    return true;
+  });
+
+  // 録音を実行しているレンダラが一時停止状態を確定させたら全ウィンドウへ通知
+  ipcMain.handle('recording:set-paused', (_e, callId: string, paused: boolean) => {
+    broadcast('app-event', { type: 'recording:paused', callId, paused });
+    return true;
+  });
+
+  // 録音ファイル (MP3) を名前を付けて保存
+  ipcMain.handle('recording:save-as', async (_e, callId: string): Promise<
+    { canceled: true } | { canceled: false; path: string } | { canceled: false; error: string }
+  > => {
+    const rec = store.getCall(callId);
+    if (!rec?.audio) return { canceled: false, error: 'この記録には録音がありません。' };
+    const { recordings } = getDirs();
+    const src = path.join(recordings, rec.audio.path);
+    try {
+      await fs.access(src);
+    } catch {
+      return { canceled: false, error: '録音ファイルが見つかりません（削除済みの可能性があります）。' };
+    }
+    const result = await dialog.showSaveDialog({
+      title: '録音を保存',
+      defaultPath: `${exportBaseName(rec)}.mp3`,
+      filters: [{ name: 'MP3 音声', extensions: ['mp3'] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fs.copyFile(src, result.filePath);
+    return { canceled: false, path: result.filePath };
+  });
+
+  // 文字起こしをテキストファイルとして保存
+  ipcMain.handle('transcript:save-as', async (_e, callId: string, withTimestamps: boolean): Promise<
+    { canceled: true } | { canceled: false; path: string } | { canceled: false; error: string }
+  > => {
+    const rec = store.getCall(callId);
+    if (!rec?.transcript) return { canceled: false, error: 'この記録には文字起こしがありません。' };
+    const result = await dialog.showSaveDialog({
+      title: '文字起こしを保存',
+      defaultPath: `${exportBaseName(rec)}${withTimestamps ? '-時刻付き' : ''}.txt`,
+      filters: [{ name: 'テキスト', extensions: ['txt'] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fs.writeFile(result.filePath, buildTranscriptText(rec, withTimestamps), 'utf-8');
+    return { canceled: false, path: result.filePath };
+  });
+
   // ============ Transcription ============
   ipcMain.handle('transcription:start', async (_e, callId: string) => {
     const rec = store.getCall(callId);
@@ -430,6 +503,10 @@ function setupIpc(): void {
     if (!setup.ok) return setup;
     queueTranscription(callId);
     return { ok: true };
+  });
+
+  ipcMain.handle('transcription:cancel', (_e, callId: string) => {
+    return cancelTranscription(callId);
   });
 
   ipcMain.handle('transcription:check-setup', async () => {
@@ -536,7 +613,43 @@ function queueTranscription(callId: string): void {
     audioPath: abs,
     model: s.transcription.model,
     language: s.transcription.language,
+    prompt: s.transcription.prompt,
   });
+}
+
+/** 保存ダイアログの既定ファイル名（例: 会議-20260613-1030-定例MTG） */
+function exportBaseName(rec: CallRecord): string {
+  const d = new Date(rec.startTime);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  const label = rec.kind === 'meeting' ? '会議' : '通話';
+  const name = (rec.kind === 'meeting' ? rec.title : rec.contactName) ?? '';
+  const safe = name.replace(/[\\/:*?"<>|\r\n]+/g, '-').trim();
+  return safe ? `${label}-${stamp}-${safe}` : `${label}-${stamp}`;
+}
+
+function buildTranscriptText(rec: CallRecord, withTimestamps: boolean): string {
+  const t = rec.transcript!;
+  const isMeeting = rec.kind === 'meeting';
+  const lines: string[] = [];
+  lines.push(`${isMeeting ? '会議' : '通話'}の文字起こし`);
+  if (isMeeting && rec.title) lines.push(`タイトル: ${rec.title}`);
+  if (isMeeting && rec.participants?.length) lines.push(`参加者: ${rec.participants.join('、')}`);
+  if (!isMeeting && rec.contactName) lines.push(`連絡先: ${rec.contactName}`);
+  if (!isMeeting && rec.phoneNumber) lines.push(`電話番号: ${rec.phoneNumber}`);
+  lines.push(`日時: ${rec.startTime.slice(0, 16).replace('T', ' ')}`);
+  if (rec.durationSec !== null) lines.push(`時間: ${formatHMS(rec.durationSec)}`);
+  lines.push(`モデル: ${t.model} / 言語: ${t.language || '自動'}`);
+  lines.push('');
+  if (withTimestamps && t.segments && t.segments.length > 0) {
+    for (const s of t.segments) {
+      lines.push(`[${formatHMS(Math.floor(s.start))}] ${s.text}`);
+    }
+  } else {
+    lines.push(t.text);
+  }
+  lines.push('');
+  return lines.join('\r\n');
 }
 
 function setupTranscriptionHandlers(): void {
@@ -544,6 +657,16 @@ function setupTranscriptionHandlers(): void {
     onStart: (callId) => {
       const updated = store.updateCall(callId, { transcriptStatus: 'running' });
       if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'running' });
+    },
+    onProgress: (callId, percent) => {
+      broadcast('app-event', { type: 'transcription:progress', callId, percent });
+    },
+    onCancelled: (callId) => {
+      const rec = store.getCall(callId);
+      // 過去の文字起こしが残っていれば done、なければ none に戻す
+      const status = rec?.transcript ? 'done' : 'none';
+      const updated = store.updateCall(callId, { transcriptStatus: status, transcriptError: undefined });
+      if (updated) broadcast('app-event', { type: 'transcription:status', callId, status });
     },
     onDone: (callId, transcript) => {
       const updated = store.updateCall(callId, { transcript, transcriptStatus: 'done', transcriptError: undefined });

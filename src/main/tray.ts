@@ -22,6 +22,7 @@ function buildIcon(active: boolean): Electron.NativeImage {
 
 export interface TrayHandlers {
   onStart: () => void;
+  onStartMeeting: () => void;
   onEnd: () => void;
   onOpen: () => void;
   onExport: () => void;
@@ -88,9 +89,12 @@ function buildMenu(state: TrayState, h: TrayHandlers): Electron.Menu {
     click: () => h.onSetTheme(value),
   });
   return Menu.buildFromTemplate([
-    state.active
-      ? { label: '通話を終了', click: h.onEnd }
-      : { label: '通話を開始', click: h.onStart },
+    ...(state.active
+      ? [{ label: '記録を終了', click: h.onEnd }]
+      : [
+          { label: '通話を開始', click: h.onStart },
+          { label: '会議を開始', click: h.onStartMeeting },
+        ]),
     { type: 'separator' },
     { label: 'メイン窓を開く', click: h.onOpen },
     { label: 'CSV エクスポート…', click: h.onExport },

@@ -140,11 +140,17 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <Row label="通話を開始">
             <ShortcutInput value={draft.shortcuts.startCall} onChange={(v) => updateShortcut('startCall', v)} />
           </Row>
-          <Row label="通話を終了">
+          <Row label="会議を開始">
+            <ShortcutInput value={draft.shortcuts.startMeeting} onChange={(v) => updateShortcut('startMeeting', v)} />
+          </Row>
+          <Row label="通話/会議を終了">
             <ShortcutInput value={draft.shortcuts.endCall} onChange={(v) => updateShortcut('endCall', v)} />
           </Row>
           <Row label="保留トグル">
             <ShortcutInput value={draft.shortcuts.toggleHold} onChange={(v) => updateShortcut('toggleHold', v)} />
+          </Row>
+          <Row label="録音の一時停止/再開">
+            <ShortcutInput value={draft.shortcuts.togglePauseRecording} onChange={(v) => updateShortcut('togglePauseRecording', v)} />
           </Row>
           <Row label="メイン窓を表示/隠す">
             <ShortcutInput value={draft.shortcuts.toggleWindow} onChange={(v) => updateShortcut('toggleWindow', v)} />
@@ -304,6 +310,18 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             <option value="ja">日本語</option>
             <option value="en">英語</option>
           </select>
+        </Row>
+        <Row label="用語ヒント">
+          <textarea
+            value={draft.transcription.prompt}
+            onChange={(e) => updateTranscription({ prompt: e.target.value })}
+            rows={2}
+            className={`w-full ${inputClass}`}
+            placeholder="例: CallStack、山田太郎、御見積、リスケ"
+          />
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            社名・人名・専門用語を読点区切りで書くと、固有名詞の認識精度が上がります（whisper の初期プロンプトとして渡されます）
+          </span>
         </Row>
         <SetupCheck />
         <div className="mt-3">

@@ -7,6 +7,7 @@ const CRLF = '\r\n';
 
 const COLUMNS: Array<{ key: string; header: string }> = [
   { key: 'id', header: 'id' },
+  { key: 'kind', header: 'kind' },
   { key: 'startTime', header: 'start_time' },
   { key: 'endTime', header: 'end_time' },
   { key: 'durationSec', header: 'duration_sec' },
@@ -19,6 +20,8 @@ const COLUMNS: Array<{ key: string; header: string }> = [
   { key: 'memo', header: 'memo' },
   { key: 'contactName', header: 'contact_name' },
   { key: 'phoneNumber', header: 'phone_number' },
+  { key: 'title', header: 'title' },
+  { key: 'participants', header: 'participants' },
   { key: 'audioPath', header: 'audio_path' },
   { key: 'transcript', header: 'transcript' },
 ];
@@ -78,6 +81,7 @@ export function buildCsv(calls: CallRecord[]): string {
     const talk = (c.durationSec ?? 0) - hold;
     const row = {
       id: c.id,
+      kind: c.kind ?? 'call',
       startTime: localIso(c.startTime),
       endTime: c.endTime ? localIso(c.endTime) : '',
       durationSec: c.durationSec ?? '',
@@ -90,6 +94,8 @@ export function buildCsv(calls: CallRecord[]): string {
       memo: c.memo ?? '',
       contactName: c.contactName ?? '',
       phoneNumber: c.phoneNumber ?? '',
+      title: c.title ?? '',
+      participants: c.participants?.join(';') ?? '',
       audioPath: c.audio?.path ?? '',
       transcript: c.transcript?.text ?? '',
     };
@@ -170,12 +176,15 @@ export function parseCsv(raw: string): ParsedRow[] {
   const header = rows[0].map((h) => h.trim());
   const idx = (name: string) => header.indexOf(name);
   const idIdx = idx('id');
+  const kindIdx = idx('kind');
   const startIdx = idx('start_time');
   const endIdx = idx('end_time');
   const tagIdx = idx('tag');
   const memoIdx = idx('memo');
   const contactIdx = idx('contact_name');
   const phoneIdx = idx('phone_number');
+  const titleIdx = idx('title');
+  const participantsIdx = idx('participants');
   const holdIdx = idx('hold_sec');
   if (startIdx < 0) {
     return [{ rowNumber: 1, error: 'ヘッダ行に start_time 列が見つかりません' }];
@@ -216,10 +225,13 @@ export function parseCsv(raw: string): ParsedRow[] {
       out.push({ rowNumber: r + 1, error: 'memo が 10000 字を超えています' });
       continue;
     }
+    const kindRaw = kindIdx >= 0 ? cols[kindIdx]?.trim() : '';
+    const participantsRaw = participantsIdx >= 0 ? (cols[participantsIdx]?.trim() ?? '') : '';
     out.push({
       rowNumber: r + 1,
       record: {
         id: idIdx >= 0 ? (cols[idIdx]?.trim() || undefined) : undefined,
+        kind: kindRaw === 'meeting' ? 'meeting' : 'call',
         startTime: new Date(startTime).toISOString(),
         endTime: endVal,
         durationSec,
@@ -227,6 +239,8 @@ export function parseCsv(raw: string): ParsedRow[] {
         memo,
         contactName: contactIdx >= 0 ? (cols[contactIdx]?.trim() || undefined) : undefined,
         phoneNumber: phoneIdx >= 0 ? (cols[phoneIdx]?.trim() || undefined) : undefined,
+        title: titleIdx >= 0 ? (cols[titleIdx]?.trim() || undefined) : undefined,
+        participants: participantsRaw ? participantsRaw.split(';').map((p) => p.trim()).filter(Boolean) : undefined,
         holdSec: isNaN(holdSec) ? 0 : Math.max(0, Math.round(holdSec)),
       },
     });

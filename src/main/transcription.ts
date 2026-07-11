@@ -11,12 +11,21 @@ export interface TranscribeOptions {
   audioPath: string;          // absolute path to mp3
   model: WhisperModel;
   language: 'auto' | 'ja' | 'en';
+  /** 用語ヒント（whisper の初期プロンプト）。空文字なら渡さない */
+  prompt?: string;
 }
 
 export class WhisperMissingError extends Error {
   constructor(public readonly binaryPath: string) {
     super(`whisper.cpp の実行ファイルが見つかりません: ${binaryPath}`);
     this.name = 'WhisperMissingError';
+  }
+}
+
+export class TranscriptionCancelledError extends Error {
+  constructor() {
+    super('文字起こしをキャンセルしました');
+    this.name = 'TranscriptionCancelledError';
   }
 }
 
@@ -53,7 +62,11 @@ async function resolveWhisperBin(): Promise<string> {
   }
 }
 
-export async function transcribe(opts: TranscribeOptions): Promise<CallTranscript> {
+export async function transcribe(
+  opts: TranscribeOptions,
+  onProgress?: (percent: number) => void,
+  cancelToken?: { cancelled: boolean; kill: (() => void) | null },
+): Promise<CallTranscript> {
   if (!(await isModelDownloaded(opts.model))) {
     throw new Error(`モデル '${opts.model}' が未ダウンロードです。設定画面からダウンロードしてください。`);
   }
@@ -64,9 +77,13 @@ export async function transcribe(opts: TranscribeOptions): Promise<CallTranscrip
   const outBase = baseTmp;
 
   await convertMp3ToWav16k(opts.audioPath, wavPath);
+  if (cancelToken?.cancelled) {
+    await fs.unlink(wavPath).catch(() => {});
+    throw new TranscriptionCancelledError();
+  }
 
   try {
-    await runWhisper(bin, modelPath, wavPath, outBase, opts.language);
+    await runWhisper(bin, modelPath, wavPath, outBase, opts.language, opts.prompt, onProgress, cancelToken);
     const jsonPath = `${outBase}.json`;
     const raw = await fs.readFile(jsonPath, 'utf-8');
     const parsed = JSON.parse(raw) as WhisperJson;
@@ -93,7 +110,16 @@ function parseTimestamp(ms: number): number {
   return ms / 1000;
 }
 
-function runWhisper(bin: string, model: string, wav: string, outBase: string, lang: string): Promise<void> {
+function runWhisper(
+  bin: string,
+  model: string,
+  wav: string,
+  outBase: string,
+  lang: string,
+  prompt?: string,
+  onProgress?: (percent: number) => void,
+  cancelToken?: { cancelled: boolean; kill: (() => void) | null },
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
       '-m', model,
@@ -103,11 +129,29 @@ function runWhisper(bin: string, model: string, wav: string, outBase: string, la
       '-l', lang === 'auto' ? 'auto' : lang,
       '-pp',                                  // print progress
     ];
+    if (prompt && prompt.trim()) {
+      args.push('--prompt', prompt.trim());
+    }
     const proc = spawn(bin, args);
+    if (cancelToken) cancelToken.kill = () => proc.kill();
     let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      const text = d.toString();
+      stderr += text;
+      // whisper.cpp -pp: "whisper_print_progress_callback: progress =  15%"
+      const matches = text.match(/progress\s*=\s*(\d+)%/g);
+      if (matches && onProgress) {
+        const last = matches[matches.length - 1].match(/(\d+)%/);
+        if (last) onProgress(Math.min(100, Number(last[1])));
+      }
+    });
     proc.on('error', reject);
     proc.on('close', (code) => {
+      if (cancelToken) cancelToken.kill = null;
+      if (cancelToken?.cancelled) {
+        reject(new TranscriptionCancelledError());
+        return;
+      }
       if (code === 0) {
         resolve();
         return;
@@ -139,13 +183,16 @@ interface WhisperJson {
 type Job = { callId: string; opts: TranscribeOptions };
 type JobHandlers = {
   onStart: (callId: string) => void;
+  onProgress: (callId: string, percent: number) => void;
   onDone: (callId: string, t: CallTranscript) => void;
+  onCancelled: (callId: string) => void;
   onError: (callId: string, err: Error) => void;
 };
 
 const queue: Job[] = [];
 let running = false;
 let handlers: JobHandlers | null = null;
+let currentJob: { callId: string; token: { cancelled: boolean; kill: (() => void) | null } } | null = null;
 
 export function setQueueHandlers(h: JobHandlers): void {
   handlers = h;
@@ -156,18 +203,45 @@ export function enqueue(callId: string, opts: TranscribeOptions): void {
   void pump();
 }
 
+/**
+ * キャンセル。待機中ならキューから除去、実行中ならプロセスを kill する。
+ * 対象が見つかったら true。
+ */
+export function cancel(callId: string): boolean {
+  const idx = queue.findIndex((j) => j.callId === callId);
+  if (idx >= 0) {
+    queue.splice(idx, 1);
+    handlers?.onCancelled(callId);
+    return true;
+  }
+  if (currentJob && currentJob.callId === callId) {
+    currentJob.token.cancelled = true;
+    currentJob.token.kill?.();
+    return true;
+  }
+  return false;
+}
+
 async function pump(): Promise<void> {
   if (running) return;
   running = true;
   try {
     while (queue.length) {
       const job = queue.shift()!;
+      const token = { cancelled: false, kill: null as (() => void) | null };
+      currentJob = { callId: job.callId, token };
       handlers?.onStart(job.callId);
       try {
-        const t = await transcribe(job.opts);
+        const t = await transcribe(job.opts, (p) => handlers?.onProgress(job.callId, p), token);
         handlers?.onDone(job.callId, t);
       } catch (err) {
-        handlers?.onError(job.callId, err as Error);
+        if (err instanceof TranscriptionCancelledError || token.cancelled) {
+          handlers?.onCancelled(job.callId);
+        } else {
+          handlers?.onError(job.callId, err as Error);
+        }
+      } finally {
+        currentJob = null;
       }
     }
   } finally {

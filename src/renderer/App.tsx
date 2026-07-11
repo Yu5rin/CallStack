@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useCalls } from './hooks/useCalls';
 import { useSettings } from './hooks/useSettings';
 import { useActiveCall } from './hooks/useActiveCall';
@@ -23,6 +23,10 @@ export function App() {
   const { active, elapsedSec } = useActiveCall();
   const recorder = useRecorder(active, settings);
   useTheme(settings?.theme);
+
+  // 統計・フッターは通話のみを対象にする（会議が混ざると平均・件数が意味を失うため）
+  const callsOnly = useMemo(() => calls.filter((c) => c.kind !== 'meeting'), [calls]);
+  const isMeeting = active?.kind === 'meeting';
 
   const navigateToContact = (name: string) => {
     setInitialContactFilter(name);
@@ -64,7 +68,7 @@ export function App() {
           {active ? (
             <span className="flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-              通話中 <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
+              {isMeeting ? '会議中' : '通話中'} <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
             </span>
           ) : (
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -72,10 +76,21 @@ export function App() {
             </span>
           )}
           {recorder.recording && (
-            <span className="flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-900">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
-              REC
-              <LevelMeter level={recorder.level} />
+            <span className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
+              recorder.paused
+                ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900'
+                : 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-900'
+            }`}>
+              <span className={`inline-block h-2 w-2 rounded-full ${recorder.paused ? 'bg-amber-500' : 'animate-pulse bg-red-500'}`} />
+              {recorder.paused ? '一時停止中' : 'REC'}
+              {!recorder.paused && <LevelMeter level={recorder.level} />}
+              <button
+                onClick={() => window.api.recording.togglePause()}
+                className="rounded px-1 hover:bg-black/10 dark:hover:bg-white/10"
+                title={recorder.paused ? `録音を再開 (${settings.shortcuts.togglePauseRecording})` : `録音を一時停止 (${settings.shortcuts.togglePauseRecording})`}
+              >
+                {recorder.paused ? '▶' : '⏸'}
+              </button>
             </span>
           )}
           {recorder.error && (
@@ -95,12 +110,21 @@ export function App() {
               終了 ({settings.shortcuts.endCall})
             </button>
           ) : (
-            <button
-              onClick={() => window.api.calls.startNow()}
-              className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-            >
-              開始 ({settings.shortcuts.startCall})
-            </button>
+            <>
+              <button
+                onClick={() => window.api.calls.startNow()}
+                className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                通話開始 ({settings.shortcuts.startCall})
+              </button>
+              <button
+                onClick={() => window.api.calls.startNow('meeting')}
+                className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
+                title={`会議を開始 (${settings.shortcuts.startMeeting})`}
+              >
+                会議開始
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -115,11 +139,11 @@ export function App() {
           />
         )}
         {page === 'stats' && (
-          <StatsPage calls={calls} settings={settings} onSelectContact={navigateToContact} />
+          <StatsPage calls={callsOnly} settings={settings} onSelectContact={navigateToContact} />
         )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
-      <SummaryFooter calls={calls} />
+      <SummaryFooter calls={callsOnly} />
     </div>
   );
 }

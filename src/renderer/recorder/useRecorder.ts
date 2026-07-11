@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { RecordingManager } from './RecordingManager';
-import { Settings } from '../../shared/types';
+import { AppEvent, Settings } from '../../shared/types';
 
 interface ActiveLike {
   id: string;
@@ -8,6 +8,7 @@ interface ActiveLike {
 
 export interface UseRecorderState {
   recording: boolean;
+  paused: boolean;
   level: number;
   error: string | null;
   clearError: () => void;
@@ -18,10 +19,30 @@ export function useRecorder(
   settings: Settings | null,
 ): UseRecorderState {
   const [recording, setRecording] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const managerRef = useRef<RecordingManager | null>(null);
   const clearTimerRef = useRef<number | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = active?.id ?? null;
+
+  // HUD やグローバルショートカットからの一時停止トグル指示を受ける。
+  // 録音の実体（MediaRecorder）はこのウィンドウにしかないため、ここで処理して
+  // 確定した状態を main 経由で全ウィンドウへ通知する。
+  useEffect(() => {
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type !== 'recording:togglePause') return;
+      const mgr = managerRef.current;
+      const callId = activeIdRef.current;
+      if (!mgr || !callId) return;
+      const p = mgr.togglePause();
+      if (p === null) return;
+      setPaused(p);
+      void window.api.recording.setPaused(callId, p);
+    });
+    return () => off();
+  }, []);
 
   const reportError = (msg: string) => {
     setError(msg);
@@ -59,7 +80,7 @@ export function useRecorder(
           else console.warn('[recorder] IPC error:', err);
         },
       })
-        .then(() => setRecording(true))
+        .then(() => { setRecording(true); setPaused(false); })
         .catch((err) => {
           reportError(err.message);
           managerRef.current = null;
@@ -71,6 +92,7 @@ export function useRecorder(
       const mgr = managerRef.current;
       managerRef.current = null;
       setRecording(false);
+      setPaused(false);
       setLevel(0);
       mgr.stop().catch((err) => {
         // Recording finalize may fail with generic IPC errors that are not
@@ -80,5 +102,5 @@ export function useRecorder(
     }
   }, [active?.id, settings?.recording.enabled, settings?.recording.source, settings?.recording.micDeviceId]);
 
-  return { recording, level, error, clearError };
+  return { recording, paused, level, error, clearError };
 }

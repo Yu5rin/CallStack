@@ -77,26 +77,29 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.value }}
-          name: TelTimeStack ${{ steps.tag.outputs.value }}
+          name: CallStack ${{ steps.tag.outputs.value }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: ${{ steps.locate.outputs.zip_path }}
           body: |
-            ## TelTimeStack ${{ steps.tag.outputs.value }}
+            ## CallStack ${{ steps.tag.outputs.value }}
 
             ### インストール方法
-            1. 下の Assets から `TelTimeStack-*-win-x64.zip` をダウンロード
+            1. 下の Assets から `CallStack-*-win-x64.zip` をダウンロード
             2. ZIP を解凍
-            3. `TelTimeStack.exe` を実行（インストール不要）
+            3. `CallStack.exe` を実行（インストール不要）
 
             ### 主な機能
             - グローバルショートカットによる通話時間記録（Ctrl+Shift+S / E）
+            - 会議の記録・録音・文字起こし（Ctrl+Shift+M で開始）
+            - 録音の一時停止/再開（Ctrl+Shift+P）
             - 通話中 HUD・システムトレイ常駐
             - 統計ダッシュボード（日別・タグ別・連絡先別）
             - CSV エクスポート／インポート
             - 保留機能（Ctrl+Shift+H）
-            - マイク録音（MP3）＋ whisper.cpp によるオフライン文字起こし
+            - マイク録音（MP3）＋ whisper.cpp によるオフライン文字起こし（進捗表示・キャンセル・用語ヒント対応）
+            - 録音 MP3・文字起こしテキストの保存（ダウンロード）
 
             ### whisper.cpp 文字起こしの準備
             `resources\whisper\README.txt` を参照してください。

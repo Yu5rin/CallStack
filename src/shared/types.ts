@@ -1,3 +1,6 @@
+/** 記録の種別。省略時は 'call'（旧バージョンのデータ互換） */
+export type RecordKind = 'call' | 'meeting';
+
 export interface HoldSegment {
   start: string;          // ISO 8601
   end: string | null;
@@ -30,6 +33,7 @@ export type TranscriptStatus = 'none' | 'queued' | 'running' | 'done' | 'error';
 
 export interface CallRecord {
   id: string;
+  kind?: RecordKind;          // 省略時は 'call'
   startTime: string;          // ISO 8601
   endTime: string | null;
   durationSec: number | null;
@@ -37,6 +41,10 @@ export interface CallRecord {
   memo: string;
   contactName?: string;
   phoneNumber?: string;
+  /** 会議用: タイトル */
+  title?: string;
+  /** 会議用: 参加者 */
+  participants?: string[];
   holds?: HoldSegment[];
   holdSec?: number;
   audio?: CallAudio;
@@ -52,9 +60,11 @@ export interface TagDef {
 
 export interface ShortcutSettings {
   startCall: string;
+  startMeeting: string;
   endCall: string;
   toggleWindow: string;
   toggleHold: string;
+  togglePauseRecording: string;
   openSettings: string;
   assignTag1: string;
   assignTag2: string;
@@ -62,7 +72,7 @@ export interface ShortcutSettings {
   assignTag4: string;
 }
 
-export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium';
+export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3-turbo';
 
 export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 
@@ -82,6 +92,8 @@ export interface TranscriptionSettings {
   model: WhisperModel;
   language: 'auto' | 'ja' | 'en';
   modelDownloaded: Partial<Record<WhisperModel, boolean>>;
+  /** 用語ヒント: 社名・専門用語・参加者名などを whisper の初期プロンプトとして渡し、固有名詞の認識を改善する */
+  prompt: string;
 }
 
 export interface Settings {
@@ -123,6 +135,15 @@ export type TranscriptionStatusEvent = {
   transcript?: CallTranscript;
   error?: string;
 };
+export type TranscriptionProgressEvent = {
+  type: 'transcription:progress';
+  callId: string;
+  percent: number;            // 0-100
+};
+/** 録音中ウィンドウへの一時停止/再開の指示（HUD・ショートカットから発火） */
+export type RecordingTogglePauseEvent = { type: 'recording:togglePause' };
+/** 一時停止状態の通知（録音を実行しているレンダラが発火） */
+export type RecordingPausedEvent = { type: 'recording:paused'; callId: string; paused: boolean };
 export type ModelDownloadEvent = {
   type: 'model:download';
   model: WhisperModel;
@@ -144,6 +165,9 @@ export type AppEvent =
   | HoldChangedEvent
   | RecordingFinalizedEvent
   | TranscriptionStatusEvent
+  | TranscriptionProgressEvent
+  | RecordingTogglePauseEvent
+  | RecordingPausedEvent
   | ModelDownloadEvent
   | NavigateEvent
   | DataRestoredEvent;
@@ -164,9 +188,11 @@ export interface CsvImportResult {
 export const DEFAULT_SETTINGS: Settings = {
   shortcuts: {
     startCall: 'Control+Shift+S',
+    startMeeting: 'Control+Shift+M',
     endCall: 'Control+Shift+E',
     toggleWindow: 'Control+Shift+T',
     toggleHold: 'Control+Shift+H',
+    togglePauseRecording: 'Control+Shift+P',
     openSettings: 'Control+Shift+,',
     assignTag1: 'Control+Shift+1',
     assignTag2: 'Control+Shift+2',
@@ -195,6 +221,7 @@ export const DEFAULT_SETTINGS: Settings = {
     model: 'small',
     language: 'ja',
     modelDownloaded: {},
+    prompt: '',
   },
   confirmRecordingEnable: true,
   minimizeToTray: false,
@@ -210,4 +237,5 @@ export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: st
   { id: 'base',   sizeMb: 142,  label: 'base (約 142MB)' },
   { id: 'small',  sizeMb: 466,  label: 'small (約 466MB, バランス・推奨)' },
   { id: 'medium', sizeMb: 1500, label: 'medium (約 1.5GB, 高精度)' },
+  { id: 'large-v3-turbo', sizeMb: 1620, label: 'large-v3-turbo (約 1.6GB, 最高精度・medium より高速。会議向け)' },
 ];

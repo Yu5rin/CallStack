@@ -16,6 +16,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
   const [editing, setEditing] = useState<CallRecord | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [filterKind, setFilterKind] = useState<'' | 'call' | 'meeting'>('');
   const [filterTag, setFilterTag] = useState<string>('');
   const [filterContact, setFilterContact] = useState<string>('');
   const [showUntagged, setShowUntagged] = useState(false);
@@ -51,6 +52,8 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
       .slice()
       .sort((a, b) => b.startTime.localeCompare(a.startTime))
       .filter((c) => {
+        const kind = c.kind ?? 'call';
+        if (filterKind && kind !== filterKind) return false;
         if (showUntagged && c.tag) return false;
         if (filterTag && c.tag !== filterTag) return false;
         if (filterContact && c.contactName !== filterContact) return false;
@@ -59,12 +62,14 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
           c.memo,
           c.contactName ?? '',
           c.phoneNumber ?? '',
+          c.title ?? '',
+          c.participants?.join(' ') ?? '',
           c.tag ?? '',
           c.transcript?.text ?? '',
         ].join(' ').toLowerCase();
         return hay.includes(q);
       });
-  }, [calls, query, filterTag, filterContact, showUntagged]);
+  }, [calls, query, filterKind, filterTag, filterContact, showUntagged]);
 
   // Delete-key handler with focus / dialog awareness.
   useEffect(() => {
@@ -175,6 +180,15 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
           className="flex-1 min-w-[240px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
         <select
+          value={filterKind}
+          onChange={(e) => setFilterKind(e.target.value as '' | 'call' | 'meeting')}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        >
+          <option value="">通話+会議</option>
+          <option value="call">📞 通話のみ</option>
+          <option value="meeting">👥 会議のみ</option>
+        </select>
+        <select
           value={filterTag}
           onChange={(e) => { setFilterTag(e.target.value); setShowUntagged(false); }}
           className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
@@ -249,7 +263,7 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
               <th className="px-4 py-3 text-right">保留</th>
               <th className="px-4 py-3 text-right">純通話</th>
               <th className="px-4 py-3">タグ</th>
-              <th className="px-4 py-3">連絡先</th>
+              <th className="px-4 py-3">連絡先 / 会議名</th>
               <th className="px-4 py-3 w-24 whitespace-nowrap text-center">録音 / 文字起こし</th>
               <th className="px-4 py-3">メモ</th>
             </tr>
@@ -278,9 +292,14 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                   }`}
                   title="クリックで選択 / ダブルクリックで編集 / Delete キーで削除"
                 >
-                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">{formatDateTime(c.startTime)}</td>
                   <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
-                    {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600 dark:text-emerald-400">通話中…</span>}
+                    <span className="mr-1" title={c.kind === 'meeting' ? '会議' : '通話'}>
+                      {c.kind === 'meeting' ? '👥' : '📞'}
+                    </span>
+                    {formatDateTime(c.startTime)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300">
+                    {c.endTime ? formatDateTime(c.endTime) : <span className="text-emerald-600 dark:text-emerald-400">{c.kind === 'meeting' ? '会議中…' : '通話中…'}</span>}
                   </td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-900 dark:text-slate-100">
                     {c.durationSec === null ? '—' : formatHMS(c.durationSec)}
@@ -304,7 +323,9 @@ export function CallListPage({ calls, settings, initialContactFilter, onConsumeI
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                    {c.contactName ? highlight(c.contactName, query) : '—'}
+                    {c.kind === 'meeting'
+                      ? (c.title ? highlight(c.title, query) : <span className="text-xs text-slate-400">（会議名未設定）</span>)
+                      : (c.contactName ? highlight(c.contactName, query) : '—')}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="inline-flex items-center justify-center gap-1 text-base whitespace-nowrap">

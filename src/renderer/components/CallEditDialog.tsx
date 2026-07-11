@@ -26,17 +26,27 @@ export function CallEditDialog({
   const [memo, setMemo] = useState(call.memo);
   const [contactName, setContactName] = useState(call.contactName ?? '');
   const [phoneNumber, setPhoneNumber] = useState(call.phoneNumber ?? '');
+  const [title, setTitle] = useState(call.title ?? '');
+  const [participants, setParticipants] = useState((call.participants ?? []).join('、'));
   const [saving, setSaving] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [transcribeProgress, setTranscribeProgress] = useState<number | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
+  const isMeeting = current.kind === 'meeting';
 
   useEffect(() => {
     const off = window.api.onEvent((e) => {
+      if (e.type === 'transcription:progress' && e.callId === current.id) {
+        setTranscribeProgress(e.percent);
+        return;
+      }
       if (
         (e.type === 'call:updated' && e.record.id === current.id) ||
         (e.type === 'transcription:status' && e.callId === current.id)
       ) {
+        if (e.type === 'transcription:status' && e.status !== 'running') setTranscribeProgress(null);
         window.api.calls.get(current.id).then((r) => {
           if (r) setCurrent(r);
         });
@@ -101,6 +111,10 @@ export function CallEditDialog({
         memo,
         contactName: contactName || undefined,
         phoneNumber: phoneNumber || undefined,
+        title: title || undefined,
+        participants: participants
+          ? participants.split(/[、,]/).map((p) => p.trim()).filter(Boolean)
+          : undefined,
       });
       onClose();
     } finally {
@@ -131,7 +145,26 @@ export function CallEditDialog({
     }
   };
 
+  const handleCancelTranscribe = async () => {
+    await window.api.transcription.cancel(current.id);
+  };
+
+  const showExportResult = (r: { canceled: boolean; path?: string; error?: string }) => {
+    if (r.canceled) return;
+    setExportMessage(r.error ? `⚠️ ${r.error}` : `✅ 保存しました: ${r.path}`);
+    window.setTimeout(() => setExportMessage(null), 6000);
+  };
+
+  const handleSaveAudio = async () => {
+    showExportResult(await window.api.recording.saveAs(current.id));
+  };
+
+  const handleSaveTranscript = async (withTimestamps: boolean) => {
+    showExportResult(await window.api.transcript.saveAs(current.id, withTimestamps));
+  };
+
   const audioSrc = current.audio ? `app://recordings/${current.audio.path}` : null;
+  const transcriptBusy = current.transcriptStatus === 'running' || current.transcriptStatus === 'queued';
 
   return (
     <div
@@ -142,40 +175,63 @@ export function CallEditDialog({
         className="w-full max-w-3xl max-h-[90vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-lg font-bold text-slate-900 dark:text-slate-100">通話記録の編集</h2>
+        <h2 className="mb-4 text-lg font-bold text-slate-900 dark:text-slate-100">
+          {isMeeting ? '👥 会議記録の編集' : '通話記録の編集'}
+        </h2>
 
-        {/* 連絡先名 / 電話番号 を最上段に */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="連絡先名">
-            <input
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              list="contact-name-suggestions"
-              className={inputClass}
-              placeholder="例: 山田太郎"
-            />
-            <datalist id="contact-name-suggestions">
-              {contactSuggestions.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-          </Field>
-          <Field label="電話番号">
-            <input
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              onBlur={onPhoneBlur}
-              list="phone-number-suggestions"
-              className={inputClass}
-              placeholder="例: 090-1234-5678"
-            />
-            <datalist id="phone-number-suggestions">
-              {phoneSuggestions.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </Field>
-        </div>
+        {/* 通話: 連絡先名 / 電話番号、会議: タイトル / 参加者 を最上段に */}
+        {isMeeting ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="会議タイトル">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className={inputClass}
+                placeholder="例: 週次定例"
+              />
+            </Field>
+            <Field label="参加者（読点・カンマ区切り）">
+              <input
+                value={participants}
+                onChange={(e) => setParticipants(e.target.value)}
+                className={inputClass}
+                placeholder="例: 山田、佐藤、鈴木"
+              />
+            </Field>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="連絡先名">
+              <input
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                list="contact-name-suggestions"
+                className={inputClass}
+                placeholder="例: 山田太郎"
+              />
+              <datalist id="contact-name-suggestions">
+                {contactSuggestions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="電話番号">
+              <input
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                onBlur={onPhoneBlur}
+                list="phone-number-suggestions"
+                className={inputClass}
+                placeholder="例: 090-1234-5678"
+              />
+              <datalist id="phone-number-suggestions">
+                {phoneSuggestions.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </Field>
+          </div>
+        )}
 
         {/* 時刻系を 3 列でコンパクトに */}
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -197,7 +253,7 @@ export function CallEditDialog({
               className={inputClass}
             />
           </Field>
-          <Field label="通話時間">
+          <Field label={isMeeting ? '会議時間' : '通話時間'}>
             <div className="font-mono text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
               {computedDuration !== null ? formatHMS(computedDuration) : '—'}
             </div>
@@ -278,25 +334,75 @@ export function CallEditDialog({
             </summary>
             <div className="mt-2">
               <AudioPlayer ref={playerRef} src={audioSrc} />
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={handleSaveAudio}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+                  title="録音 (MP3) を名前を付けて保存"
+                >
+                  ⬇ 録音を保存…
+                </button>
+              </div>
               <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">文字起こし</div>
                   <div className="flex items-center gap-2">
                     {current.transcriptStatus === 'running' && (
-                      <span className="text-xs text-brand-600 dark:text-brand-300">処理中…</span>
+                      <span className="text-xs text-brand-600 dark:text-brand-300">
+                        処理中… {transcribeProgress !== null ? `${transcribeProgress}%` : ''}
+                      </span>
                     )}
                     {current.transcriptStatus === 'queued' && (
                       <span className="text-xs text-slate-500 dark:text-slate-400">待機中…</span>
                     )}
+                    {transcriptBusy && (
+                      <button
+                        onClick={handleCancelTranscribe}
+                        className="rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+                      >
+                        キャンセル
+                      </button>
+                    )}
+                    {current.transcript && !transcriptBusy && (
+                      <>
+                        <button
+                          onClick={() => handleSaveTranscript(false)}
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+                          title="文字起こしをテキストファイルとして保存"
+                        >
+                          ⬇ テキスト保存…
+                        </button>
+                        <button
+                          onClick={() => handleSaveTranscript(true)}
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+                          title="[00:01:23] 形式のタイムスタンプ付きで保存"
+                        >
+                          ⬇ 時刻付き…
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={handleTranscribe}
-                      disabled={transcribing || current.transcriptStatus === 'running' || current.transcriptStatus === 'queued'}
+                      disabled={transcribing || transcriptBusy}
                       className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                     >
                       {current.transcript ? '再文字起こし' : '文字起こし'}
                     </button>
                   </div>
                 </div>
+                {current.transcriptStatus === 'running' && transcribeProgress !== null && (
+                  <div className="mb-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                    <div
+                      className="h-full bg-brand-500 transition-all"
+                      style={{ width: `${transcribeProgress}%` }}
+                    />
+                  </div>
+                )}
+                {exportMessage && (
+                  <div className="mb-2 break-all rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+                    {exportMessage}
+                  </div>
+                )}
                 {current.transcriptStatus === 'error' && current.transcriptError && (
                   <div className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
                     {current.transcriptError}

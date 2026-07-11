@@ -54,6 +54,22 @@ export class RecordingManager {
     return !!this.recorder && this.recorder.state !== 'inactive';
   }
 
+  isPaused(): boolean {
+    return this.recorder?.state === 'paused';
+  }
+
+  /** 一時停止/再開をトグルし、トグル後の paused 状態を返す。録音していなければ null。 */
+  togglePause(): boolean | null {
+    const rec = this.recorder;
+    if (!rec || rec.state === 'inactive') return null;
+    if (rec.state === 'paused') {
+      rec.resume();
+      return false;
+    }
+    rec.pause();
+    return true;
+  }
+
   /** Stop recording, wait for last chunk, and finalize on main. */
   async stop(): Promise<void> {
     const rec = this.recorder;

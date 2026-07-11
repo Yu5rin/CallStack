@@ -1,14 +1,19 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
-  CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize,
+  CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
 } from '../shared/types';
+
+type SaveAsResult =
+  | { canceled: true }
+  | { canceled: false; path: string }
+  | { canceled: false; error: string };
 
 const api = {
   calls: {
     list: (): Promise<CallRecord[]> => ipcRenderer.invoke('calls:list'),
     get: (id: string): Promise<CallRecord | null> => ipcRenderer.invoke('calls:get', id),
     getActive: (): Promise<CallRecord | null> => ipcRenderer.invoke('calls:getActive'),
-    startNow: (): Promise<CallRecord | null> => ipcRenderer.invoke('calls:startNow'),
+    startNow: (kind?: RecordKind): Promise<CallRecord | null> => ipcRenderer.invoke('calls:startNow', kind),
     endNow: (): Promise<CallRecord | null> => ipcRenderer.invoke('calls:endNow'),
     toggleHold: (): Promise<void> => ipcRenderer.invoke('calls:toggleHold'),
     update: (id: string, patch: Partial<CallRecord>): Promise<CallRecord | null> =>
@@ -57,10 +62,21 @@ const api = {
     finalize: (callId: string): Promise<CallRecord | null> =>
       ipcRenderer.invoke('recording:finalize', callId),
     abort: (callId: string): Promise<boolean> => ipcRenderer.invoke('recording:abort', callId),
+    togglePause: (): Promise<boolean> => ipcRenderer.invoke('recording:toggle-pause'),
+    setPaused: (callId: string, paused: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('recording:set-paused', callId, paused),
+    saveAs: (callId: string): Promise<SaveAsResult> =>
+      ipcRenderer.invoke('recording:save-as', callId),
+  },
+  transcript: {
+    saveAs: (callId: string, withTimestamps: boolean): Promise<SaveAsResult> =>
+      ipcRenderer.invoke('transcript:save-as', callId, withTimestamps),
   },
   transcription: {
     start: (callId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke('transcription:start', callId),
+    cancel: (callId: string): Promise<boolean> =>
+      ipcRenderer.invoke('transcription:cancel', callId),
     checkSetup: (): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke('transcription:check-setup'),
     downloadModel: (model: WhisperModel): Promise<{ ok: boolean; error?: string }> =>

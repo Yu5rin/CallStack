@@ -7,6 +7,7 @@ export function HudApp() {
   const { active, elapsedSec, holding, holdSec } = useActiveCall();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activeRecord, setActiveRecord] = useState<CallRecord | null>(null);
+  const [paused, setPaused] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState('');
   const memoTimer = useRef<number | null>(null);
@@ -19,6 +20,8 @@ export function HudApp() {
     });
     const off = window.api.onEvent((e: AppEvent) => {
       if (e.type === 'settings:updated') setSettings(e.settings);
+      if (e.type === 'recording:paused') setPaused(e.paused);
+      if (e.type === 'call:started') setPaused(false);
       if (
         (e.type === 'call:started' || e.type === 'call:updated' || e.type === 'call:ended') &&
         e.record
@@ -47,6 +50,7 @@ export function HudApp() {
   }, [memoOpen]);
 
   const recording = !!(active && settings?.recording.enabled);
+  const isMeeting = activeRecord?.kind === 'meeting';
   const size = settings?.hudSize ?? 'compact';
   const opacity = settings?.hudOpacity ?? 1.0;
 
@@ -59,6 +63,7 @@ export function HudApp() {
   const handleEnd = () => { void window.api.hud.end(); };
   const handleOpenMain = () => { void window.api.hud.openMain(); };
   const handleToggleHold = () => { void window.api.calls.toggleHold(); };
+  const handleTogglePause = () => { void window.api.recording.togglePause(); };
   const handleCycleSize = () => { void window.api.hud.cycleSize(); };
   const handleAssignTag = (tag: string) => {
     const currentTag = activeRecord?.tag;
@@ -108,7 +113,23 @@ export function HudApp() {
 
   const status = holding
     ? <span className="text-amber-400">⏸ HOLD {formatHMS(holdSec)}</span>
-    : <span className="text-emerald-400">● 通話中</span>;
+    : <span className="text-emerald-400">● {isMeeting ? '会議中' : '通話中'}</span>;
+
+  const recIndicator = recording && (
+    paused
+      ? <span className="text-amber-400">⏸ PAUSE</span>
+      : <span className="text-red-400">● REC</span>
+  );
+
+  const pauseButton = recording ? (
+    <button
+      onClick={handleTogglePause}
+      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${paused ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
+      title={paused ? '録音を再開' : '録音を一時停止'}
+    >
+      {paused ? '再開' : '⏸'}
+    </button>
+  ) : null;
 
   const sizeButton = (
     <button
@@ -129,7 +150,7 @@ export function HudApp() {
           onDoubleClick={handleOpenMain}
           title="ダブルクリックでメイン窓 / 右上アイコンでサイズ切替"
         >
-          <span className={`text-[10px] ${recording ? 'text-red-400' : holding ? 'text-amber-400' : 'text-emerald-400'}`}>●</span>
+          <span className={`text-[10px] ${recording && !paused ? 'text-red-400' : holding || paused ? 'text-amber-400' : 'text-emerald-400'}`}>●</span>
           <div className="font-mono text-sm font-semibold tabular-nums">{formatHMS(elapsedSec)}</div>
           <div className="flex-1" />
           <button
@@ -166,7 +187,7 @@ export function HudApp() {
             <div className="flex flex-col leading-tight">
               <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider">
                 {status}
-                {recording && <span className="text-red-400">● REC</span>}
+                {recIndicator}
               </div>
               <div className="font-mono text-base font-bold tabular-nums">{formatHMS(elapsedSec)}</div>
             </div>
@@ -182,13 +203,16 @@ export function HudApp() {
                   title={`タグ: ${t.name}${activeRecord?.tag === t.name ? '（解除）' : ''}`}
                 />
               ))}
-              <button
-                onClick={handleToggleHold}
-                className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${holding ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
-                title="保留トグル"
-              >
-                {holding ? '解除' : '保留'}
-              </button>
+              {!isMeeting && (
+                <button
+                  onClick={handleToggleHold}
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${holding ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
+                  title="保留トグル"
+                >
+                  {holding ? '解除' : '保留'}
+                </button>
+              )}
+              {isMeeting && pauseButton}
               <button
                 onClick={handleOpenMemo}
                 className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${memoOpen ? 'bg-brand-500 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
@@ -225,7 +249,7 @@ export function HudApp() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
               {status}
-              {recording && <span className="text-red-400">● REC</span>}
+              {recIndicator}
               <div className="ml-auto flex items-center gap-1">
                 {settings?.tags.slice(0, 4).map((t) => (
                   <button
@@ -250,12 +274,23 @@ export function HudApp() {
             >
               終了
             </button>
-            <button
-              onClick={handleToggleHold}
-              className={`rounded-lg px-3 py-1 text-xs ${holding ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
-            >
-              {holding ? '解除' : '保留'}
-            </button>
+            {isMeeting ? (
+              recording && (
+                <button
+                  onClick={handleTogglePause}
+                  className={`rounded-lg px-3 py-1 text-xs ${paused ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
+                >
+                  {paused ? '再開' : '一時停止'}
+                </button>
+              )
+            ) : (
+              <button
+                onClick={handleToggleHold}
+                className={`rounded-lg px-3 py-1 text-xs ${holding ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
+              >
+                {holding ? '解除' : '保留'}
+              </button>
+            )}
             <button
               onClick={handleOpenMemo}
               className={`rounded-lg px-3 py-1 text-xs ${memoOpen ? 'bg-brand-500 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'}`}
