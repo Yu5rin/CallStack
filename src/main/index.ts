@@ -7,6 +7,7 @@ import {
   CallRecord, CsvExportOptions, CsvImportResult, Settings,
   CallTranscript, WhisperModel, RecordKind, AudioSourceLabel, Marker,
   RecordingSourceConfig, VoskLiveModel, TranscriptSegment,
+  getRecordTags, tagsPatch,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -559,9 +560,16 @@ const trayHandlers: TrayHandlers = {
 function assignTagToActive(tag: string | null): CallRecord | null {
   const active = getActive();
   if (!active) return null;
-  // Toggle: pressing the shortcut for the already-assigned tag clears it.
-  const next = active.tag === tag ? null : tag;
-  const updated = store.updateCall(active.id, { tag: next });
+  const cur = getRecordTags(active);
+  let next: string[];
+  if (tag === null) {
+    next = [];   // クリア
+  } else if (cur.includes(tag)) {
+    next = cur.filter((t) => t !== tag);   // トグルで外す
+  } else {
+    next = [...cur, tag];                   // 追加（複数可）
+  }
+  const updated = store.updateCall(active.id, tagsPatch(next));
   if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
   return updated;
 }
@@ -1404,7 +1412,7 @@ function buildMinutesMd(rec: CallRecord): string {
   if (rec.durationSec !== null) lines.push(`- 時間: ${formatHMS(rec.durationSec)}`);
   if (isMeeting && rec.participants?.length) lines.push(`- 参加者: ${rec.participants.join('、')}`);
   if (!isMeeting && rec.contactName) lines.push(`- 連絡先: ${rec.contactName}${rec.phoneNumber ? ` (${rec.phoneNumber})` : ''}`);
-  if (rec.tag) lines.push(`- タグ: ${rec.tag}`);
+  { const tg = getRecordTags(rec); if (tg.length) lines.push(`- タグ: ${tg.join('、')}`); }
   lines.push('');
   if (rec.memo) {
     lines.push('## メモ');
@@ -1628,11 +1636,14 @@ function buildWeeklyReport(calls: CallRecord[]): string {
   const avg = target.length ? Math.round(total / target.length) : 0;
   const byTag = new Map<string, { count: number; sec: number }>();
   for (const c of target) {
-    const k = c.tag ?? '（タグなし）';
-    const cur = byTag.get(k) ?? { count: 0, sec: 0 };
-    cur.count += 1;
-    cur.sec += c.durationSec ?? 0;
-    byTag.set(k, cur);
+    const tags = getRecordTags(c);
+    const keys = tags.length ? tags : ['（タグなし）'];
+    for (const k of keys) {
+      const cur = byTag.get(k) ?? { count: 0, sec: 0 };
+      cur.count += 1;
+      cur.sec += c.durationSec ?? 0;
+      byTag.set(k, cur);
+    }
   }
   const top3 = [...target].sort((a, b) => (b.durationSec ?? 0) - (a.durationSec ?? 0)).slice(0, 3);
 

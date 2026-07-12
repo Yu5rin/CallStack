@@ -45,7 +45,10 @@ export interface CallRecord {
   startTime: string;          // ISO 8601
   endTime: string | null;
   durationSec: number | null;
+  /** 旧: 単一タグ（互換のため残す。tags の先頭をミラー） */
   tag: string | null;
+  /** 複数タグ */
+  tags?: string[];
   memo: string;
   contactName?: string;
   phoneNumber?: string;
@@ -68,6 +71,17 @@ export interface CallRecord {
 export interface TagDef {
   name: string;
   color: string;
+}
+
+/** 記録に付いたタグの配列を取得（旧形式 tag: string|null との互換） */
+export function getRecordTags(rec: Pick<CallRecord, 'tag' | 'tags'>): string[] {
+  if (rec.tags && rec.tags.length > 0) return rec.tags;
+  return rec.tag ? [rec.tag] : [];
+}
+
+/** タグ配列を保存用のパッチに変換（旧 tag も先頭タグでミラーして互換維持） */
+export function tagsPatch(tags: string[]): { tags: string[]; tag: string | null } {
+  return { tags, tag: tags[0] ?? null };
 }
 
 export interface ShortcutSettings {

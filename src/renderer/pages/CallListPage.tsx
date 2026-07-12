@@ -4,7 +4,7 @@ import {
   FileAudio, Plus, Upload, Download, SlidersHorizontal, Trash2,
   Pencil, RefreshCw, Undo2, RotateCcw, ChevronUp, ChevronDown,
 } from 'lucide-react';
-import { AppEvent, CallRecord, Settings, CsvExportOptions, CsvImportResult } from '../../shared/types';
+import { AppEvent, CallRecord, Settings, CsvExportOptions, CsvImportResult, getRecordTags } from '../../shared/types';
 import { CallEditDialog } from '../components/CallEditDialog';
 import { AudioImportDialog, ImportFile } from '../components/AudioImportDialog';
 import { deleteCallWithConfirm } from '../hooks/useCalls';
@@ -121,7 +121,7 @@ export function CallListPage({
         c.phoneNumber ?? '',
         c.title ?? '',
         c.participants?.join(' ') ?? '',
-        c.tag ?? '',
+        getRecordTags(c).join(' '),
         c.transcript?.text ?? '',
       ].join(' ').toLowerCase());
     }
@@ -238,7 +238,7 @@ export function CallListPage({
       case 'duration': return c.durationSec ?? -1;
       case 'hold': return c.holdSec ?? 0;
       case 'talk': return c.durationSec === null ? -1 : Math.max(0, c.durationSec - (c.holdSec ?? 0));
-      case 'tag': return c.tag ?? '';
+      case 'tag': return getRecordTags(c).join(', ');
       case 'name': return (c.kind === 'meeting' ? c.title : c.contactName) ?? '';
       case 'media': return (c.audio ? 2 : 0) + (c.transcript ? 1 : 0);
       case 'memo': return c.memo || c.transcript?.text || '';
@@ -268,8 +268,9 @@ export function CallListPage({
     const base = source.filter((c) => {
       const kind = c.kind ?? 'call';
       if (filterKind && kind !== filterKind) return false;
-      if (showUntagged && c.tag) return false;
-      if (filterTag && c.tag !== filterTag) return false;
+      const cTags = getRecordTags(c);
+      if (showUntagged && cTags.length > 0) return false;
+      if (filterTag && !cTags.includes(filterTag)) return false;
       if (filterContact && c.contactName !== filterContact) return false;
       const t = new Date(c.startTime).getTime();
       if (fromMs !== null && t < fromMs) return false;
@@ -492,21 +493,28 @@ export function CallListPage({
           </td>
         );
       }
-      case 'tag':
+      case 'tag': {
+        const cTags = getRecordTags(c);
         return (
           <td key={key} className="px-4 py-3">
-            {c.tag ? (
-              <span
-                className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                style={{ backgroundColor: tagColor[c.tag] ?? '#94a3b8' }}
-              >
-                {highlight(c.tag, debouncedQuery)}
+            {cTags.length > 0 ? (
+              <span className="flex flex-wrap gap-1">
+                {cTags.map((tn) => (
+                  <span
+                    key={tn}
+                    className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: tagColor[tn] ?? '#94a3b8' }}
+                  >
+                    {highlight(tn, debouncedQuery)}
+                  </span>
+                ))}
               </span>
             ) : (
               <span className="text-xs text-slate-400">—</span>
             )}
           </td>
         );
+      }
       case 'name':
         return (
           <td key={key} className="px-4 py-3 text-slate-700 dark:text-slate-300">
@@ -570,7 +578,7 @@ export function CallListPage({
     });
   };
 
-  const untaggedCount = calls.filter((c) => c.endTime && !c.tag).length;
+  const untaggedCount = calls.filter((c) => c.endTime && getRecordTags(c).length === 0).length;
   const thAlignRight = (k: ColKey) => k === 'duration' || k === 'hold' || k === 'talk';
 
   return (

@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { CallRecord, CsvExportOptions } from '../shared/types';
+import { CallRecord, CsvExportOptions, getRecordTags, tagsPatch } from '../shared/types';
 import { localIso } from './localTime';
 
 const BOM = '﻿';
@@ -90,7 +90,7 @@ export function buildCsv(calls: CallRecord[]): string {
       holdHMS: formatHMS(hold),
       talkSec: c.durationSec === null ? '' : Math.max(0, talk),
       talkHMS: c.durationSec === null ? '' : formatHMS(Math.max(0, talk)),
-      tag: c.tag ?? '',
+      tag: getRecordTags(c).join(';'),
       memo: c.memo ?? '',
       contactName: c.contactName ?? '',
       phoneNumber: c.phoneNumber ?? '',
@@ -235,7 +235,7 @@ export function parseCsv(raw: string): ParsedRow[] {
         startTime: new Date(startTime).toISOString(),
         endTime: endVal,
         durationSec,
-        tag: tagIdx >= 0 ? (cols[tagIdx]?.trim() || null) : null,
+        ...tagsPatch(tagIdx >= 0 ? (cols[tagIdx]?.split(';').map((t) => t.trim()).filter(Boolean) ?? []) : []),
         memo,
         contactName: contactIdx >= 0 ? (cols[contactIdx]?.trim() || undefined) : undefined,
         phoneNumber: phoneIdx >= 0 ? (cols[phoneIdx]?.trim() || undefined) : undefined,

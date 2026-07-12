@@ -6,6 +6,7 @@ import {
 import {
   Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
   Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines, Plus, X, Video,
+  ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
@@ -432,6 +433,13 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
     commit({ ...draftRef.current, tags: draftRef.current.tags.filter((_, i) => i !== idx) });
   const addTag = () =>
     commit({ ...draftRef.current, tags: [...draftRef.current.tags, { name: '新規タグ', color: '#94a3b8' }] });
+  const moveTag = (idx: number, dir: -1 | 1) => {
+    const tags = draftRef.current.tags.slice();
+    const j = idx + dir;
+    if (j < 0 || j >= tags.length) return;
+    [tags[idx], tags[j]] = [tags[j], tags[idx]];
+    commit({ ...draftRef.current, tags });
+  };
 
   const handleToggleRecording = (checked: boolean) => {
     if (checked) {
@@ -626,6 +634,24 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 onChange={(e) => updateTag(i, { name: e.target.value })}
                 className={`flex-1 ${inputClass}`}
               />
+              <div className="flex items-center">
+                <button
+                  onClick={() => moveTag(i, -1)}
+                  disabled={i === 0}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-700"
+                  title="上へ"
+                >
+                  <ChevronUp size={16} />
+                </button>
+                <button
+                  onClick={() => moveTag(i, 1)}
+                  disabled={i === draft.tags.length - 1}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-700"
+                  title="下へ"
+                >
+                  <ChevronDown size={16} />
+                </button>
+              </div>
               <button
                 onClick={() => removeTag(i)}
                 className="rounded-md border border-red-300 bg-white px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
@@ -635,6 +661,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             </div>
           ))}
         </div>
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          ▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・HUD の「情報」から選択）。
+          上位4つはクイックタグ（{'Ctrl+Shift+1〜4'}）に割り当てられます。
+        </p>
       </section>
 
       {/* ============ 録音 ============ */}

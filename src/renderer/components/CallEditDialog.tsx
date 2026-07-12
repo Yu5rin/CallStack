@@ -3,7 +3,7 @@ import {
   Phone, Users, Bookmark, Play, Trash2, FileText, Download, Clock3, X,
   RefreshCw, Ban, Mic, AudioLines,
 } from 'lucide-react';
-import { CallRecord, Settings, WhisperModel, WHISPER_MODELS } from '../../shared/types';
+import { CallRecord, Settings, WhisperModel, WHISPER_MODELS, getRecordTags, tagsPatch } from '../../shared/types';
 import { formatHMS, toDatetimeLocalValue, fromDatetimeLocalValue, formatDateTime } from '../utils/format';
 import { AudioPlayer, AudioPlayerHandle } from './AudioPlayer';
 import { TranscriptView } from './TranscriptView';
@@ -28,7 +28,7 @@ export function CallEditDialog({
   const [current, setCurrent] = useState(call);
   const [startTime, setStartTime] = useState(toDatetimeLocalValue(call.startTime));
   const [endTime, setEndTime] = useState(toDatetimeLocalValue(call.endTime));
-  const [tag, setTag] = useState(call.tag ?? '');
+  const [tags, setTags] = useState<string[]>(getRecordTags(call));
   const [memo, setMemo] = useState(call.memo);
   const [contactName, setContactName] = useState(call.contactName ?? '');
   const [phoneNumber, setPhoneNumber] = useState(call.phoneNumber ?? '');
@@ -154,7 +154,7 @@ export function CallEditDialog({
         kind,
         startTime: fromDatetimeLocalValue(startTime),
         endTime: endTime ? fromDatetimeLocalValue(endTime) : null,
-        tag: tag || null,
+        ...tagsPatch(tags),
         memo,
         contactName: contactName || undefined,
         phoneNumber: phoneNumber || undefined,
@@ -389,25 +389,36 @@ export function CallEditDialog({
             </div>
 
             <div className="mt-4">
-              <Field label="タグ">
+              <Field label="タグ（複数選択可）">
                 <div className="flex flex-wrap gap-1.5">
-                  {settings.tags.map((t) => (
+                  {settings.tags.map((t) => {
+                    const on = tags.includes(t.name);
+                    return (
+                      <button
+                        key={t.name}
+                        onClick={() => setTags(on ? tags.filter((x) => x !== t.name) : [...tags, t.name])}
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
+                          on
+                            ? 'text-white ring-transparent'
+                            : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700'
+                        }`}
+                        style={on ? { backgroundColor: t.color } : {}}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                  {/* 設定に無いタグ（旧データ等）も表示・解除できる */}
+                  {tags.filter((tn) => !settings.tags.find((t) => t.name === tn)).map((tn) => (
                     <button
-                      key={t.name}
-                      onClick={() => setTag(tag === t.name ? '' : t.name)}
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
-                        tag === t.name
-                          ? 'text-white ring-transparent'
-                          : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700'
-                      }`}
-                      style={tag === t.name ? { backgroundColor: t.color } : {}}
+                      key={tn}
+                      onClick={() => setTags(tags.filter((x) => x !== tn))}
+                      className="rounded-full bg-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200"
+                      title="このタグを外す"
                     >
-                      {t.name}
+                      {tn} ×
                     </button>
                   ))}
-                  {tag && !settings.tags.find((t) => t.name === tag) && (
-                    <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs dark:bg-slate-700 dark:text-slate-200">{tag}</span>
-                  )}
                 </div>
               </Field>
             </div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, Contact } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
-import { AppEvent, Settings, CallRecord } from '../shared/types';
+import { AppEvent, Settings, CallRecord, getRecordTags } from '../shared/types';
 
 /** HUD 内蔵の小型レベルメータ（recording:level イベント駆動） */
 function MiniLevel({ level, segments = 10 }: { level: number; segments?: number }) {
@@ -198,9 +198,10 @@ export function HudApp() {
       infoTimer.current = null;
     }, 400);
   };
+  // main 側でトグル（未付与なら追加・付与済みなら解除。複数タグ可）
+  const curTags = activeRecord ? getRecordTags(activeRecord) : [];
   const handleAssignTag = (tagName: string) => {
-    const nextTag = activeRecord?.tag === tagName ? null : tagName;
-    void window.api.hud.assignTag(nextTag);
+    void window.api.hud.assignTag(tagName);
   };
 
   const inputCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-brand-500';
@@ -241,7 +242,7 @@ export function HudApp() {
       )}
       <div className="flex flex-wrap gap-1 pt-0.5">
         {(settings?.tags ?? []).map((t) => {
-          const on = activeRecord?.tag === t.name;
+          const on = curTags.includes(t.name);
           return (
             <button
               key={t.name}

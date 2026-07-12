@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { CallRecord } from '../../shared/types';
+import { CallRecord, getRecordTags } from '../../shared/types';
 
 export interface OverviewStats {
   totalCount: number;
@@ -101,11 +101,15 @@ export function computeByTag(calls: CallRecord[], tagColors: Record<string, stri
   const map = new Map<string, TagBucket>();
   for (const c of calls) {
     if (!c.endTime || c.durationSec === null) continue;
-    const k = c.tag ?? '（タグなし）';
-    const cur = map.get(k) ?? { tag: k, totalSec: 0, count: 0, color: tagColors[k] ?? '#94a3b8' };
-    cur.totalSec += c.durationSec;
-    cur.count += 1;
-    map.set(k, cur);
+    // 複数タグは各タグに計上（タグなしは1件として集計）
+    const keys = getRecordTags(c);
+    const list = keys.length ? keys : ['（タグなし）'];
+    for (const k of list) {
+      const cur = map.get(k) ?? { tag: k, totalSec: 0, count: 0, color: tagColors[k] ?? '#94a3b8' };
+      cur.totalSec += c.durationSec;
+      cur.count += 1;
+      map.set(k, cur);
+    }
   }
   return [...map.values()].sort((a, b) => b.totalSec - a.totalSec);
 }
@@ -143,7 +147,7 @@ function computeByName(calls: CallRecord[], getName: (c: CallRecord) => string |
     cur.count += 1;
     cur.totalSec += c.durationSec;
     if (c.startTime > cur.last) cur.last = c.startTime;
-    if (c.tag) cur.tagCounts.set(c.tag, (cur.tagCounts.get(c.tag) ?? 0) + 1);
+    for (const tn of getRecordTags(c)) cur.tagCounts.set(tn, (cur.tagCounts.get(tn) ?? 0) + 1);
     map.set(name, cur);
   }
   return [...map.values()]
