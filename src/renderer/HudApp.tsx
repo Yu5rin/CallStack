@@ -35,7 +35,9 @@ export function HudApp() {
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState('');
   const [hovered, setHovered] = useState(false);
-  const [liveText, setLiveText] = useState('');
+  // ライブ文字起こし: 確定した行を蓄積（末尾が最新）＋ 認識途中の1行
+  const [liveLines, setLiveLines] = useState<string[]>([]);
+  const [livePartial, setLivePartial] = useState('');
   const memoTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
@@ -62,18 +64,28 @@ export function HudApp() {
         if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setMarkerFlash(false), 1200);
       }
-      // ライブ文字起こしの最新行（partial は同じ行を置き換え、final で次の行に切り替わる）
-      if (e.type === 'live:segment') setLiveText(e.text);
+      // ライブ文字起こし: final で行を確定して蓄積、partial は認識途中の1行を差し替え。
+      // 表示は直近 N 行だけに絞るため、蓄積は上限を設けて古い行を捨てる。
+      if (e.type === 'live:segment') {
+        if (e.final) {
+          if (e.text) setLiveLines((prev) => [...prev, e.text].slice(-30));
+          setLivePartial('');
+        } else {
+          setLivePartial(e.text);
+        }
+      }
       if (e.type === 'call:started') {
         setLevel(0);
-        setLiveText('');
+        setLiveLines([]);
+        setLivePartial('');
         setActiveRecord(e.record);
         setMemoDraft(e.record.memo ?? '');
         setMarkerCount(e.record.markers?.length ?? 0);
       }
       if (e.type === 'call:ended') {
         setActiveRecord(null);
-        setLiveText('');
+        setLiveLines([]);
+        setLivePartial('');
       }
       if (e.type === 'call:updated') {
         // 進行中の記録に対する更新のみ反映する。
@@ -100,11 +112,22 @@ export function HudApp() {
     }
   }, [active]);
 
+  // 設定行数に収まる直近のライブ字幕（確定行＋認識途中の行）。少ないほど新しい行が優先される。
+  const maxLiveLines = settings?.hudLiveLines ?? 2;
+  const liveItems = useMemo(() => {
+    if (maxLiveLines <= 0) return [] as Array<{ text: string; partial: boolean }>;
+    const items = liveLines.map((t) => ({ text: t, partial: false }));
+    if (livePartial) items.push({ text: livePartial, partial: true });
+    return items.filter((x) => x.text).slice(-maxLiveLines);
+  }, [liveLines, livePartial, maxLiveLines]);
+  const hasLive = liveItems.length > 0;
+
   // Grow / shrink the HUD window so the textarea / live caption overlay is visible.
-  const hasLive = liveText.length > 0;
+  // ライブ字幕は 1 行あたり約 15px ＋ 枠の余白。
+  const liveExtra = hasLive ? liveItems.length * 15 + 12 : 0;
   useEffect(() => {
-    void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + (hasLive ? 30 : 0));
-  }, [memoOpen, hasLive]);
+    void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + liveExtra);
+  }, [memoOpen, liveExtra]);
 
   const recording = recState.recording;
   const paused = recState.paused;
@@ -159,14 +182,23 @@ export function HudApp() {
     }
   };
 
-  // ライブ文字起こしの最新行（Vosk の暫定テキスト）
+  // ライブ文字起こし（Vosk の暫定テキスト）。設定した行数ぶんを縦に並べ、
+  // 最新行を下に表示。収まらない古い行は自動的に押し出される。
   const liveBox = hasLive && active ? (
-    <div
-      className="hud-no-drag mt-1 flex h-[26px] flex-none items-center gap-1.5 truncate rounded-lg bg-slate-900/95 px-2 text-[10px] text-slate-200 shadow-2xl ring-1 ring-white/15"
-      title={liveText}
-    >
-      <AudioLines size={11} strokeWidth={2.25} className="flex-none text-sky-300" />
-      <span className="min-w-0 flex-1 truncate">{liveText}</span>
+    <div className="hud-no-drag mt-1 flex flex-none flex-col justify-end gap-px rounded-lg bg-slate-900/95 px-2 py-1 shadow-2xl ring-1 ring-white/15">
+      {liveItems.map((item, i) => {
+        const isLast = i === liveItems.length - 1;
+        return (
+          <div key={i} className="flex items-center gap-1.5" title={item.text}>
+            {isLast
+              ? <AudioLines size={10} strokeWidth={2.25} className="flex-none text-sky-300" />
+              : <span className="w-2.5 flex-none" />}
+            <span className={`min-w-0 flex-1 truncate text-[10px] leading-none ${item.partial ? 'text-slate-400 italic' : 'text-slate-200'}`}>
+              {item.text}
+            </span>
+          </div>
+        );
+      })}
     </div>
   ) : null;
 

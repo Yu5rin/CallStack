@@ -157,6 +157,8 @@ export interface Settings {
   theme: ThemePref;
   hudSize: HudSize;
   hudOpacity: HudOpacity;
+  /** HUD に表示するライブ文字起こしの行数（0=非表示）。収まらない分は新しい行へ自動で切り替わる */
+  hudLiveLines?: number;
   transcriptSeekOffsetSec: number;
   /** 保存ダイアログで前回使ったフォルダ（auto モードで使用） */
   lastSaveDir?: string | null;
@@ -351,6 +353,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   hudSize: 'compact',
   hudOpacity: 1.0,
+  hudLiveLines: 2,
   transcriptSeekOffsetSec: 1.0,
 };
 
