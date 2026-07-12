@@ -266,6 +266,7 @@ export function createHudWindow(
     hudWindow.show();
     return hudWindow;
   }
+  hudExtraPx = 0;   // 新規作成時は追加高さをリセット
   const display = screen.getPrimaryDisplay();
   const { workArea } = display;
   const { width, height } = HUD_SIZES[size];
@@ -320,21 +321,26 @@ export function createHudWindow(
  * Apply a new size to the existing HUD without moving it off-screen.
  * Anchors on the right edge so right-aligned default layout stays put.
  */
+/** メモ・ライブ字幕などで追加された HUD の高さ（px）。サイズ切替でも保持する */
+let hudExtraPx = 0;
+
 export function setHudSize(size: HudSize): void {
   if (!hudWindow || hudWindow.isDestroyed()) return;
   const [oldX, oldY] = hudWindow.getPosition();
   const [oldW] = hudWindow.getSize();
   const { width, height } = HUD_SIZES[size];
   const newX = oldX + (oldW - width);
-  hudWindow.setBounds({ x: newX, y: oldY, width, height });
+  // サイズ切替時も追加高さ（ライブ字幕・メモ）を維持する
+  hudWindow.setBounds({ x: newX, y: oldY, width, height: height + Math.max(0, hudExtraPx) });
 }
 
-/** Add extra height (e.g. for memo overlay) while keeping the window anchored. */
+/** Add extra height (e.g. for memo overlay / live caption) while keeping the window anchored. */
 export function setHudExtraHeight(extraPx: number, baseSize: HudSize): void {
   if (!hudWindow || hudWindow.isDestroyed()) return;
+  hudExtraPx = Math.max(0, extraPx);
   const [x, y] = hudWindow.getPosition();
   const { width, height } = HUD_SIZES[baseSize];
-  hudWindow.setBounds({ x, y, width, height: height + Math.max(0, extraPx) });
+  hudWindow.setBounds({ x, y, width, height: height + hudExtraPx });
 }
 
 export function closeHudWindow(): void {

@@ -157,8 +157,10 @@ export interface Settings {
   theme: ThemePref;
   hudSize: HudSize;
   hudOpacity: HudOpacity;
-  /** HUD に表示するライブ文字起こしの行数（0=非表示）。収まらない分は新しい行へ自動で切り替わる */
+  /** HUD に表示するライブ文字起こしの行数（0=非表示）。既定の高さを決める */
   hudLiveLines?: number;
+  /** HUD ライブ字幕パネルの高さ(px)。ドラッグで調整した値を保持（未設定なら行数から算出） */
+  hudLivePanelPx?: number;
   transcriptSeekOffsetSec: number;
   /** 保存ダイアログで前回使ったフォルダ（auto モードで使用） */
   lastSaveDir?: string | null;

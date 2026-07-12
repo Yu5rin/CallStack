@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square } from 'lucide-react';
+import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, ChevronDown } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
 import { AppEvent, Settings, CallRecord } from '../shared/types';
@@ -38,6 +38,10 @@ export function HudApp() {
   // ライブ文字起こし: 確定した行を蓄積（末尾が最新）＋ 認識途中の1行
   const [liveLines, setLiveLines] = useState<string[]>([]);
   const [livePartial, setLivePartial] = useState('');
+  // ライブ字幕パネル: ドラッグ中の高さ(px, 未ドラッグは null) と 自動追従
+  const [dragPx, setDragPx] = useState<number | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
+  const liveScrollRef = useRef<HTMLDivElement | null>(null);
   const memoTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
@@ -112,22 +116,38 @@ export function HudApp() {
     }
   }, [active]);
 
-  // 設定行数に収まる直近のライブ字幕（確定行＋認識途中の行）。少ないほど新しい行が優先される。
+  // ライブ字幕パネル。設定の行数で既定の高さを決め、ドラッグで自由に広げられる。
+  // 内容はスクロールで全文を確認でき、下端の「最新へ」で追従に戻れる。
+  const LIVE_LINE_PX = 16;
+  const LIVE_CHROME = 30;   // ヘッダー＋リサイズハンドル＋余白のぶん
+  const MIN_PANEL = 28;
+  const MAX_PANEL = 360;
   const maxLiveLines = settings?.hudLiveLines ?? 2;
-  const liveItems = useMemo(() => {
-    if (maxLiveLines <= 0) return [] as Array<{ text: string; partial: boolean }>;
-    const items = liveLines.map((t) => ({ text: t, partial: false }));
-    if (livePartial) items.push({ text: livePartial, partial: true });
-    return items.filter((x) => x.text).slice(-maxLiveLines);
-  }, [liveLines, livePartial, maxLiveLines]);
-  const hasLive = liveItems.length > 0;
+  const derivedPanelPx = Math.max(MIN_PANEL, maxLiveLines * LIVE_LINE_PX);
+  const livePanelPx = Math.min(
+    MAX_PANEL,
+    Math.max(MIN_PANEL, dragPx ?? settings?.hudLivePanelPx ?? derivedPanelPx),
+  );
+  const hasLiveContent = liveLines.length > 0 || livePartial.length > 0;
+  const hasLive = maxLiveLines > 0 && hasLiveContent && !!active;
 
   // Grow / shrink the HUD window so the textarea / live caption overlay is visible.
-  // ライブ字幕は 1 行あたり約 15px ＋ 枠の余白。
-  const liveExtra = hasLive ? liveItems.length * 15 + 12 : 0;
+  const liveExtra = hasLive ? livePanelPx + LIVE_CHROME : 0;
   useEffect(() => {
     void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + liveExtra);
   }, [memoOpen, liveExtra]);
+
+  // 設定側の高さ（ドラッグ保存値/行数リセット）に追随してドラッグ状態を同期
+  useEffect(() => {
+    setDragPx(settings?.hudLivePanelPx ?? null);
+  }, [settings?.hudLivePanelPx]);
+
+  // 追従中は新しい行が来るたび最下部へスクロール
+  useEffect(() => {
+    if (!autoFollow) return;
+    const el = liveScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [liveLines, livePartial, autoFollow, livePanelPx, hasLive]);
 
   const recording = recState.recording;
   const paused = recState.paused;
@@ -182,23 +202,73 @@ export function HudApp() {
     }
   };
 
-  // ライブ文字起こし（Vosk の暫定テキスト）。設定した行数ぶんを縦に並べ、
-  // 最新行を下に表示。収まらない古い行は自動的に押し出される。
-  const liveBox = hasLive && active ? (
-    <div className="hud-no-drag mt-1 flex flex-none flex-col justify-end gap-px rounded-lg bg-slate-900/95 px-2 py-1 shadow-2xl ring-1 ring-white/15">
-      {liveItems.map((item, i) => {
-        const isLast = i === liveItems.length - 1;
-        return (
-          <div key={i} className="flex items-center gap-1.5" title={item.text}>
-            {isLast
-              ? <AudioLines size={10} strokeWidth={2.25} className="flex-none text-sky-300" />
-              : <span className="w-2.5 flex-none" />}
-            <span className={`min-w-0 flex-1 truncate text-[10px] leading-none ${item.partial ? 'text-slate-400 italic' : 'text-slate-200'}`}>
-              {item.text}
-            </span>
-          </div>
-        );
-      })}
+  // ライブ字幕: ユーザーがスクロールで最下部から離れたら追従を解除し、戻したら再開
+  const handleLiveScroll = () => {
+    const el = liveScrollRef.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setAutoFollow(dist < 12);
+  };
+  const returnToLatest = () => {
+    setAutoFollow(true);
+    const el = liveScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+  // 下端ハンドルのドラッグでライブ字幕パネルの高さを変える（離したら設定に保存）
+  const handleResizeDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startPx = livePanelPx;
+    const clamp = (v: number) => Math.min(MAX_PANEL, Math.max(MIN_PANEL, v));
+    const onMove = (ev: MouseEvent) => setDragPx(clamp(startPx + (ev.clientY - startY)));
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const final = clamp(startPx + (ev.clientY - startY));
+      setDragPx(final);
+      if (settings) void window.api.settings.update({ ...settings, hudLivePanelPx: final });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  // ライブ文字起こし（Vosk の暫定テキスト）。スクロールで全文確認でき、
+  // 下端のハンドルをドラッグして高さを調整できる。
+  const liveBox = hasLive ? (
+    <div className="hud-no-drag mt-1 flex flex-none flex-col rounded-lg bg-slate-900/95 shadow-2xl ring-1 ring-white/15">
+      <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5">
+        <AudioLines size={10} strokeWidth={2.25} className="flex-none text-sky-300" />
+        <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">ライブ</span>
+        {!autoFollow && (
+          <button
+            onClick={returnToLatest}
+            className="ml-auto inline-flex items-center gap-0.5 rounded bg-sky-500/80 px-1.5 py-px text-[9px] font-semibold text-white hover:bg-sky-500"
+            title="最新の文字起こしへ戻る（自動追従を再開）"
+          >
+            <ChevronDown size={9} strokeWidth={2.5} /> 最新へ
+          </button>
+        )}
+      </div>
+      <div
+        ref={liveScrollRef}
+        onScroll={handleLiveScroll}
+        className="overflow-y-auto px-2 text-[10px] leading-snug text-slate-200"
+        style={{ height: livePanelPx }}
+      >
+        {liveLines.map((t, i) => (
+          <div key={i} className="whitespace-pre-wrap break-words">{t}</div>
+        ))}
+        {livePartial && (
+          <div className="whitespace-pre-wrap break-words italic text-slate-400">{livePartial}</div>
+        )}
+      </div>
+      <div
+        onMouseDown={handleResizeDown}
+        className="flex h-2 cursor-ns-resize items-center justify-center rounded-b-lg hover:bg-white/5"
+        title="ドラッグして高さを調整"
+      >
+        <div className="h-0.5 w-6 rounded bg-white/25" />
+      </div>
     </div>
   ) : null;
 
