@@ -39,6 +39,8 @@ export function CallEditDialog({
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
   const [transcribeProgress, setTranscribeProgress] = useState<{ stage: 'convert' | 'transcribe'; percent: number } | null>(null);
   const [queuePos, setQueuePos] = useState<number | null>(null);
+  // 再生位置（文字起こしの追従ハイライト用）
+  const [playSec, setPlaySec] = useState<number | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
   // 種別は編集で変更できる（通話⇄会議）。保存時に反映される。
@@ -469,7 +471,7 @@ export function CallEditDialog({
                       <Download size={12} /> 録音を保存
                     </button>
                   </div>
-                  <AudioPlayer ref={playerRef} src={audioSrc} />
+                  <AudioPlayer ref={playerRef} src={audioSrc} onTimeUpdate={setPlaySec} />
                 </div>
 
                 <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-slate-200 pt-3 dark:border-slate-700">
@@ -544,13 +546,13 @@ export function CallEditDialog({
                       {transcribeError}
                     </div>
                   )}
-                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                    <TranscriptView
-                      transcript={current.transcript}
-                      onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
-                      onEditSegment={(i, text) => void handleEditSegment(i, text)}
-                    />
-                  </div>
+                  <TranscriptView
+                    className="min-h-0 flex-1"
+                    transcript={current.transcript}
+                    currentSec={playSec}
+                    onSeek={(t) => playerRef.current?.seekTo(Math.max(0, t - settings.transcriptSeekOffsetSec))}
+                    onEditSegment={(i, text) => void handleEditSegment(i, text)}
+                  />
                 </div>
               </>
             ) : (

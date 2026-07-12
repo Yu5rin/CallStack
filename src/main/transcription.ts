@@ -14,6 +14,8 @@ export interface TranscribeOptions {
   language: 'auto' | 'ja' | 'en';
   /** 用語ヒント（whisper の初期プロンプト）。空文字なら渡さない */
   prompt?: string;
+  /** GPU (CUDA) 版バイナリを使用する（隠しオプション） */
+  useGpu?: boolean;
 }
 
 export class WhisperMissingError extends Error {
@@ -30,12 +32,12 @@ export class TranscriptionCancelledError extends Error {
   }
 }
 
-export async function checkSetup(model: WhisperModel): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function checkSetup(model: WhisperModel, useGpu = false): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!(await isModelDownloaded(model))) {
     return { ok: false, error: `モデル '${model}' が未ダウンロードです。設定画面からダウンロードしてください。` };
   }
   try {
-    await resolveWhisperBin();
+    await resolveWhisperBin(useGpu);
   } catch (err) {
     if (err instanceof WhisperMissingError) {
       return {
@@ -48,9 +50,18 @@ export async function checkSetup(model: WhisperModel): Promise<{ ok: true } | { 
   return { ok: true };
 }
 
-async function resolveWhisperBin(): Promise<string> {
+async function resolveWhisperBin(useGpu = false): Promise<string> {
+  const exeName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+  // 0. GPU 版が有効で配置済みなら最優先
+  if (useGpu) {
+    const gpuBin = path.join(getUserWhisperDir('gpu'), exeName);
+    try {
+      await fs.access(gpuBin);
+      return gpuBin;
+    } catch { /* CPU 版へフォールバック */ }
+  }
   // 1. アプリ内ダウンロードで配置されたもの (userData/whisper) を最優先
-  const userBin = path.join(getUserWhisperDir(), process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
+  const userBin = path.join(getUserWhisperDir(), exeName);
   try {
     await fs.access(userBin);
     return userBin;
@@ -80,7 +91,7 @@ export async function transcribe(
   if (!(await isModelDownloaded(opts.model))) {
     throw new Error(`モデル '${opts.model}' が未ダウンロードです。設定画面からダウンロードしてください。`);
   }
-  const bin = await resolveWhisperBin();
+  const bin = await resolveWhisperBin(opts.useGpu);
   const modelPath = getModelPath(opts.model);
   const baseTmp = path.join(app.getPath('temp'), `tts-${Date.now()}`);
   const wavPath = baseTmp + '.wav';
@@ -220,19 +231,31 @@ const queue: Job[] = [];
 let running = false;
 let handlers: JobHandlers | null = null;
 let currentJob: { callId: string; token: { cancelled: boolean; kill: (() => void) | null } } | null = null;
+/** enqueue 前の一瞬にキャンセルされた場合の記録（enqueue 時に照合して即キャンセル扱いにする） */
+const cancelledBeforeEnqueue = new Set<string>();
 
 export function setQueueHandlers(h: JobHandlers): void {
   handlers = h;
 }
 
+/** 待機中・実行中のいずれかに存在するか（二重開始の防止用） */
+export function isActive(callId: string): boolean {
+  return currentJob?.callId === callId || queue.some((j) => j.callId === callId);
+}
+
 export function enqueue(callId: string, opts: TranscribeOptions): void {
+  // ステータス表示直後（enqueue 前）にキャンセルされていたら投入しない
+  // （キャンセル時の onCancelled は cancel() 側で通知済み）
+  if (cancelledBeforeEnqueue.delete(callId)) return;
+  // 同じ記録の二重投入は無視する
+  if (isActive(callId)) return;
   queue.push({ callId, opts });
   void pump();
 }
 
 /**
  * キャンセル。待機中ならキューから除去、実行中ならプロセスを kill する。
- * 対象が見つかったら true。
+ * まだ enqueue されていない（楽観的ステータス表示のみの）場合も予約キャンセルする。
  */
 export function cancel(callId: string): boolean {
   const idx = queue.findIndex((j) => j.callId === callId);
@@ -246,7 +269,10 @@ export function cancel(callId: string): boolean {
     currentJob.token.kill?.();
     return true;
   }
-  return false;
+  // enqueue 前の競合: 予約キャンセルとして記録し、即キャンセル済み扱いにする
+  cancelledBeforeEnqueue.add(callId);
+  handlers?.onCancelled(callId);
+  return true;
 }
 
 async function pump(): Promise<void> {

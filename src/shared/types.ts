@@ -121,6 +121,8 @@ export interface TranscriptionSettings {
   modelDownloaded: Partial<Record<WhisperModel, boolean>>;
   /** 用語ヒント: 社名・専門用語・参加者名などを whisper の初期プロンプトとして渡し、固有名詞の認識を改善する */
   prompt: string;
+  /** GPU (CUDA) 版 whisper を使用する（隠しコマンドで解放される上級者向けオプション） */
+  useGpu?: boolean;
 }
 
 export interface Settings {
@@ -206,6 +208,7 @@ export type RecordingLevelEvent = { type: 'recording:level'; level: number };
 export type WhisperBinDownloadEvent = {
   type: 'whisperbin:download';
   step: 'download' | 'extract' | 'done' | 'error';
+  variant?: 'cpu' | 'gpu';
   receivedBytes: number;
   totalBytes: number | null;
   error?: string;

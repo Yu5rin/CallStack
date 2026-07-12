@@ -117,9 +117,10 @@ const api = {
       ipcRenderer.invoke('recording:save-as', callId),
   },
   whisper: {
-    binaryStatus: (): Promise<{ installed: boolean }> => ipcRenderer.invoke('whisper:binary-status'),
-    downloadBinary: (): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('whisper:download-binary'),
+    binaryStatus: (variant?: 'cpu' | 'gpu'): Promise<{ installed: boolean }> =>
+      ipcRenderer.invoke('whisper:binary-status', variant),
+    downloadBinary: (variant?: 'cpu' | 'gpu'): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('whisper:download-binary', variant),
   },
   capture: {
     listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),

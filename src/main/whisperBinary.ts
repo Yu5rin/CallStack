@@ -26,12 +26,20 @@ const FALLBACK_ASSETS = [
   'v1.7.2/whisper-bin-x64.zip',
 ];
 
-/** Windows 用 CPU ビルドとして採用する資産名（優先順） */
-const ASSET_PATTERNS: RegExp[] = [
-  /^whisper-blas-bin-x64\.zip$/i,     // CPU + OpenBLAS（速い）
-  /^whisper-bin-x64\.zip$/i,          // CPU 汎用
-  /^whisper-.*bin.*x64.*\.zip$/i,     // 名前が変わった場合の保険（cublas 等は除外したいので最後）
-];
+export type BinaryVariant = 'cpu' | 'gpu';
+
+/** Windows 用ビルドとして採用する資産名（優先順） */
+const ASSET_PATTERNS: Record<BinaryVariant, RegExp[]> = {
+  cpu: [
+    /^whisper-blas-bin-x64\.zip$/i,     // CPU + OpenBLAS（速い）
+    /^whisper-bin-x64\.zip$/i,          // CPU 汎用
+    /^whisper-.*bin.*x64.*\.zip$/i,     // 名前が変わった場合の保険
+  ],
+  gpu: [
+    /^whisper-cublas-[\d.]+-bin-x64\.zip$/i,  // NVIDIA CUDA 版
+    /^whisper-cuda.*bin.*x64.*\.zip$/i,
+  ],
+};
 
 function fetchJson<T>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -60,37 +68,47 @@ interface GhRelease {
   assets: Array<{ name: string; browser_download_url: string }>;
 }
 
-/** 最近のリリースから Windows x64 CPU ビルドのダウンロード URL を解決する */
-async function resolveAssetUrls(): Promise<string[]> {
+/** 最近のリリースから Windows x64 ビルドのダウンロード URL を解決する */
+async function resolveAssetUrls(variant: BinaryVariant): Promise<string[]> {
   try {
     const releases = await fetchJson<GhRelease[]>(RELEASES_API);
     const urls: string[] = [];
-    for (const pattern of ASSET_PATTERNS) {
+    for (const pattern of ASSET_PATTERNS[variant]) {
       for (const rel of releases) {
         if (rel.prerelease) continue;
-        // GPU 版 (cublas/cuda/vulkan) は CUDA ランタイムが必要なため除外
-        const asset = rel.assets.find((a) =>
-          pattern.test(a.name) && !/cublas|cuda|vulkan|arm|win32/i.test(a.name));
+        const asset = rel.assets.find((a) => {
+          if (!pattern.test(a.name)) return false;
+          if (/arm|win32/i.test(a.name)) return false;
+          // CPU 版検索時は GPU 資産を誤って掴まない
+          if (variant === 'cpu' && /cublas|cuda|vulkan/i.test(a.name)) return false;
+          return true;
+        });
         if (asset) urls.push(asset.browser_download_url);
       }
     }
     if (urls.length > 0) {
-      logInfo('whisperbin', `resolved ${urls.length} candidate assets via GitHub API`);
+      logInfo('whisperbin', `resolved ${urls.length} ${variant} assets via GitHub API`);
       return [...new Set(urls)];
     }
   } catch (err) {
     logInfo('whisperbin', `GitHub API failed: ${(err as Error).message} — using fallback list`);
   }
+  if (variant === 'gpu') {
+    return [
+      `${RELEASE_BASE}/v1.5.5/whisper-cublas-12.2.0-bin-x64.zip`,
+      `${RELEASE_BASE}/v1.5.4/whisper-cublas-12.2.0-bin-x64.zip`,
+    ];
+  }
   return FALLBACK_ASSETS.map((a) => `${RELEASE_BASE}/${a}`);
 }
 
-export function getUserWhisperDir(): string {
-  return path.join(app.getPath('userData'), 'whisper');
+export function getUserWhisperDir(variant: BinaryVariant = 'cpu'): string {
+  return path.join(app.getPath('userData'), variant === 'gpu' ? 'whisper-gpu' : 'whisper');
 }
 
-export async function isBinaryInstalled(): Promise<boolean> {
+export async function isBinaryInstalled(variant: BinaryVariant = 'cpu'): Promise<boolean> {
   try {
-    await fs.access(path.join(getUserWhisperDir(), 'whisper-cli.exe'));
+    await fs.access(path.join(getUserWhisperDir(variant), 'whisper-cli.exe'));
     return true;
   } catch {
     return false;
@@ -174,12 +192,13 @@ async function normalizeExecutable(dir: string): Promise<void> {
 
 export async function downloadWhisperBinary(
   onProgress: (p: BinDownloadProgress & { step: 'download' | 'extract' }) => void,
+  variant: BinaryVariant = 'cpu',
 ): Promise<void> {
-  const dir = getUserWhisperDir();
+  const dir = getUserWhisperDir(variant);
   await fs.mkdir(dir, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `whisper-bin-${Date.now()}.zip`);
 
-  const urls = await resolveAssetUrls();
+  const urls = await resolveAssetUrls(variant);
   let lastError: Error | null = null;
   let downloaded = false;
   for (const url of urls) {

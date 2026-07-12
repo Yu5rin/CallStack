@@ -2,6 +2,8 @@ import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from 're
 
 interface Props {
   src: string;
+  /** 再生位置の通知（文字起こしの追従ハイライト用） */
+  onTimeUpdate?: (sec: number) => void;
 }
 
 export interface AudioPlayerHandle {
@@ -11,7 +13,7 @@ export interface AudioPlayerHandle {
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
-export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPlayer({ src }, ref) {
+export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPlayer({ src, onTimeUpdate }, ref) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [speed, setSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPl
         src={src}
         controls
         preload="metadata"
+        onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
         onError={() => setError('音声ファイルを読み込めませんでした')}
         className="w-full"
       />

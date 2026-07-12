@@ -7,6 +7,7 @@ import {
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
+import { useToast } from '../components/Toast';
 
 const sectionClass =
   'rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900';
@@ -16,17 +17,27 @@ const ghostBtn =
   'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
 
 /** whisper.cpp のセットアップ状態 + 実行ファイルのアプリ内ダウンロード */
-function WhisperSetup() {
+function WhisperSetup({
+  gpuUnlocked,
+  useGpu,
+  onToggleGpu,
+}: {
+  gpuUnlocked: boolean;
+  useGpu: boolean;
+  onToggleGpu: (v: boolean) => void;
+}) {
   const [status, setStatus] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
   const [checking, setChecking] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<null | 'cpu' | 'gpu'>(null);
   const [progress, setProgress] = useState<{ step: string; rec: number; total: number | null } | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
+  const [gpuInstalled, setGpuInstalled] = useState(false);
 
   const run = async () => {
     setChecking(true);
     try {
       setStatus(await window.api.transcription.checkSetup());
+      setGpuInstalled((await window.api.whisper.binaryStatus('gpu')).installed);
     } finally {
       setChecking(false);
     }
@@ -37,11 +48,11 @@ function WhisperSetup() {
     const off = window.api.onEvent((e: AppEvent) => {
       if (e.type !== 'whisperbin:download') return;
       if (e.step === 'done') {
-        setDownloading(false);
+        setDownloading(null);
         setProgress(null);
         void run();
       } else if (e.step === 'error') {
-        setDownloading(false);
+        setDownloading(null);
         setProgress(null);
         setDlError(e.error ?? 'ダウンロードに失敗しました');
       } else {
@@ -51,11 +62,11 @@ function WhisperSetup() {
     return () => off();
   }, []);
 
-  const download = async () => {
+  const download = async (variant: 'cpu' | 'gpu' = 'cpu') => {
     setDlError(null);
-    setDownloading(true);
+    setDownloading(variant);
     setProgress({ step: 'download', rec: 0, total: null });
-    await window.api.whisper.downloadBinary();
+    await window.api.whisper.downloadBinary(variant);
   };
 
   const pct = progress?.total ? Math.round((progress.rec / progress.total) * 100) : null;
@@ -82,15 +93,25 @@ function WhisperSetup() {
           <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{status.error}</div>
         </div>
       )}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
-          onClick={download}
-          disabled={downloading}
+          onClick={() => download('cpu')}
+          disabled={downloading !== null}
           className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           title="whisper.cpp の Windows ビルドを GitHub から取得して自動配置します"
         >
-          {downloading ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
+          {downloading === 'cpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
         </button>
+        {gpuUnlocked && (
+          <button
+            onClick={() => download('gpu')}
+            disabled={downloading !== null}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            title="NVIDIA CUDA 対応ビルド（大容量）。NVIDIA GPU が必要です"
+          >
+            {downloading === 'gpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />GPU (CUDA) 版をダウンロード</>}
+          </button>
+        )}
         {progress && (
           <span className="text-xs text-slate-500 dark:text-slate-400">
             {progress.step === 'extract'
@@ -101,6 +122,20 @@ function WhisperSetup() {
           </span>
         )}
       </div>
+      {gpuUnlocked && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={useGpu}
+            onChange={(e) => onToggleGpu(e.target.checked)}
+            disabled={!gpuInstalled}
+          />
+          GPU (CUDA) 版を使用する
+          <span className="text-slate-500 dark:text-slate-400">
+            {gpuInstalled ? '— 文字起こしが数倍高速になります（NVIDIA GPU 必須）' : '— 先に GPU 版をダウンロードしてください'}
+          </span>
+        </label>
+      )}
       {progress && pct !== null && progress.step === 'download' && (
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
           <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
@@ -113,9 +148,40 @@ function WhisperSetup() {
   );
 }
 
+const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+const GPU_UNLOCK_KEY = 'callstack.gpuUnlocked';
+
 export function SettingsPage({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => Promise<void> }) {
+  const toast = useToast();
   const [draft, setDraft] = useState<Settings>(settings);
   const [showRecordingWarning, setShowRecordingWarning] = useState(false);
+  // 隠しコマンド (↑↑↓↓←→←→BA) で GPU 版のオプションを解放
+  const [gpuUnlocked, setGpuUnlocked] = useState(
+    () => localStorage.getItem(GPU_UNLOCK_KEY) === '1' || !!settings.transcription.useGpu,
+  );
+  const konamiPos = useRef(0);
+  useEffect(() => {
+    if (gpuUnlocked) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (key === KONAMI[konamiPos.current]) {
+        konamiPos.current += 1;
+        if (konamiPos.current === KONAMI.length) {
+          konamiPos.current = 0;
+          setGpuUnlocked(true);
+          localStorage.setItem(GPU_UNLOCK_KEY, '1');
+          toast.success('隠しオプションを解放しました: GPU (CUDA) 版 whisper が利用できます');
+        }
+      } else {
+        konamiPos.current = key === KONAMI[0] ? 1 : 0;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpuUnlocked]);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const lastIncoming = useRef<Settings>(settings);
@@ -425,7 +491,11 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           すべてオフラインで動作します。初回のみ whisper.cpp 本体とモデルのダウンロードが必要です（下のボタンで完結します）。
         </p>
-        <WhisperSetup />
+        <WhisperSetup
+          gpuUnlocked={gpuUnlocked}
+          useGpu={draft.transcription.useGpu ?? false}
+          onToggleGpu={(v) => updateTranscription({ useGpu: v })}
+        />
         <div className="mt-4 space-y-3">
           <Row label="自動文字起こし">
             <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">

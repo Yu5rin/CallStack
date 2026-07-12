@@ -38,6 +38,7 @@ import {
   enqueue as enqueueTranscription, cancel as cancelTranscription,
   setQueueHandlers, WhisperMissingError, checkSetup as checkTranscriptionSetup,
   queueLength as transcriptionQueueLength, shutdownQueue as shutdownTranscription,
+  isActive as isTranscriptionActive,
 } from './transcription';
 import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels';
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
@@ -753,19 +754,20 @@ function setupIpc(): void {
     const rec = store.getCall(callId);
     if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
     if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
-    // 押した瞬間に状況が見えるよう、セットアップ確認の前に「待機中」を即時表示する
-    const optimistic = store.updateCall(callId, { transcriptStatus: 'queued', transcriptError: undefined });
-    if (optimistic) {
-      broadcast('app-event', {
-        type: 'transcription:status', callId, status: 'queued',
-        queuePosition: transcriptionQueueLength() + 1,
-      });
+    // 二重開始の防止（すでに待機中・実行中なら受け付けない）
+    if (isTranscriptionActive(callId) || rec.transcriptStatus === 'queued' || rec.transcriptStatus === 'running') {
+      return { ok: false, error: 'この記録の文字起こしはすでに進行中です。' };
     }
+    // 押した瞬間に状況が見えるよう、セットアップ確認の前に「待機中」を即時表示する
+    setTranscriptStatus(
+      callId,
+      { transcriptStatus: 'queued', transcriptError: undefined },
+      { status: 'queued', queuePosition: transcriptionQueueLength() + 1 },
+    );
     const s = store.getSettings();
-    const setup = await checkTranscriptionSetup(s.transcription.model);
+    const setup = await checkTranscriptionSetup(s.transcription.model, s.transcription.useGpu ?? false);
     if (!setup.ok) {
-      const reverted = store.updateCall(callId, { transcriptStatus: 'error', transcriptError: setup.error });
-      if (reverted) broadcast('app-event', { type: 'transcription:status', callId, status: 'error', error: setup.error });
+      setTranscriptStatus(callId, { transcriptStatus: 'error', transcriptError: setup.error }, { status: 'error', error: setup.error });
       return setup;
     }
     queueTranscription(callId);
@@ -778,7 +780,7 @@ function setupIpc(): void {
 
   ipcMain.handle('transcription:check-setup', async () => {
     const s = store.getSettings();
-    return checkTranscriptionSetup(s.transcription.model);
+    return checkTranscriptionSetup(s.transcription.model, s.transcription.useGpu ?? false);
   });
 
   ipcMain.handle('transcription:download-model', async (_e, model: WhisperModel) => {
@@ -902,7 +904,7 @@ function setupIpc(): void {
       broadcast('app-event', { type: 'call:updated', record: rec });
       logInfo('import', `audio imported ${opts.filePath} -> ${rel} (${durationSec}s)`);
       if (opts.autoTranscribe) {
-        const setup = await checkTranscriptionSetup(s.transcription.model);
+        const setup = await checkTranscriptionSetup(s.transcription.model, s.transcription.useGpu ?? false);
         if (setup.ok) queueTranscription(id);
         else broadcast('app-event', { type: 'recording:error', message: `文字起こしを開始できません: ${setup.error}` });
       }
@@ -913,28 +915,30 @@ function setupIpc(): void {
   });
 
   // ============ whisper.cpp 実行ファイルのダウンロード ============
-  ipcMain.handle('whisper:binary-status', async () => {
-    return { installed: await isBinaryInstalled() };
+  ipcMain.handle('whisper:binary-status', async (_e, variant?: 'cpu' | 'gpu') => {
+    return { installed: await isBinaryInstalled(variant ?? 'cpu') };
   });
 
-  ipcMain.handle('whisper:download-binary', async () => {
+  ipcMain.handle('whisper:download-binary', async (_e, variant?: 'cpu' | 'gpu') => {
+    const v = variant ?? 'cpu';
     try {
       await downloadWhisperBinary((p) => {
         broadcast('app-event', {
           type: 'whisperbin:download',
           step: p.step,
+          variant: v,
           receivedBytes: p.receivedBytes,
           totalBytes: p.totalBytes,
         });
-      });
+      }, v);
       broadcast('app-event', {
-        type: 'whisperbin:download', step: 'done', receivedBytes: 0, totalBytes: null,
+        type: 'whisperbin:download', step: 'done', variant: v, receivedBytes: 0, totalBytes: null,
       });
       return { ok: true };
     } catch (err) {
       const message = (err as Error).message;
       broadcast('app-event', {
-        type: 'whisperbin:download', step: 'error', receivedBytes: 0, totalBytes: null, error: message,
+        type: 'whisperbin:download', step: 'error', variant: v, receivedBytes: 0, totalBytes: null, error: message,
       });
       return { ok: false, error: message };
     }
@@ -1010,18 +1014,17 @@ function queueTranscription(callId: string): void {
   const { recordings } = getDirs();
   const abs = path.join(recordings, rec.audio.path);
   const s = store.getSettings();
-  const updated = store.updateCall(callId, { transcriptStatus: 'queued', transcriptError: undefined });
-  if (updated) {
-    broadcast('app-event', {
-      type: 'transcription:status', callId, status: 'queued',
-      queuePosition: transcriptionQueueLength() + 1,
-    });
-  }
+  setTranscriptStatus(
+    callId,
+    { transcriptStatus: 'queued', transcriptError: undefined },
+    { status: 'queued', queuePosition: transcriptionQueueLength() + 1 },
+  );
   enqueueTranscription(callId, {
     audioPath: abs,
     model: s.transcription.model,
     language: s.transcription.language,
     prompt: s.transcription.prompt,
+    useGpu: s.transcription.useGpu ?? false,
   });
   updatePowerBlocker();
   // 実行中ジョブがあればその進捗込みで、なければ待機数のみサマリーを更新
@@ -1108,6 +1111,22 @@ function buildMinutesMd(rec: CallRecord): string {
   return lines.join('\n');
 }
 
+/**
+ * 文字起こしステータスの更新。transcription:status に加えて必ず call:updated も
+ * 配信する（一覧・編集ダイアログは記録データの transcriptStatus を表示しているため、
+ * これがないと表示が古いまま「開始」も押せてしまう）。
+ */
+function setTranscriptStatus(
+  callId: string,
+  patch: Partial<CallRecord>,
+  statusEvent: { status: CallRecord['transcriptStatus']; error?: string; queuePosition?: number; transcript?: CallTranscript },
+): void {
+  const updated = store.updateCall(callId, patch);
+  if (!updated) return;
+  broadcast('app-event', { type: 'transcription:status', callId, ...statusEvent });
+  broadcast('app-event', { type: 'call:updated', record: updated });
+}
+
 // ============ 文字起こし進捗マネージャ ============
 // whisper の進捗通知は約5%刻みのため、直近の進行速度から1秒ごとに補間して
 // 1%単位の進捗と推定残り時間を全ウィンドウへ配信する。
@@ -1191,8 +1210,7 @@ function endJobProgress(callId: string): void {
 function setupTranscriptionHandlers(): void {
   setQueueHandlers({
     onStart: (callId) => {
-      const updated = store.updateCall(callId, { transcriptStatus: 'running' });
-      if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'running' });
+      setTranscriptStatus(callId, { transcriptStatus: 'running' }, { status: 'running' });
       const now = Date.now();
       jobProgress = {
         callId, stage: 'convert', startedAt: now,
@@ -1221,17 +1239,16 @@ function setupTranscriptionHandlers(): void {
       const rec = store.getCall(callId);
       // 過去の文字起こしが残っていれば done、なければ none に戻す
       const status = rec?.transcript ? 'done' : 'none';
-      const updated = store.updateCall(callId, { transcriptStatus: status, transcriptError: undefined });
-      if (updated) broadcast('app-event', { type: 'transcription:status', callId, status });
+      setTranscriptStatus(callId, { transcriptStatus: status, transcriptError: undefined }, { status });
       endJobProgress(callId);
       updatePowerBlocker();
     },
     onDone: (callId, transcript) => {
-      const updated = store.updateCall(callId, { transcript, transcriptStatus: 'done', transcriptError: undefined });
-      if (updated) {
-        broadcast('app-event', { type: 'transcription:status', callId, status: 'done', transcript });
-        broadcast('app-event', { type: 'call:updated', record: updated });
-      }
+      setTranscriptStatus(
+        callId,
+        { transcript, transcriptStatus: 'done', transcriptError: undefined },
+        { status: 'done', transcript },
+      );
       endJobProgress(callId);
       updatePowerBlocker();
     },
@@ -1239,8 +1256,7 @@ function setupTranscriptionHandlers(): void {
       const message = err instanceof WhisperMissingError
         ? `whisper.cpp の実行ファイルが見つかりません。設定画面の「whisper.cpp をダウンロード」で自動セットアップできます。`
         : err.message;
-      const updated = store.updateCall(callId, { transcriptStatus: 'error', transcriptError: message });
-      if (updated) broadcast('app-event', { type: 'transcription:status', callId, status: 'error', error: message });
+      setTranscriptStatus(callId, { transcriptStatus: 'error', transcriptError: message }, { status: 'error', error: message });
       endJobProgress(callId);
       updatePowerBlocker();
     },
