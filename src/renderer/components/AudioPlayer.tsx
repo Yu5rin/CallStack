@@ -12,15 +12,34 @@ export interface AudioPlayerHandle {
 }
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
+const VOL_KEY = 'callstack.playbackVolume';
+const SPEED_KEY = 'callstack.playbackSpeed';
 
 export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPlayer({ src, onTimeUpdate }, ref) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [speed, setSpeed] = useState(1);
+  // 再生速度・音量は前回の設定を引き継ぐ（localStorage に保存）
+  const [speed, setSpeed] = useState(() => {
+    const v = Number(localStorage.getItem(SPEED_KEY));
+    return SPEEDS.includes(v) ? v : 1;
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = speed;
+    localStorage.setItem(SPEED_KEY, String(speed));
   }, [speed]);
+
+  // 音量の初期値を復元（音声要素が用意できたら適用）
+  const applyStoredVolume = (el: HTMLAudioElement | null) => {
+    audioRef.current = el;
+    if (!el) return;
+    const v = Number(localStorage.getItem(VOL_KEY));
+    if (!Number.isNaN(v) && v >= 0 && v <= 1) el.volume = v;
+    el.playbackRate = speed;
+  };
+  const handleVolumeChange = (el: HTMLAudioElement) => {
+    localStorage.setItem(VOL_KEY, String(el.volume));
+  };
 
   useImperativeHandle(ref, () => ({
     seekTo: (sec: number) => {
@@ -37,11 +56,13 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPl
   return (
     <div className="space-y-2">
       <audio
-        ref={audioRef}
+        ref={applyStoredVolume}
         src={src}
         controls
         preload="metadata"
         onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+        onVolumeChange={(e) => handleVolumeChange(e.currentTarget)}
+        onLoadedMetadata={(e) => applyStoredVolume(e.currentTarget)}
         onError={() => setError('音声ファイルを読み込めませんでした')}
         className="w-full"
       />

@@ -10,7 +10,7 @@ import { formatHMS } from './utils/format';
 import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared/types';
 import { LevelMeter } from './recorder/LevelMeter';
 import { SummaryFooter } from './components/SummaryFooter';
-import { Phone, Users, Bookmark, Play, Pause, Square, Circle, MoreVertical, FileAudio, Plus, Upload, Download } from 'lucide-react';
+import { Phone, Users, Bookmark, Play, Pause, Square, Circle, MoreVertical, FileAudio, Plus, Upload, Download, Settings as SettingsIcon } from 'lucide-react';
 import { ToastProvider, useToast } from './components/Toast';
 import { StartRecordDialog, StartMeta } from './components/StartRecordDialog';
 import { OnboardingDialog } from './components/OnboardingDialog';
@@ -182,7 +182,6 @@ function AppContent() {
           <TabButton active={page === 'list'} onClick={() => setPage('list')}>記録</TabButton>
           <TabButton active={page === 'stats'} onClick={() => setPage('stats')}>統計</TabButton>
           <TabButton active={page === 'trash'} onClick={() => setPage('trash')}>ゴミ箱</TabButton>
-          <TabButton active={page === 'settings'} onClick={() => setPage('settings')}>設定</TabButton>
         </nav>
         <div className="flex items-center gap-3">
           {active ? (
@@ -287,6 +286,17 @@ function AppContent() {
               </div>
             )}
           </div>
+          <button
+            onClick={() => setPage('settings')}
+            className={`rounded-md border p-1.5 transition ${
+              page === 'settings'
+                ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-950 dark:text-brand-300'
+                : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+            }`}
+            title="設定"
+          >
+            <SettingsIcon size={16} />
+          </button>
         </div>
       </header>
 

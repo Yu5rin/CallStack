@@ -57,6 +57,8 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
 let mainWindow: BrowserWindow | null = null;
 let hudWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
+let liveWindow: BrowserWindow | null = null;
+let liveBoundsHandler: ((b: { x: number; y: number; width: number; height: number }) => void) | null = null;
 let minimizeToTrayEnabled = false;
 
 /** ウィンドウを閉じる前の確認フック。'prevent' を返すと閉じない */
@@ -404,9 +406,87 @@ export function destroyRecorderWindow(): void {
 }
 
 export function broadcast(channel: string, payload: unknown): void {
-  for (const win of [mainWindow, hudWindow, recorderWindow]) {
+  for (const win of [mainWindow, hudWindow, recorderWindow, liveWindow]) {
     if (win && !win.isDestroyed()) {
       win.webContents.send(channel, payload);
     }
   }
+}
+
+// ============ ライブ字幕ウィンドウ（独立・移動/リサイズ可能） ============
+export interface LiveBounds { x: number; y: number; width: number; height: number }
+
+/** 移動・リサイズされたときに保存するためのハンドラを登録する */
+export function setLiveBoundsHandler(fn: (b: LiveBounds) => void): void {
+  liveBoundsHandler = fn;
+}
+
+export function getLiveWindow(): BrowserWindow | null {
+  return liveWindow;
+}
+
+export function showLiveWindow(bounds?: LiveBounds | null): BrowserWindow {
+  if (liveWindow && !liveWindow.isDestroyed()) {
+    liveWindow.show();
+    return liveWindow;
+  }
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = bounds?.width ?? 380;
+  const height = bounds?.height ?? 200;
+  // 画面内に収める（保存座標がモニタ構成変更で画面外になっていても見えるように）
+  const x = bounds
+    ? Math.min(Math.max(bounds.x, workArea.x), workArea.x + workArea.width - width)
+    : workArea.x + workArea.width - width - 20;
+  const y = bounds
+    ? Math.min(Math.max(bounds.y, workArea.y), workArea.y + workArea.height - height)
+    : workArea.y + 120;
+
+  liveWindow = new BrowserWindow({
+    width, height, x, y,
+    minWidth: 220,
+    minHeight: 90,
+    frame: false,
+    transparent: false,
+    resizable: true,      // 枠なしでも端からリサイズ可能（横・縦とも）
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    focusable: true,
+    backgroundColor: '#0f172a',
+    webPreferences: {
+      preload: PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false,
+    },
+  });
+  liveWindow.setAlwaysOnTop(true, 'screen-saver');
+  attachEditContextMenu(liveWindow);
+
+  const persist = () => {
+    if (!liveWindow || liveWindow.isDestroyed()) return;
+    const [bx, by] = liveWindow.getPosition();
+    const [bw, bh] = liveWindow.getSize();
+    liveBoundsHandler?.({ x: bx, y: by, width: bw, height: bh });
+  };
+  liveWindow.on('moved', persist);
+  liveWindow.on('resized', persist);
+  liveWindow.on('closed', () => { liveWindow = null; });
+
+  liveWindow.once('ready-to-show', () => liveWindow?.show());
+  if (DEV_URL) {
+    liveWindow.loadURL(`${DEV_URL.replace(/\/$/, '')}/live.html`);
+  } else {
+    liveWindow.loadFile(path.join(DIST_DIR, 'live.html'));
+  }
+  return liveWindow;
+}
+
+export function hideLiveWindow(): void {
+  if (liveWindow && !liveWindow.isDestroyed()) {
+    liveWindow.close();
+  }
+  liveWindow = null;
 }

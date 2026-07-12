@@ -26,6 +26,10 @@ import {
   setHudSize,
   setHudExtraHeight,
   nextHudSize,
+  showLiveWindow,
+  hideLiveWindow,
+  getLiveWindow,
+  setLiveBoundsHandler,
 } from './window';
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
 import { exportCsv, parseCsv } from './csv';
@@ -176,6 +180,7 @@ function startCall(kind: RecordKind = 'call', meta?: Partial<CallRecord>): CallR
   updatePowerBlocker();
   broadcast('app-event', { type: 'call:started', record: rec });
   void startLiveSession(rec);
+  updateLiveWindow();
   return rec;
 }
 
@@ -198,6 +203,7 @@ async function endCall(): Promise<CallRecord | null> {
   // so we just broadcast and let it call recording:finalize.
   stopTickLoop();
   closeHudWindow();
+  hideLiveWindow();
   updateTray({ active: false, today: todayStats() }, trayHandlers);
   updatePowerBlocker();
   logInfo('call', `ended ${active.id} (${durationSec}s)`);
@@ -273,6 +279,23 @@ async function isLiveReady(s: Settings): Promise<boolean> {
   if (!s.recording.enabled || !s.transcription.liveEnabled) return false;
   const model = s.transcription.liveModel ?? 'small-ja';
   return (await isVoskEngineInstalled()) && (await isVoskModelInstalled(model));
+}
+
+/**
+ * ライブ字幕ウィンドウの表示/非表示を現在の状態に合わせる。
+ * 記録中 かつ ライブ文字起こし有効 かつ 表示設定 ON のときだけ出す。
+ */
+function updateLiveWindow(): void {
+  const s = store.getSettings();
+  const shouldShow = !!getActive()
+    && s.recording.enabled
+    && !!s.transcription.liveEnabled
+    && (s.hudLiveVisible ?? true);
+  if (shouldShow) {
+    showLiveWindow(s.liveWindowBounds ?? null);
+  } else {
+    hideLiveWindow();
+  }
 }
 
 async function startLiveSession(rec: CallRecord): Promise<void> {
@@ -561,6 +584,11 @@ function setupIpc(): void {
       voskUnloadModel();
     }
     broadcast('app-event', { type: 'settings:updated', settings: next });
+    // 表示切替・ライブ有効切替に追随してライブ字幕ウィンドウを出し入れ
+    if (prev.hudLiveVisible !== next.hudLiveVisible
+      || prev.transcription.liveEnabled !== next.transcription.liveEnabled) {
+      updateLiveWindow();
+    }
     return next;
   });
 
@@ -852,10 +880,20 @@ function setupIpc(): void {
     }
   });
 
-  // 編集ダイアログを途中から開いたとき、これまでのライブ認識結果を取得する
+  // 編集ダイアログ・ライブ字幕ウィンドウが途中から開いたとき、これまでの結果を取得する
   ipcMain.handle('live:get', () => {
     if (!liveSession) return null;
     return { callId: liveSession.callId, segments: liveSession.segments };
+  });
+
+  // ライブ字幕ウィンドウの × ボタン: 表示設定を OFF にして閉じる
+  ipcMain.handle('live:hide', () => {
+    const s = store.getSettings();
+    const next = { ...s, hudLiveVisible: false };
+    store.setSettings(next);
+    hideLiveWindow();
+    broadcast('app-event', { type: 'settings:updated', settings: next });
+    return true;
   });
 
   // 録音サービスウィンドウからの 16kHz/mono/Int16 PCM（fire-and-forget で高頻度に届く）
@@ -927,7 +965,7 @@ function setupIpc(): void {
   });
 
   // ============ Transcription ============
-  ipcMain.handle('transcription:start', async (_e, callId: string) => {
+  ipcMain.handle('transcription:start', async (_e, callId: string, model?: WhisperModel) => {
     const rec = store.getCall(callId);
     if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
     if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
@@ -942,12 +980,14 @@ function setupIpc(): void {
       { status: 'queued', queuePosition: transcriptionQueueLength() + 1 },
     );
     const s = store.getSettings();
-    const setup = await checkTranscriptionSetup(s.transcription.model, s.transcription.useGpu ?? false);
+    // 編集画面でモデルを指定された場合はそれを使う（既定は設定のモデル）
+    const useModel = model ?? s.transcription.model;
+    const setup = await checkTranscriptionSetup(useModel, s.transcription.useGpu ?? false);
     if (!setup.ok) {
       setTranscriptStatus(callId, { transcriptStatus: 'error', transcriptError: setup.error }, { status: 'error', error: setup.error });
       return setup;
     }
-    queueTranscription(callId);
+    queueTranscription(callId, useModel);
     return { ok: true };
   });
 
@@ -1185,7 +1225,7 @@ function setupIpc(): void {
   });
 }
 
-function queueTranscription(callId: string): void {
+function queueTranscription(callId: string, modelOverride?: WhisperModel): void {
   const rec = store.getCall(callId);
   if (!rec || !rec.audio) return;
   const { recordings } = getDirs();
@@ -1198,7 +1238,7 @@ function queueTranscription(callId: string): void {
   );
   enqueueTranscription(callId, {
     audioPath: abs,
-    model: s.transcription.model,
+    model: modelOverride ?? s.transcription.model,
     language: s.transcription.language,
     prompt: s.transcription.prompt,
     useGpu: s.transcription.useGpu ?? false,
@@ -1665,7 +1705,9 @@ async function main() {
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {
     logInfo('app', 'another instance is already running — quitting this one');
-    app.quit();
+    // app.quit() は will-quit を発火させ、アプリ準備前に globalShortcut 等へ触れて
+    // 例外ダイアログが出てしまう。exit なら後片付けイベントを発火せず即終了できる。
+    app.exit(0);
     return;
   }
   app.on('second-instance', () => {
@@ -1682,6 +1724,11 @@ async function main() {
   setupMediaPermissions();
   setupDisplayCapture();
   registerAppProtocol();
+
+  // ライブ字幕ウィンドウの移動・リサイズを設定に保存する
+  setLiveBoundsHandler((bounds) => {
+    store.setSettings({ ...store.getSettings(), liveWindowBounds: bounds });
+  });
 
   createTray(trayHandlers);
   updateTray({ active: false, today: todayStats() }, trayHandlers);
@@ -1746,6 +1793,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  // アプリ準備前（二重起動で即終了する場合など）は初期化していないので後片付け不要。
+  // globalShortcut 等を ready 前に触ると例外になるためガードする。
+  if (!app.isReady()) return;
   unregisterAll();
   stopTickLoop();
   stopDailyCleanup();

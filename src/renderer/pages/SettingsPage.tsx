@@ -480,29 +480,28 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
               <input
                 type="checkbox"
-                checked={draft.hudLiveVisible ?? ((draft.hudLiveLines ?? 2) !== 0)}
+                checked={draft.hudLiveVisible ?? true}
                 onChange={(e) => update({ hudLiveVisible: e.target.checked })}
               />
-              HUD にライブ字幕を表示する
+              ライブ字幕ウィンドウを表示する
             </label>
             <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-              既定の高さ
+              文字サイズ
               <select
-                value={Math.max(1, draft.hudLiveLines ?? 2)}
-                // 行数を変えたらドラッグで調整した高さはリセットして行数基準に戻す
-                onChange={(e) => update({ hudLiveLines: Number(e.target.value), hudLivePanelPx: undefined })}
+                value={draft.liveFontSize ?? 'sm'}
+                onChange={(e) => update({ liveFontSize: e.target.value as 'sm' | 'md' | 'lg' })}
                 className={`w-24 ${inputClass}`}
               >
-                {[1, 2, 3, 4, 5, 6].map((n) => (
-                  <option key={n} value={n}>{n} 行</option>
-                ))}
+                <option value="sm">小</option>
+                <option value="md">中</option>
+                <option value="lg">大</option>
               </select>
             </label>
           </div>
           <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-            録音中のライブ文字起こしを HUD に表示します。表示の ON/OFF は HUD 上の「字幕」ボタンからも切り替えられます。
-            HUD 上のパネルは下端をドラッグして高さを変えられ、スクロールで全文を確認できます
-            （下にスクロールすると「最新へ」ボタンで追従に戻れます）
+            録音中のライブ文字起こしを独立したウィンドウに表示します。ウィンドウは自由に移動・リサイズでき、
+            文字サイズ（小/中/大）はウィンドウ上でも切り替えられます。表示 ON/OFF は HUD の「字幕」ボタンや
+            ウィンドウの × でも操作できます
           </span>
         </Row>
       </section>

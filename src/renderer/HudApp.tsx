@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, ChevronDown } from 'lucide-react';
+import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, Contact } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
 import { AppEvent, Settings, CallRecord } from '../shared/types';
@@ -35,14 +35,11 @@ export function HudApp() {
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState('');
   const [hovered, setHovered] = useState(false);
-  // ライブ文字起こし: 確定した行を蓄積（末尾が最新）＋ 認識途中の1行
-  const [liveLines, setLiveLines] = useState<string[]>([]);
-  const [livePartial, setLivePartial] = useState('');
-  // ライブ字幕パネル: ドラッグ中の高さ(px, 未ドラッグは null) と 自動追従
-  const [dragPx, setDragPx] = useState<number | null>(null);
-  const [autoFollow, setAutoFollow] = useState(true);
-  const liveScrollRef = useRef<HTMLDivElement | null>(null);
+  // 情報（タイトル/参加者 or 連絡先/電話番号）の追記オーバーレイ
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [infoDraft, setInfoDraft] = useState({ title: '', participants: '', contactName: '', phoneNumber: '' });
   const memoTimer = useRef<number | null>(null);
+  const infoTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -68,28 +65,14 @@ export function HudApp() {
         if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setMarkerFlash(false), 1200);
       }
-      // ライブ文字起こし: final で行を確定して蓄積、partial は認識途中の1行を差し替え。
-      // 表示は直近 N 行だけに絞るため、蓄積は上限を設けて古い行を捨てる。
-      if (e.type === 'live:segment') {
-        if (e.final) {
-          if (e.text) setLiveLines((prev) => [...prev, e.text].slice(-30));
-          setLivePartial('');
-        } else {
-          setLivePartial(e.text);
-        }
-      }
       if (e.type === 'call:started') {
         setLevel(0);
-        setLiveLines([]);
-        setLivePartial('');
         setActiveRecord(e.record);
         setMemoDraft(e.record.memo ?? '');
         setMarkerCount(e.record.markers?.length ?? 0);
       }
       if (e.type === 'call:ended') {
         setActiveRecord(null);
-        setLiveLines([]);
-        setLivePartial('');
       }
       if (e.type === 'call:updated') {
         // 進行中の記録に対する更新のみ反映する。
@@ -105,10 +88,11 @@ export function HudApp() {
     return () => off();
   }, []);
 
-  // Close the memo overlay when the call ends.
+  // Close the memo / info overlays when the call ends.
   useEffect(() => {
     if (!active) {
       setMemoOpen(false);
+      setInfoOpen(false);
       if (memoTimer.current !== null) {
         window.clearTimeout(memoTimer.current);
         memoTimer.current = null;
@@ -116,41 +100,14 @@ export function HudApp() {
     }
   }, [active]);
 
-  // ライブ字幕パネル。設定の行数で既定の高さを決め、ドラッグで自由に広げられる。
-  // 内容はスクロールで全文を確認でき、下端の「最新へ」で追従に戻れる。
-  const LIVE_LINE_PX = 16;
-  const LIVE_CHROME = 30;   // ヘッダー＋リサイズハンドル＋余白のぶん
-  const MIN_PANEL = 28;
-  const MAX_PANEL = 360;
-  const maxLiveLines = Math.max(1, settings?.hudLiveLines ?? 2);
-  const derivedPanelPx = Math.max(MIN_PANEL, maxLiveLines * LIVE_LINE_PX);
-  const livePanelPx = Math.min(
-    MAX_PANEL,
-    Math.max(MIN_PANEL, dragPx ?? settings?.hudLivePanelPx ?? derivedPanelPx),
-  );
-  // 表示の可否: HUD の切替（hudLiveVisible）優先。未設定なら旧「行数0=非表示」を踏襲。
-  const liveVisible = settings?.hudLiveVisible ?? ((settings?.hudLiveLines ?? 2) !== 0);
+  // ライブ字幕は独立ウィンドウで表示する。HUD の「字幕」ボタンは表示 ON/OFF の切替。
+  const liveVisible = settings?.hudLiveVisible ?? true;
   const liveEnabled = settings?.transcription.liveEnabled ?? false;
-  const hasLiveContent = liveLines.length > 0 || livePartial.length > 0;
-  const hasLive = liveVisible && hasLiveContent && !!active;
 
-  // Grow / shrink the HUD window so the textarea / live caption overlay is visible.
-  const liveExtra = hasLive ? livePanelPx + LIVE_CHROME : 0;
+  // Grow / shrink the HUD window so the memo / info overlays are visible.
   useEffect(() => {
-    void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + liveExtra);
-  }, [memoOpen, liveExtra]);
-
-  // 設定側の高さ（ドラッグ保存値/行数リセット）に追随してドラッグ状態を同期
-  useEffect(() => {
-    setDragPx(settings?.hudLivePanelPx ?? null);
-  }, [settings?.hudLivePanelPx]);
-
-  // 追従中は新しい行が来るたび最下部へスクロール
-  useEffect(() => {
-    if (!autoFollow) return;
-    const el = liveScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [liveLines, livePartial, autoFollow, livePanelPx, hasLive]);
+    void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + (infoOpen ? 156 : 0));
+  }, [memoOpen, infoOpen]);
 
   const recording = recState.recording;
   const paused = recState.paused;
@@ -209,72 +166,96 @@ export function HudApp() {
     }
   };
 
-  // ライブ字幕: ユーザーがスクロールで最下部から離れたら追従を解除し、戻したら再開
-  const handleLiveScroll = () => {
-    const el = liveScrollRef.current;
-    if (!el) return;
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setAutoFollow(dist < 12);
+  // 情報オーバーレイ: 開くとき現在値を読み込む（メモは閉じる）
+  const handleOpenInfo = () => {
+    setInfoOpen((v) => {
+      const next = !v;
+      if (next) {
+        setInfoDraft({
+          title: activeRecord?.title ?? '',
+          participants: (activeRecord?.participants ?? []).join('、'),
+          contactName: activeRecord?.contactName ?? '',
+          phoneNumber: activeRecord?.phoneNumber ?? '',
+        });
+        setMemoOpen(false);
+      }
+      return next;
+    });
   };
-  const returnToLatest = () => {
-    setAutoFollow(true);
-    const el = liveScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+  const handleInfoField = (field: 'title' | 'participants' | 'contactName' | 'phoneNumber', value: string) => {
+    setInfoDraft((d) => ({ ...d, [field]: value }));
+    const id = activeRecord?.id;
+    if (!id) return;
+    if (infoTimer.current !== null) window.clearTimeout(infoTimer.current);
+    infoTimer.current = window.setTimeout(() => {
+      if (field === 'participants') {
+        void window.api.calls.update(id, {
+          participants: value.split(/[、,]/).map((s) => s.trim()).filter(Boolean),
+        });
+      } else {
+        void window.api.calls.update(id, { [field]: value || undefined });
+      }
+      infoTimer.current = null;
+    }, 400);
   };
-  // 下端ハンドルのドラッグでライブ字幕パネルの高さを変える（離したら設定に保存）
-  const handleResizeDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startPx = livePanelPx;
-    const clamp = (v: number) => Math.min(MAX_PANEL, Math.max(MIN_PANEL, v));
-    const onMove = (ev: MouseEvent) => setDragPx(clamp(startPx + (ev.clientY - startY)));
-    const onUp = (ev: MouseEvent) => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      const final = clamp(startPx + (ev.clientY - startY));
-      setDragPx(final);
-      if (settings) void window.api.settings.update({ ...settings, hudLivePanelPx: final });
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+  const handleAssignTag = (tagName: string) => {
+    const nextTag = activeRecord?.tag === tagName ? null : tagName;
+    void window.api.hud.assignTag(nextTag);
   };
 
-  // ライブ文字起こし（Vosk の暫定テキスト）。スクロールで全文確認でき、
-  // 下端のハンドルをドラッグして高さを調整できる。
-  const liveBox = hasLive ? (
-    <div className="hud-no-drag mt-1 flex flex-none flex-col rounded-lg bg-slate-900/95 shadow-2xl ring-1 ring-white/15">
-      <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5">
-        <AudioLines size={10} strokeWidth={2.25} className="flex-none text-sky-300" />
-        <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">ライブ</span>
-        {!autoFollow && (
-          <button
-            onClick={returnToLatest}
-            className="ml-auto inline-flex items-center gap-0.5 rounded bg-sky-500/80 px-1.5 py-px text-[9px] font-semibold text-white hover:bg-sky-500"
-            title="最新の文字起こしへ戻る（自動追従を再開）"
-          >
-            <ChevronDown size={9} strokeWidth={2.5} /> 最新へ
-          </button>
-        )}
-      </div>
-      <div
-        ref={liveScrollRef}
-        onScroll={handleLiveScroll}
-        className="overflow-y-auto px-2 text-[10px] leading-snug text-slate-200"
-        style={{ height: livePanelPx }}
-      >
-        {liveLines.map((t, i) => (
-          <div key={i} className="whitespace-pre-wrap break-words">{t}</div>
-        ))}
-        {livePartial && (
-          <div className="whitespace-pre-wrap break-words italic text-slate-400">{livePartial}</div>
-        )}
-      </div>
-      <div
-        onMouseDown={handleResizeDown}
-        className="flex h-2 cursor-ns-resize items-center justify-center rounded-b-lg hover:bg-white/5"
-        title="ドラッグして高さを調整"
-      >
-        <div className="h-0.5 w-6 rounded bg-white/25" />
+  const inputCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-brand-500';
+  const infoBox = infoOpen ? (
+    <div className="hud-no-drag mt-1 flex-none space-y-1.5 rounded-lg bg-slate-900/95 p-2 shadow-2xl ring-1 ring-white/15">
+      {isMeeting ? (
+        <>
+          <input
+            autoFocus
+            value={infoDraft.title}
+            onChange={(e) => handleInfoField('title', e.target.value)}
+            placeholder="会議タイトル"
+            className={inputCls}
+          />
+          <input
+            value={infoDraft.participants}
+            onChange={(e) => handleInfoField('participants', e.target.value)}
+            placeholder="参加者（読点・カンマ区切り）"
+            className={inputCls}
+          />
+        </>
+      ) : (
+        <>
+          <input
+            autoFocus
+            value={infoDraft.contactName}
+            onChange={(e) => handleInfoField('contactName', e.target.value)}
+            placeholder="連絡先名"
+            className={inputCls}
+          />
+          <input
+            value={infoDraft.phoneNumber}
+            onChange={(e) => handleInfoField('phoneNumber', e.target.value)}
+            placeholder="電話番号"
+            className={inputCls}
+          />
+        </>
+      )}
+      <div className="flex flex-wrap gap-1 pt-0.5">
+        {(settings?.tags ?? []).map((t) => {
+          const on = activeRecord?.tag === t.name;
+          return (
+            <button
+              key={t.name}
+              onClick={() => handleAssignTag(t.name)}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 transition ${
+                on ? 'text-white' : 'text-slate-300 ring-slate-600 hover:bg-white/10'
+              }`}
+              style={on ? { backgroundColor: t.color, borderColor: t.color } : undefined}
+              title={on ? 'タグを外す' : `タグ「${t.name}」を付ける`}
+            >
+              {t.name}
+            </button>
+          );
+        })}
       </div>
     </div>
   ) : null;
@@ -374,6 +355,17 @@ export function HudApp() {
     </button>
   );
 
+  const infoButton = (
+    <button
+      onClick={handleOpenInfo}
+      className={`${btnBase} ${infoOpen ? 'bg-brand-500 text-white' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      title={isMeeting ? 'タイトル・参加者・タグを追記' : '連絡先・電話番号・タグを追記'}
+    >
+      <Contact size={11} strokeWidth={2.25} />
+      情報
+    </button>
+  );
+
   // ライブ字幕の表示 ON/OFF（ライブ文字起こしが有効なときのみ表示）
   const liveToggleButton = liveEnabled ? (
     <button
@@ -434,6 +426,13 @@ export function HudApp() {
           >
             <StickyNote size={12} strokeWidth={2.25} />
           </button>
+          <button
+            onClick={handleOpenInfo}
+            className={`hud-no-drag rounded p-0.5 ${infoOpen ? 'bg-brand-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+            title={isMeeting ? 'タイトル・参加者・タグを追記' : '連絡先・電話番号・タグを追記'}
+          >
+            <Contact size={12} strokeWidth={2.25} />
+          </button>
           {liveEnabled && (
             <button
               onClick={handleToggleLive}
@@ -452,7 +451,7 @@ export function HudApp() {
             <X size={12} strokeWidth={2.5} />
           </button>
         </div>
-        {liveBox}
+        {infoBox}
         {memoBox}
       </div>
     );
@@ -483,12 +482,13 @@ export function HudApp() {
               {holdButton}
               {editButton}
               {liveToggleButton}
+              {infoButton}
               {memoButton}
               {endButton}
             </div>
           </div>
         </div>
-        {liveBox}
+        {infoBox}
         {memoBox}
       </div>
     );
@@ -522,12 +522,13 @@ export function HudApp() {
           {holdButton}
           {editButton}
           {liveToggleButton}
+          {infoButton}
           {memoButton}
           <div className="flex-1" />
           {endButton}
         </div>
       </div>
-      {liveBox}
+        {infoBox}
         {memoBox}
     </div>
   );

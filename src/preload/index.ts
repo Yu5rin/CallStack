@@ -136,6 +136,8 @@ const api = {
     /** 進行中のライブ認識セッションのこれまでの結果（なければ null） */
     get: (): Promise<{ callId: string; segments: Array<{ start: number; end: number; text: string }> } | null> =>
       ipcRenderer.invoke('live:get'),
+    /** ライブ字幕ウィンドウを閉じる（× ボタン。表示設定も OFF にする） */
+    hide: (): Promise<void> => ipcRenderer.invoke('live:hide'),
   },
   capture: {
     listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),
@@ -163,8 +165,8 @@ const api = {
       ipcRenderer.invoke('minutes:save-as', callId),
   },
   transcription: {
-    start: (callId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke('transcription:start', callId),
+    start: (callId: string, model?: WhisperModel): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('transcription:start', callId, model),
     cancel: (callId: string): Promise<boolean> =>
       ipcRenderer.invoke('transcription:cancel', callId),
     checkSetup: (): Promise<{ ok: true } | { ok: false; error: string }> =>

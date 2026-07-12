@@ -3,7 +3,7 @@ import {
   Phone, Users, Bookmark, Play, Trash2, FileText, Download, Clock3, X,
   RefreshCw, Ban, Mic, AudioLines,
 } from 'lucide-react';
-import { CallRecord, Settings } from '../../shared/types';
+import { CallRecord, Settings, WhisperModel, WHISPER_MODELS } from '../../shared/types';
 import { formatHMS, toDatetimeLocalValue, fromDatetimeLocalValue, formatDateTime } from '../utils/format';
 import { AudioPlayer, AudioPlayerHandle } from './AudioPlayer';
 import { TranscriptView } from './TranscriptView';
@@ -37,6 +37,8 @@ export function CallEditDialog({
   const [saving, setSaving] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  // 文字起こしに使うモデル（既定は設定のモデル。編集画面で個別に選べる）
+  const [transcribeModel, setTranscribeModel] = useState<WhisperModel>(settings.transcription.model);
   const [transcribeProgress, setTranscribeProgress] = useState<{ stage: 'convert' | 'transcribe'; percent: number } | null>(null);
   const [queuePos, setQueuePos] = useState<number | null>(null);
   // 再生位置（文字起こしの追従ハイライト用）
@@ -181,7 +183,7 @@ export function CallEditDialog({
     setTranscribing(true);
     setTranscribeError(null);
     try {
-      const result = await window.api.transcription.start(current.id);
+      const result = await window.api.transcription.start(current.id, transcribeModel);
       if (!result.ok) setTranscribeError(result.error);
     } catch (err) {
       setTranscribeError((err as Error).message);
@@ -547,14 +549,26 @@ export function CallEditDialog({
                         </>
                       )}
                       {!transcriptBusy && (
-                        <button
-                          onClick={handleTranscribe}
-                          disabled={transcribing}
-                          className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                        >
-                          <RefreshCw size={12} />
-                          {current.transcript ? '再文字起こし' : '文字起こし'}
-                        </button>
+                        <>
+                          <select
+                            value={transcribeModel}
+                            onChange={(e) => setTranscribeModel(e.target.value as WhisperModel)}
+                            className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                            title="文字起こしに使うモデルを選択（大きいほど高精度・低速）"
+                          >
+                            {WHISPER_MODELS.map((m) => (
+                              <option key={m.id} value={m.id}>{m.id}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={handleTranscribe}
+                            disabled={transcribing}
+                            className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                          >
+                            <RefreshCw size={12} />
+                            {current.transcript ? '再文字起こし' : '文字起こし'}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

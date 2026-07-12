@@ -57,6 +57,7 @@ export default defineConfig({
         index: path.resolve(__dirname, 'index.html'),
         hud: path.resolve(__dirname, 'hud.html'),
         recorder: path.resolve(__dirname, 'recorder.html'),
+        live: path.resolve(__dirname, 'live.html'),
       },
     },
   },

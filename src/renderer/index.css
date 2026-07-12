@@ -6,8 +6,39 @@ html, body, #root, #hud-root {
   height: 100%;
 }
 
-#hud-root {
+#hud-root, #live-root {
   overflow: hidden;
+}
+
+/* スクロールバーを OS 標準の見た目からアプリ調の細身に整える */
+* {
+  scrollbar-width: thin;                       /* Firefox */
+  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.45);  /* slate-400 半透明 */
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.75);  /* slate-500 */
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(71, 85, 105, 0.7);     /* slate-600 */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.9);
 }
 
 body {

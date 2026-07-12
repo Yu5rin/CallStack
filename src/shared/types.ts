@@ -90,6 +90,8 @@ export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3-turb
 export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 
 export type HudSize = 'mini' | 'compact' | 'full';
+/** ライブ字幕ウィンドウの文字サイズ */
+export type LiveFontSize = 'sm' | 'md' | 'lg';
 /** HUD の不透明度 0.3〜1.0（設定のスライダーで変更） */
 export type HudOpacity = number;
 
@@ -157,11 +159,14 @@ export interface Settings {
   theme: ThemePref;
   hudSize: HudSize;
   hudOpacity: HudOpacity;
-  /** HUD にライブ字幕を表示するか（HUD のボタンからも切替可能。未設定は表示） */
+  /** ライブ字幕ウィンドウを表示するか（HUD の「字幕」ボタン・×ボタンからも切替可能） */
   hudLiveVisible?: boolean;
-  /** HUD に表示するライブ文字起こしの既定の行数（高さ） */
+  /** ライブ字幕ウィンドウの位置とサイズ（移動・リサイズで保存） */
+  liveWindowBounds?: { x: number; y: number; width: number; height: number };
+  /** ライブ字幕ウィンドウの文字サイズ */
+  liveFontSize?: LiveFontSize;
+  /** （旧）HUD 内ライブ字幕の行数・高さ。独立ウィンドウ化に伴い未使用 */
   hudLiveLines?: number;
-  /** HUD ライブ字幕パネルの高さ(px)。ドラッグで調整した値を保持（未設定なら行数から算出） */
   hudLivePanelPx?: number;
   transcriptSeekOffsetSec: number;
   /** 保存ダイアログで前回使ったフォルダ（auto モードで使用） */
@@ -358,7 +363,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hudSize: 'compact',
   hudOpacity: 1.0,
   hudLiveVisible: true,
-  hudLiveLines: 2,
+  liveFontSize: 'sm',
   transcriptSeekOffsetSec: 1.0,
 };
 
