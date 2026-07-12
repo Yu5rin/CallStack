@@ -227,7 +227,7 @@ export type WhisperBinDownloadEvent = {
 /** Vosk エンジン・モデルのダウンロード進捗 */
 export type VoskDownloadEvent = {
   type: 'vosk:download';
-  what: 'engine' | VoskLiveModel;
+  what: 'engine' | 'engine-legacy' | VoskLiveModel;
   step: 'download' | 'extract' | 'done' | 'error';
   receivedBytes: number;
   totalBytes: number | null;

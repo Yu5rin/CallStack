@@ -28,6 +28,8 @@ const VOSK_DLL_FALLBACKS = [
   'https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip',
   'https://github.com/alphacep/vosk-api/releases/download/v0.3.42/vosk-win64-0.3.42.zip',
 ];
+/** 代替エンジン（0.3.45 の Windows ビルドがモデル読込でクラッシュする環境向け） */
+const VOSK_DLL_LEGACY = 'https://github.com/alphacep/vosk-api/releases/download/v0.3.42/vosk-win64-0.3.42.zip';
 
 export function getVoskDir(): string {
   return path.join(app.getPath('userData'), 'vosk');
@@ -100,16 +102,22 @@ interface GhRelease {
 }
 
 export async function downloadVosk(
-  what: 'engine' | VoskModelId,
+  what: 'engine' | 'engine-legacy' | VoskModelId,
   onProgress: (p: BinDownloadProgress & { step: 'download' | 'extract' }) => void,
 ): Promise<void> {
-  const isEngine = what === 'engine';
+  const isEngine = what === 'engine' || what === 'engine-legacy';
   const dir = isEngine ? getVoskDir() : getVoskModelDir(what as VoskModelId);
+  if (isEngine) {
+    // バージョン違いの DLL が混在しないよう、エンジンは常に入れ直す
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
   await fs.mkdir(dir, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `vosk-${Date.now()}.zip`);
 
   let urls: string[];
-  if (isEngine) {
+  if (what === 'engine-legacy') {
+    urls = [VOSK_DLL_LEGACY];
+  } else if (isEngine) {
     urls = [...VOSK_DLL_FALLBACKS];
     try {
       const releases = await fetchJson<GhRelease[]>(VOSK_API_RELEASES);

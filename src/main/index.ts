@@ -329,6 +329,11 @@ async function startLiveSession(rec: CallRecord): Promise<void> {
     if (liveSession === sess) liveSession = null;
     logInfo('live', `start failed: ${message}`);
     broadcast('app-event', { type: 'live:state', callId: rec.id, active: false, error: message });
+    broadcast('app-event', {
+      type: 'recording:error',
+      message: `ライブ文字起こしを開始できませんでした（録音は継続しています）: ${message}\n`
+        + '設定 → 文字起こし → ライブ文字起こしから、エンジンの旧バージョン (0.3.42) への入れ替えをお試しください。',
+    });
   }
 }
 
@@ -826,7 +831,7 @@ function setupIpc(): void {
     } as Record<VoskLiveModel, boolean>,
   }));
 
-  ipcMain.handle('vosk:download', async (_e, what: 'engine' | VoskLiveModel) => {
+  ipcMain.handle('vosk:download', async (_e, what: 'engine' | 'engine-legacy' | VoskLiveModel) => {
     try {
       await downloadVosk(what, (p) => {
         broadcast('app-event', {

@@ -164,7 +164,7 @@ function LiveTranscribeSetup({
   const enabled = transcription.liveEnabled ?? false;
   const model = transcription.liveModel ?? 'small-ja';
   const [status, setStatus] = useState<{ engine: boolean; models: Record<VoskLiveModel, boolean> } | null>(null);
-  const [downloading, setDownloading] = useState<null | 'engine' | VoskLiveModel>(null);
+  const [downloading, setDownloading] = useState<null | 'engine' | 'engine-legacy' | VoskLiveModel>(null);
   const [progress, setProgress] = useState<{ step: string; rec: number; total: number | null } | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
 
@@ -189,7 +189,7 @@ function LiveTranscribeSetup({
     return () => off();
   }, []);
 
-  const download = async (what: 'engine' | VoskLiveModel) => {
+  const download = async (what: 'engine' | 'engine-legacy' | VoskLiveModel) => {
     setDlError(null);
     setDownloading(what);
     setProgress({ step: 'download', rec: 0, total: null });
@@ -243,6 +243,16 @@ function LiveTranscribeSetup({
             className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           >
             {downloading === 'engine' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />エンジンをダウンロード (約7MB)</>}
+          </button>
+        )}
+        {engineOk && (
+          <button
+            onClick={() => download('engine-legacy')}
+            disabled={downloading !== null}
+            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700"
+            title="ライブ文字起こしの開始に失敗する（エンジンがクラッシュする）場合、互換性の高い旧バージョン (0.3.42) に入れ替えて試せます"
+          >
+            {downloading === 'engine-legacy' ? '取得中…' : '動かない場合: 旧バージョン (0.3.42) に入れ替える'}
           </button>
         )}
       </div>

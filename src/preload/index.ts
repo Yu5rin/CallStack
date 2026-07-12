@@ -127,7 +127,7 @@ const api = {
   vosk: {
     status: (): Promise<{ engine: boolean; models: Record<VoskLiveModel, boolean> }> =>
       ipcRenderer.invoke('vosk:status'),
-    download: (what: 'engine' | VoskLiveModel): Promise<{ ok: boolean; error?: string }> =>
+    download: (what: 'engine' | 'engine-legacy' | VoskLiveModel): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('vosk:download', what),
   },
   live: {

@@ -41,7 +41,9 @@ function loadLib(dllPath) {
     partial: k.func('const char* vosk_recognizer_partial_result(void*)'),
     finalResult: k.func('const char* vosk_recognizer_final_result(void*)'),
   };
-  lib.setLogLevel(-1);
+  // Kaldi のロードログを stderr に出す（main が app.log に記録する）。
+  // モデル読込中のネイティブクラッシュの発生箇所を特定するため 0（情報あり）にする。
+  lib.setLogLevel(0);
   return lib;
 }
 
@@ -50,7 +52,9 @@ port.on('message', (e) => {
   try {
     switch (msg.type) {
       case 'start': {
+        console.log(`[vosk-worker] dll: ${msg.dllPath}`);
         const l = loadLib(msg.dllPath);
+        console.log('[vosk-worker] dll loaded');
         if (!model || loadedModelDir !== msg.modelDir) {
           if (model) {
             l.modelFree(model);
