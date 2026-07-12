@@ -1235,6 +1235,12 @@ function setupTranscriptionHandlers(): void {
       }
       broadcastTranscriptionProgress();
     },
+    onIdle: () => {
+      // キューが空になった最終状態を配信（完了直後の「待機 1 件」残り対策）
+      stopProgressTicker();
+      jobProgress = null;
+      broadcastTranscriptionIdleSummary();
+    },
     onCancelled: (callId) => {
       const rec = store.getCall(callId);
       // 過去の文字起こしが残っていれば done、なければ none に戻す

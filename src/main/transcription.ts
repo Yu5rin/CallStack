@@ -225,6 +225,8 @@ type JobHandlers = {
   onDone: (callId: string, t: CallTranscript) => void;
   onCancelled: (callId: string) => void;
   onError: (callId: string, err: Error) => void;
+  /** キューが完全に空になった（running フラグ解除後）。サマリー表示の最終クリア用 */
+  onIdle: () => void;
 };
 
 const queue: Job[] = [];
@@ -299,6 +301,8 @@ async function pump(): Promise<void> {
     }
   } finally {
     running = false;
+    // running 解除後に通知することで、待機数の計算が正しく 0 になる
+    handlers?.onIdle();
   }
 }
 
