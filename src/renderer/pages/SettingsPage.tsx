@@ -476,21 +476,31 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </span>
         </Row>
         <Row label="HUD のライブ字幕">
-          <div className="flex items-center gap-3">
-            <select
-              value={draft.hudLiveLines ?? 2}
-              // 行数を変えたらドラッグで調整した高さはリセットして行数基準に戻す
-              onChange={(e) => update({ hudLiveLines: Number(e.target.value), hudLivePanelPx: undefined })}
-              className={`w-40 ${inputClass}`}
-            >
-              <option value={0}>表示しない</option>
-              {[1, 2, 3, 4, 5, 6].map((n) => (
-                <option key={n} value={n}>既定 {n} 行</option>
-              ))}
-            </select>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={draft.hudLiveVisible ?? ((draft.hudLiveLines ?? 2) !== 0)}
+                onChange={(e) => update({ hudLiveVisible: e.target.checked })}
+              />
+              HUD にライブ字幕を表示する
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+              既定の高さ
+              <select
+                value={Math.max(1, draft.hudLiveLines ?? 2)}
+                // 行数を変えたらドラッグで調整した高さはリセットして行数基準に戻す
+                onChange={(e) => update({ hudLiveLines: Number(e.target.value), hudLivePanelPx: undefined })}
+                className={`w-24 ${inputClass}`}
+              >
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <option key={n} value={n}>{n} 行</option>
+                ))}
+              </select>
+            </label>
           </div>
           <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-            録音中のライブ文字起こしを HUD に表示します。ここで既定の高さ（行数）を選べます。
+            録音中のライブ文字起こしを HUD に表示します。表示の ON/OFF は HUD 上の「字幕」ボタンからも切り替えられます。
             HUD 上のパネルは下端をドラッグして高さを変えられ、スクロールで全文を確認できます
             （下にスクロールすると「最新へ」ボタンで追従に戻れます）
           </span>

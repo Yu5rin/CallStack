@@ -157,7 +157,9 @@ export interface Settings {
   theme: ThemePref;
   hudSize: HudSize;
   hudOpacity: HudOpacity;
-  /** HUD に表示するライブ文字起こしの行数（0=非表示）。既定の高さを決める */
+  /** HUD にライブ字幕を表示するか（HUD のボタンからも切替可能。未設定は表示） */
+  hudLiveVisible?: boolean;
+  /** HUD に表示するライブ文字起こしの既定の行数（高さ） */
   hudLiveLines?: number;
   /** HUD ライブ字幕パネルの高さ(px)。ドラッグで調整した値を保持（未設定なら行数から算出） */
   hudLivePanelPx?: number;
@@ -355,6 +357,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   hudSize: 'compact',
   hudOpacity: 1.0,
+  hudLiveVisible: true,
   hudLiveLines: 2,
   transcriptSeekOffsetSec: 1.0,
 };

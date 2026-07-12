@@ -122,14 +122,17 @@ export function HudApp() {
   const LIVE_CHROME = 30;   // ヘッダー＋リサイズハンドル＋余白のぶん
   const MIN_PANEL = 28;
   const MAX_PANEL = 360;
-  const maxLiveLines = settings?.hudLiveLines ?? 2;
+  const maxLiveLines = Math.max(1, settings?.hudLiveLines ?? 2);
   const derivedPanelPx = Math.max(MIN_PANEL, maxLiveLines * LIVE_LINE_PX);
   const livePanelPx = Math.min(
     MAX_PANEL,
     Math.max(MIN_PANEL, dragPx ?? settings?.hudLivePanelPx ?? derivedPanelPx),
   );
+  // 表示の可否: HUD の切替（hudLiveVisible）優先。未設定なら旧「行数0=非表示」を踏襲。
+  const liveVisible = settings?.hudLiveVisible ?? ((settings?.hudLiveLines ?? 2) !== 0);
+  const liveEnabled = settings?.transcription.liveEnabled ?? false;
   const hasLiveContent = liveLines.length > 0 || livePartial.length > 0;
-  const hasLive = maxLiveLines > 0 && hasLiveContent && !!active;
+  const hasLive = liveVisible && hasLiveContent && !!active;
 
   // Grow / shrink the HUD window so the textarea / live caption overlay is visible.
   const liveExtra = hasLive ? livePanelPx + LIVE_CHROME : 0;
@@ -181,6 +184,10 @@ export function HudApp() {
   const handleOpenEdit = () => {
     // activeRecord 未取得でも main 側が進行中の記録を解決する
     void window.api.hud.openEdit(activeRecord?.id);
+  };
+  const handleToggleLive = () => {
+    if (!settings) return;
+    void window.api.settings.update({ ...settings, hudLiveVisible: !liveVisible });
   };
   const handleCycleSize = () => { void window.api.hud.cycleSize(); };
   const handleOpenMemo = () => setMemoOpen((v) => !v);
@@ -367,6 +374,18 @@ export function HudApp() {
     </button>
   );
 
+  // ライブ字幕の表示 ON/OFF（ライブ文字起こしが有効なときのみ表示）
+  const liveToggleButton = liveEnabled ? (
+    <button
+      onClick={handleToggleLive}
+      className={`${btnBase} ${liveVisible ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
+    >
+      <AudioLines size={11} strokeWidth={2.25} />
+      字幕
+    </button>
+  ) : null;
+
   const endButton = (
     <button
       onClick={handleEnd}
@@ -415,6 +434,15 @@ export function HudApp() {
           >
             <StickyNote size={12} strokeWidth={2.25} />
           </button>
+          {liveEnabled && (
+            <button
+              onClick={handleToggleLive}
+              className={`hud-no-drag rounded p-0.5 ${liveVisible ? 'bg-sky-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+              title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
+            >
+              <AudioLines size={12} strokeWidth={2.25} />
+            </button>
+          )}
           {sizeButton}
           <button
             onClick={handleEnd}
@@ -454,6 +482,7 @@ export function HudApp() {
               {pauseButton}
               {holdButton}
               {editButton}
+              {liveToggleButton}
               {memoButton}
               {endButton}
             </div>
@@ -492,6 +521,7 @@ export function HudApp() {
           {pauseButton}
           {holdButton}
           {editButton}
+          {liveToggleButton}
           {memoButton}
           <div className="flex-1" />
           {endButton}

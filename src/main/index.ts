@@ -1660,12 +1660,17 @@ async function main() {
     app.setAppUserModelId('com.callstack.app');
   }
 
+  // 二重起動の防止。ロックを取得できない＝既に起動中なので、
+  // このプロセスは終了し、既存インスタンスを最前面へ出す。
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {
+    logInfo('app', 'another instance is already running — quitting this one');
     app.quit();
     return;
   }
   app.on('second-instance', () => {
+    // 2つ目の起動が試みられた: 既存のメイン窓を復元して最前面に出す
+    logInfo('app', 'second instance detected — focusing existing window');
     showMainWindow();
   });
 
