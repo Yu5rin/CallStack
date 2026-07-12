@@ -263,14 +263,11 @@ function formatHMS(sec: number): string {
 // 確定版は従来どおり録音終了後に whisper が生成し、暫定 transcript を置き換える。
 interface LiveSession {
   callId: string;
-  startMs: number;
   segments: TranscriptSegment[];
   /** モデルロード完了前に届いた PCM の一時バッファ（約30秒分まで） */
   pending: Buffer[];
   ready: boolean;
   stopped: boolean;
-  /** 現在進行中のフレーズの開始秒（partial が最初に出た時刻） */
-  phraseStart: number | null;
 }
 let liveSession: LiveSession | null = null;
 
@@ -304,26 +301,23 @@ async function startLiveSession(rec: CallRecord): Promise<void> {
   const modelId = s.transcription.liveModel ?? 'small-ja';
   const sess: LiveSession = {
     callId: rec.id,
-    startMs: new Date(rec.startTime).getTime(),
     segments: [],
     pending: [],
     ready: false,
     stopped: false,
-    phraseStart: null,
   };
   liveSession = sess;
   try {
     await voskStartLive(modelId, {
       onSegment: (seg) => {
         if (liveSession !== sess) return;
-        const at = Math.max(0, (Date.now() - sess.startMs) / 1000);
+        // タイムスタンプはワーカーが消費した音声位置（秒）。壁時計の遅延を受けない。
         if (seg.final) {
-          sess.segments.push({ start: sess.phraseStart ?? Math.max(0, at - 5), end: at, text: seg.text });
-          sess.phraseStart = null;
-        } else if (sess.phraseStart === null) {
-          sess.phraseStart = at;
+          sess.segments.push({ start: seg.startSec, end: seg.endSec, text: seg.text });
         }
-        broadcast('app-event', { type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at });
+        broadcast('app-event', {
+          type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at: seg.startSec,
+        });
       },
       onError: (message) => {
         // ワーカーの異常終了など。録音・記録には影響しないため通知のみ。
@@ -366,10 +360,9 @@ async function stopLiveSession(): Promise<void> {
   sess.stopped = true;
   liveSession = null;
   if (!sess.ready) return;   // startLiveSession 側が後始末する
-  const endAt = Math.max(0, (Date.now() - sess.startMs) / 1000);
   const tail = await voskStopLive().catch(() => null);
-  if (tail) {
-    sess.segments.push({ start: sess.phraseStart ?? Math.max(0, endAt - 5), end: endAt, text: tail });
+  if (tail && tail.text) {
+    sess.segments.push({ start: tail.startSec, end: tail.endSec, text: tail.text });
   }
   broadcast('app-event', { type: 'live:state', callId: sess.callId, active: false });
   logInfo('live', `session stopped for ${sess.callId} (${sess.segments.length} segments)`);

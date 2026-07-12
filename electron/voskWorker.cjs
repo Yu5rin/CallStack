@@ -30,6 +30,11 @@ let model = null;
 let loadedModelDir = null;
 let recognizer = null;
 let lastPartial = '';
+// 認識器が消費した音声の累積秒数（16kHz mono Int16 前提）。
+// タイムスタンプは壁時計ではなく「消費した音声位置」で付けることで、
+// モデルロードや処理遅延によるズレを避ける。
+let consumedSec = 0;
+let phraseStartSec = null;
 
 const port = process.parentPort;
 const send = (msg) => port.postMessage(msg);
@@ -82,28 +87,38 @@ port.on('message', (e) => {
         recognizer = l.recNew(model, 16000.0);
         if (!recognizer) throw new Error('Vosk 認識器の初期化に失敗しました');
         lastPartial = '';
+        consumedSec = 0;
+        phraseStartSec = null;
         send({ type: 'started' });
         break;
       }
       case 'pcm': {
         if (!recognizer || !lib) break;
         const buf = Buffer.from(msg.data.buffer ?? msg.data, msg.data.byteOffset ?? 0, msg.data.byteLength);
+        // この時点の音声位置（accept 前）＝フレーズ開始の目安
+        const beforeSec = consumedSec;
         const hasFinal = lib.accept(recognizer, buf, buf.length);
+        // Int16 mono 16kHz: 2 バイト = 1 サンプル
+        consumedSec += (buf.length / 2) / 16000;
         if (hasFinal) {
           const text = (JSON.parse(lib.result(recognizer)).text || '').trim();
           lastPartial = '';
-          if (text) send({ type: 'segment', text, final: true });
+          const startSec = phraseStartSec != null ? phraseStartSec : Math.max(0, consumedSec - 5);
+          phraseStartSec = null;
+          if (text) send({ type: 'segment', text, final: true, startSec, endSec: consumedSec });
         } else {
           const text = (JSON.parse(lib.partial(recognizer)).partial || '').trim();
           if (text && text !== lastPartial) {
+            if (phraseStartSec == null) phraseStartSec = beforeSec;
             lastPartial = text;
-            send({ type: 'segment', text, final: false });
+            send({ type: 'segment', text, final: false, startSec: phraseStartSec, endSec: consumedSec });
           }
         }
         break;
       }
       case 'stop': {
         let text = null;
+        let startSec = phraseStartSec != null ? phraseStartSec : Math.max(0, consumedSec - 5);
         if (recognizer && lib) {
           try {
             text = (JSON.parse(lib.finalResult(recognizer)).text || '').trim() || null;
@@ -113,7 +128,7 @@ port.on('message', (e) => {
           lib.recFree(recognizer);
           recognizer = null;
         }
-        send({ type: 'stopped', text });
+        send({ type: 'stopped', text, startSec, endSec: consumedSec });
         break;
       }
       case 'unload': {

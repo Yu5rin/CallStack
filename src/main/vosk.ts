@@ -168,6 +168,10 @@ export async function downloadVosk(
 export interface LiveSegment {
   text: string;
   final: boolean;
+  /** フレーズ開始の音声位置（秒）。壁時計ではなく消費した音声位置 */
+  startSec: number;
+  /** フレーズ末尾の音声位置（秒） */
+  endSec: number;
 }
 
 export interface LiveHandlers {
@@ -180,14 +184,23 @@ interface WorkerMsg {
   type: 'ready' | 'started' | 'segment' | 'stopped' | 'unloaded' | 'error';
   text?: string | null;
   final?: boolean;
+  startSec?: number;
+  endSec?: number;
   message?: string;
+}
+
+/** stopLive の戻り値（末尾の確定テキストとその音声位置） */
+export interface LiveTail {
+  text: string | null;
+  startSec: number;
+  endSec: number;
 }
 
 let worker: UtilityProcess | null = null;
 let sessionActive = false;
 let handlers: LiveHandlers | null = null;
 let startWaiter: { resolve: () => void; reject: (e: Error) => void } | null = null;
-let stopWaiter: ((text: string | null) => void) | null = null;
+let stopWaiter: ((tail: LiveTail) => void) | null = null;
 
 function workerPath(): string {
   // 開発時: <プロジェクト>/electron/voskWorker.cjs
@@ -209,11 +222,16 @@ function spawnWorker(): UtilityProcess {
         break;
       case 'segment':
         if (sessionActive && typeof msg.text === 'string') {
-          handlers?.onSegment({ text: msg.text, final: !!msg.final });
+          handlers?.onSegment({
+            text: msg.text,
+            final: !!msg.final,
+            startSec: msg.startSec ?? 0,
+            endSec: msg.endSec ?? 0,
+          });
         }
         break;
       case 'stopped':
-        stopWaiter?.(msg.text ?? null);
+        stopWaiter?.({ text: msg.text ?? null, startSec: msg.startSec ?? 0, endSec: msg.endSec ?? 0 });
         stopWaiter = null;
         break;
       case 'error': {
@@ -223,7 +241,7 @@ function spawnWorker(): UtilityProcess {
           startWaiter.reject(new Error(message));
           startWaiter = null;
         } else if (stopWaiter) {
-          stopWaiter(null);
+          stopWaiter({ text: null, startSec: 0, endSec: 0 });
           stopWaiter = null;
         } else if (sessionActive) {
           sessionActive = false;
@@ -241,7 +259,7 @@ function spawnWorker(): UtilityProcess {
       startWaiter = null;
     }
     if (stopWaiter) {
-      stopWaiter(null);
+      stopWaiter({ text: null, startSec: 0, endSec: 0 });
       stopWaiter = null;
     }
     if (sessionActive) {
@@ -287,22 +305,22 @@ export function feedPcm(buf: Buffer): void {
   worker.postMessage({ type: 'pcm', data: buf });
 }
 
-/** セッションを終了し、末尾の確定テキストを返す */
-export async function stopLive(): Promise<string | null> {
+/** セッションを終了し、末尾の確定テキストとその音声位置を返す */
+export async function stopLive(): Promise<LiveTail | null> {
   if (!sessionActive || !worker) {
     sessionActive = false;
     return null;
   }
   sessionActive = false;
   const w = worker;
-  return new Promise<string | null>((resolve) => {
+  return new Promise<LiveTail | null>((resolve) => {
     const timer = setTimeout(() => {
       if (stopWaiter) {
         stopWaiter = null;
         resolve(null);
       }
     }, 10 * 1000);
-    stopWaiter = (text) => { clearTimeout(timer); resolve(text); };
+    stopWaiter = (tail) => { clearTimeout(timer); resolve(tail); };
     w.postMessage({ type: 'stop' });
   });
 }
