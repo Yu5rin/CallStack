@@ -123,7 +123,18 @@ export interface TranscriptionSettings {
   prompt: string;
   /** GPU (CUDA) 版 whisper を使用する（隠しコマンドで解放される上級者向けオプション） */
   useGpu?: boolean;
+  /** ライブ文字起こし（Vosk）を有効にする。録音が有効なことが前提 */
+  liveEnabled?: boolean;
+  /** ライブ文字起こしに使う Vosk モデル */
+  liveModel?: VoskLiveModel;
 }
+
+export type VoskLiveModel = 'small-ja' | 'ja';
+
+export const VOSK_MODELS: Array<{ id: VoskLiveModel; sizeMb: number; label: string }> = [
+  { id: 'small-ja', sizeMb: 48,   label: 'small-ja (約 48MB, 軽量・推奨)' },
+  { id: 'ja',       sizeMb: 1024, label: 'ja (約 1GB, 高精度)' },
+];
 
 export interface Settings {
   shortcuts: ShortcutSettings;
@@ -213,6 +224,26 @@ export type WhisperBinDownloadEvent = {
   totalBytes: number | null;
   error?: string;
 };
+/** Vosk エンジン・モデルのダウンロード進捗 */
+export type VoskDownloadEvent = {
+  type: 'vosk:download';
+  what: 'engine' | VoskLiveModel;
+  step: 'download' | 'extract' | 'done' | 'error';
+  receivedBytes: number;
+  totalBytes: number | null;
+  error?: string;
+};
+/** ライブ文字起こしの暫定テキスト（Vosk）。final=false は途中経過で、次の同 final=false を置き換える */
+export type LiveSegmentEvent = {
+  type: 'live:segment';
+  callId: string;
+  text: string;
+  final: boolean;
+  /** 記録開始からの経過秒 */
+  at: number;
+};
+/** ライブ文字起こしセッションの状態通知 */
+export type LiveStateEvent = { type: 'live:state'; callId: string; active: boolean; error?: string };
 /** マーカー追加の通知 */
 export type MarkerAddedEvent = { type: 'marker:added'; callId: string; marker: Marker; count: number };
 /** HUD 上にカーソルがあるか（main がカーソル位置を監視して通知。drag 領域では DOM イベントが発火しないため） */
@@ -246,6 +277,9 @@ export type AppEvent =
   | RecordingStateEvent
   | RecordingErrorEvent
   | RecordingLevelEvent
+  | VoskDownloadEvent
+  | LiveSegmentEvent
+  | LiveStateEvent
   | MarkerAddedEvent
   | HudHoverEvent
   | ModelDownloadEvent

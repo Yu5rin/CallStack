@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel } from '../../shared/types';
+import {
+  AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel,
+  VoskLiveModel, VOSK_MODELS, TranscriptionSettings,
+} from '../../shared/types';
 import {
   Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
-  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2,
+  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines,
 } from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
@@ -135,6 +138,146 @@ function WhisperSetup({
             {gpuInstalled ? '— 文字起こしが数倍高速になります（NVIDIA GPU 必須）' : '— 先に GPU 版をダウンロードしてください'}
           </span>
         </label>
+      )}
+      {progress && pct !== null && progress.step === 'download' && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+          <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      {dlError && (
+        <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{dlError}</div>
+      )}
+    </div>
+  );
+}
+
+/** ライブ文字起こし（Vosk）の設定 + エンジン・モデルのアプリ内ダウンロード */
+function LiveTranscribeSetup({
+  recordingEnabled,
+  transcription,
+  onChange,
+}: {
+  recordingEnabled: boolean;
+  transcription: TranscriptionSettings;
+  onChange: (patch: Partial<TranscriptionSettings>) => void;
+}) {
+  const enabled = transcription.liveEnabled ?? false;
+  const model = transcription.liveModel ?? 'small-ja';
+  const [status, setStatus] = useState<{ engine: boolean; models: Record<VoskLiveModel, boolean> } | null>(null);
+  const [downloading, setDownloading] = useState<null | 'engine' | VoskLiveModel>(null);
+  const [progress, setProgress] = useState<{ step: string; rec: number; total: number | null } | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+
+  const refresh = () => { void window.api.vosk.status().then(setStatus).catch(() => {}); };
+
+  useEffect(() => {
+    refresh();
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type !== 'vosk:download') return;
+      if (e.step === 'done') {
+        setDownloading(null);
+        setProgress(null);
+        refresh();
+      } else if (e.step === 'error') {
+        setDownloading(null);
+        setProgress(null);
+        setDlError(e.error ?? 'ダウンロードに失敗しました');
+      } else {
+        setProgress({ step: e.step, rec: e.receivedBytes, total: e.totalBytes });
+      }
+    });
+    return () => off();
+  }, []);
+
+  const download = async (what: 'engine' | VoskLiveModel) => {
+    setDlError(null);
+    setDownloading(what);
+    setProgress({ step: 'download', rec: 0, total: null });
+    await window.api.vosk.download(what);
+  };
+
+  const pct = progress?.total ? Math.round((progress.rec / progress.total) * 100) : null;
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+  const engineOk = status?.engine ?? false;
+  const modelOk = status?.models?.[model] ?? false;
+  const ready = engineOk && modelOk;
+
+  return (
+    <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+          <AudioLines size={13} className="text-sky-500" />
+          ライブ文字起こし（実験的 / Vosk）
+        </div>
+        <button
+          onClick={refresh}
+          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+        >
+          再チェック
+        </button>
+      </div>
+      <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+        録音中の音声をその場で認識し、HUD と編集画面に暫定テキストを表示します（オフライン動作）。
+        録音終了後は従来どおり whisper が高精度の確定版を生成します。
+      </p>
+      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={!recordingEnabled || (!ready && !enabled)}
+          onChange={(e) => onChange({ liveEnabled: e.target.checked })}
+        />
+        録音中にライブ文字起こしを表示する
+        {!recordingEnabled && <span className="text-xs text-slate-500 dark:text-slate-400">— 先に録音を有効にしてください</span>}
+        {recordingEnabled && !ready && <span className="text-xs text-slate-500 dark:text-slate-400">— 下のエンジンとモデルの配置が必要です</span>}
+      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1 text-xs ${engineOk ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
+          {engineOk ? <CircleCheck size={13} /> : <AlertTriangle size={13} />}
+          エンジン (libvosk)
+        </span>
+        {!engineOk && (
+          <button
+            onClick={() => download('engine')}
+            disabled={downloading !== null}
+            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {downloading === 'engine' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />エンジンをダウンロード (約7MB)</>}
+          </button>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          value={model}
+          onChange={(e) => onChange({ liveModel: e.target.value as VoskLiveModel })}
+          className={`w-64 ${inputClass}`}
+          disabled={downloading !== null}
+        >
+          {VOSK_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>{m.label}</option>
+          ))}
+        </select>
+        <span className={`inline-flex items-center gap-1 text-xs ${modelOk ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
+          {modelOk ? <><CircleCheck size={13} />配置済み</> : <><AlertTriangle size={13} />未ダウンロード</>}
+        </span>
+        {!modelOk && (
+          <button
+            onClick={() => download(model)}
+            disabled={downloading !== null}
+            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {downloading === model ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />モデルをダウンロード</>}
+          </button>
+        )}
+      </div>
+      {progress && (
+        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          {progress.step === 'extract'
+            ? '展開中…'
+            : pct !== null
+              ? `ダウンロード中 ${pct}% (${mb(progress.rec)} MB)`
+              : `ダウンロード中 ${mb(progress.rec)} MB`}
+        </div>
       )}
       {progress && pct !== null && progress.step === 'download' && (
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
@@ -495,6 +638,11 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           gpuUnlocked={gpuUnlocked}
           useGpu={draft.transcription.useGpu ?? false}
           onToggleGpu={(v) => updateTranscription({ useGpu: v })}
+        />
+        <LiveTranscribeSetup
+          recordingEnabled={draft.recording.enabled}
+          transcription={draft.transcription}
+          onChange={(patch) => updateTranscription(patch)}
         />
         <div className="mt-4 space-y-3">
           <Row label="自動文字起こし">

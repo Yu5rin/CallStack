@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, Pause, Play, Pencil, StickyNote, X, Square } from 'lucide-react';
+import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
 import { AppEvent, Settings, CallRecord } from '../shared/types';
@@ -35,6 +35,7 @@ export function HudApp() {
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState('');
   const [hovered, setHovered] = useState(false);
+  const [liveText, setLiveText] = useState('');
   const memoTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
 
@@ -61,14 +62,18 @@ export function HudApp() {
         if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setMarkerFlash(false), 1200);
       }
+      // ライブ文字起こしの最新行（partial は同じ行を置き換え、final で次の行に切り替わる）
+      if (e.type === 'live:segment') setLiveText(e.text);
       if (e.type === 'call:started') {
         setLevel(0);
+        setLiveText('');
         setActiveRecord(e.record);
         setMemoDraft(e.record.memo ?? '');
         setMarkerCount(e.record.markers?.length ?? 0);
       }
       if (e.type === 'call:ended') {
         setActiveRecord(null);
+        setLiveText('');
       }
       if (e.type === 'call:updated') {
         // 進行中の記録に対する更新のみ反映する。
@@ -95,10 +100,11 @@ export function HudApp() {
     }
   }, [active]);
 
-  // Grow / shrink the HUD window so the textarea overlay is visible.
+  // Grow / shrink the HUD window so the textarea / live caption overlay is visible.
+  const hasLive = liveText.length > 0;
   useEffect(() => {
-    void window.api.hud.setExtraHeight(memoOpen ? 92 : 0);
-  }, [memoOpen]);
+    void window.api.hud.setExtraHeight((memoOpen ? 92 : 0) + (hasLive ? 30 : 0));
+  }, [memoOpen, hasLive]);
 
   const recording = recState.recording;
   const paused = recState.paused;
@@ -152,6 +158,17 @@ export function HudApp() {
       setMemoOpen(false);
     }
   };
+
+  // ライブ文字起こしの最新行（Vosk の暫定テキスト）
+  const liveBox = hasLive && active ? (
+    <div
+      className="hud-no-drag mt-1 flex h-[26px] flex-none items-center gap-1.5 truncate rounded-lg bg-slate-900/95 px-2 text-[10px] text-slate-200 shadow-2xl ring-1 ring-white/15"
+      title={liveText}
+    >
+      <AudioLines size={11} strokeWidth={2.25} className="flex-none text-sky-300" />
+      <span className="min-w-0 flex-1 truncate">{liveText}</span>
+    </div>
+  ) : null;
 
   const memoBox = memoOpen ? (
     <div className="hud-no-drag mt-1 flex-1 min-h-0 rounded-lg bg-slate-900/95 p-2 shadow-2xl ring-1 ring-white/15">
@@ -305,6 +322,7 @@ export function HudApp() {
             <X size={12} strokeWidth={2.5} />
           </button>
         </div>
+        {liveBox}
         {memoBox}
       </div>
     );
@@ -339,6 +357,7 @@ export function HudApp() {
             </div>
           </div>
         </div>
+        {liveBox}
         {memoBox}
       </div>
     );
@@ -376,7 +395,8 @@ export function HudApp() {
           {endButton}
         </div>
       </div>
-      {memoBox}
+      {liveBox}
+        {memoBox}
     </div>
   );
 }

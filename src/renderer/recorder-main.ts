@@ -52,6 +52,7 @@ async function startRecording(rec: CallRecord): Promise<void> {
         }
       },
     });
+    if (cfg.live) mgr.startPcmTap();
     void window.api.recording.reportState(true, false);
   } catch (err) {
     manager = null;

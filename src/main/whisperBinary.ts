@@ -41,7 +41,7 @@ const ASSET_PATTERNS: Record<BinaryVariant, RegExp[]> = {
   ],
 };
 
-function fetchJson<T>(url: string): Promise<T> {
+export function fetchJson<T>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, method: 'GET', redirect: 'follow' });
     req.setHeader('Accept', 'application/vnd.github+json');
@@ -120,7 +120,7 @@ export interface BinDownloadProgress {
   totalBytes: number | null;
 }
 
-function downloadTo(url: string, dest: string, onProgress: (p: BinDownloadProgress) => void): Promise<void> {
+export function downloadTo(url: string, dest: string, onProgress: (p: BinDownloadProgress) => void): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const req = net.request({ url, method: 'GET', redirect: 'follow' });
     req.on('response', (res) => {

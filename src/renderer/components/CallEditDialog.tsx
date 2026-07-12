@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Phone, Users, Bookmark, Play, Trash2, FileText, Download, Clock3, X,
-  RefreshCw, Ban, Mic,
+  RefreshCw, Ban, Mic, AudioLines,
 } from 'lucide-react';
 import { CallRecord, Settings } from '../../shared/types';
 import { formatHMS, toDatetimeLocalValue, fromDatetimeLocalValue, formatDateTime } from '../utils/format';
@@ -41,6 +41,10 @@ export function CallEditDialog({
   const [queuePos, setQueuePos] = useState<number | null>(null);
   // 再生位置（文字起こしの追従ハイライト用）
   const [playSec, setPlaySec] = useState<number | null>(null);
+  // ライブ文字起こし（進行中の記録のみ）: 確定行 + 認識途中のテキスト
+  const [liveLines, setLiveLines] = useState<Array<{ at: number; text: string }>>([]);
+  const [livePartial, setLivePartial] = useState('');
+  const liveScrollRef = useRef<HTMLDivElement | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
   // 種別は編集で変更できる（通話⇄会議）。保存時に反映される。
@@ -51,6 +55,15 @@ export function CallEditDialog({
     const off = window.api.onEvent((e) => {
       if (e.type === 'transcription:progress' && e.callId === current.id) {
         setTranscribeProgress({ stage: e.stage, percent: e.percent });
+        return;
+      }
+      if (e.type === 'live:segment' && e.callId === current.id) {
+        if (e.final) {
+          setLiveLines((prev) => [...prev, { at: e.at, text: e.text }]);
+          setLivePartial('');
+        } else {
+          setLivePartial(e.text);
+        }
         return;
       }
       if (
@@ -68,6 +81,23 @@ export function CallEditDialog({
     });
     return () => off();
   }, [current.id]);
+
+  // 進行中の記録を途中から開いた場合、これまでのライブ認識結果を取得する
+  useEffect(() => {
+    if (current.endTime) return;
+    window.api.live.get().then((s) => {
+      if (s && s.callId === current.id) {
+        setLiveLines(s.segments.map((x) => ({ at: x.start, text: x.text })));
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current.id]);
+
+  // ライブ表示は常に最下部（最新）へスクロール
+  useEffect(() => {
+    const el = liveScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [liveLines, livePartial]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -555,6 +585,46 @@ export function CallEditDialog({
                   />
                 </div>
               </>
+            ) : !current.endTime ? (
+              /* 進行中の記録: ライブ文字起こしのフィードを表示 */
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="mb-2 flex flex-none flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  <AudioLines size={14} className="text-sky-500" />
+                  ライブ文字起こし（暫定）
+                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                    録音終了後に whisper が確定版を生成します
+                  </span>
+                </div>
+                <div
+                  ref={liveScrollRef}
+                  className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {liveLines.length === 0 && !livePartial ? (
+                    <div className="text-xs text-slate-400 dark:text-slate-500">
+                      記録中です。ライブ文字起こしが有効な場合、認識結果がここに順次表示されます。
+                      <br />
+                      （設定 → 文字起こし → ライブ文字起こし から有効化できます）
+                    </div>
+                  ) : (
+                    <>
+                      {liveLines.map((l, i) => (
+                        <div key={i} className="mb-1.5 flex gap-2">
+                          <span className="flex-none pt-0.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                            {formatHMS(Math.floor(l.at))}
+                          </span>
+                          <span className="min-w-0 text-slate-700 dark:text-slate-200">{l.text}</span>
+                        </div>
+                      ))}
+                      {livePartial && (
+                        <div className="mb-1.5 flex gap-2 opacity-60">
+                          <span className="flex-none pt-0.5 font-mono text-[10px] text-slate-400">…</span>
+                          <span className="min-w-0 text-slate-600 dark:text-slate-300">{livePartial}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
                 <Mic size={32} strokeWidth={1.5} />

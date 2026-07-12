@@ -6,7 +6,7 @@ import { Store } from './store';
 import {
   CallRecord, CsvExportOptions, CsvImportResult, Settings,
   CallTranscript, WhisperModel, RecordKind, AudioSourceLabel, Marker,
-  RecordingSourceConfig,
+  RecordingSourceConfig, VoskLiveModel, TranscriptSegment,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -45,6 +45,11 @@ import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from
 import { localDate } from './localTime';
 import { getLogPath, logInfo } from './log';
 import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
+import {
+  isVoskEngineInstalled, isVoskModelInstalled, downloadVosk,
+  startLive as voskStartLive, stopLive as voskStopLive, feedPcm as voskFeedPcm,
+  unloadModel as voskUnloadModel,
+} from './vosk';
 import { checkForUpdate, checkOnStartup } from './updates';
 
 registerAppProtocolPrivilege();
@@ -170,6 +175,7 @@ function startCall(kind: RecordKind = 'call', meta?: Partial<CallRecord>): CallR
   startTickLoop();
   updatePowerBlocker();
   broadcast('app-event', { type: 'call:started', record: rec });
+  void startLiveSession(rec);
   return rec;
 }
 
@@ -178,6 +184,7 @@ async function endCall(): Promise<CallRecord | null> {
   if (!active) return null;
   // Close any open hold first
   if (store.isHolding()) store.endHold();
+  void stopLiveSession();
   const endTime = new Date().toISOString();
   const durationSec = Math.max(
     0,
@@ -243,6 +250,103 @@ function formatHMS(sec: number): string {
   const m = Math.floor((s % 3600) / 60);
   const rs = s % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(rs).padStart(2, '0')}`;
+}
+
+// ============ ライブ文字起こし（Vosk） ============
+// 録音サービスウィンドウから 16kHz PCM を受け取り、Vosk で暫定テキストを生成する。
+// 確定版は従来どおり録音終了後に whisper が生成し、暫定 transcript を置き換える。
+interface LiveSession {
+  callId: string;
+  startMs: number;
+  segments: TranscriptSegment[];
+  /** モデルロード完了前に届いた PCM の一時バッファ（約30秒分まで） */
+  pending: Buffer[];
+  ready: boolean;
+  stopped: boolean;
+  /** 現在進行中のフレーズの開始秒（partial が最初に出た時刻） */
+  phraseStart: number | null;
+}
+let liveSession: LiveSession | null = null;
+
+/** ライブ文字起こしが使える構成か（設定 ON + エンジン・モデル配置済み） */
+async function isLiveReady(s: Settings): Promise<boolean> {
+  if (!s.recording.enabled || !s.transcription.liveEnabled) return false;
+  const model = s.transcription.liveModel ?? 'small-ja';
+  return (await isVoskEngineInstalled()) && (await isVoskModelInstalled(model));
+}
+
+async function startLiveSession(rec: CallRecord): Promise<void> {
+  const s = store.getSettings();
+  if (!(await isLiveReady(s))) return;
+  const modelId = s.transcription.liveModel ?? 'small-ja';
+  const sess: LiveSession = {
+    callId: rec.id,
+    startMs: new Date(rec.startTime).getTime(),
+    segments: [],
+    pending: [],
+    ready: false,
+    stopped: false,
+    phraseStart: null,
+  };
+  liveSession = sess;
+  try {
+    await voskStartLive(modelId, (seg) => {
+      if (liveSession !== sess) return;
+      const at = Math.max(0, (Date.now() - sess.startMs) / 1000);
+      if (seg.final) {
+        sess.segments.push({ start: sess.phraseStart ?? Math.max(0, at - 5), end: at, text: seg.text });
+        sess.phraseStart = null;
+      } else if (sess.phraseStart === null) {
+        sess.phraseStart = at;
+      }
+      broadcast('app-event', { type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at });
+    });
+    if (liveSession !== sess || sess.stopped) {
+      // モデルロード中に記録が終了した
+      await voskStopLive().catch(() => {});
+      return;
+    }
+    sess.ready = true;
+    for (const buf of sess.pending) voskFeedPcm(buf);
+    sess.pending = [];
+    broadcast('app-event', { type: 'live:state', callId: sess.callId, active: true });
+    logInfo('live', `session started for ${rec.id} (model=${modelId})`);
+  } catch (err) {
+    const message = (err as Error).message;
+    if (liveSession === sess) liveSession = null;
+    logInfo('live', `start failed: ${message}`);
+    broadcast('app-event', { type: 'live:state', callId: rec.id, active: false, error: message });
+  }
+}
+
+async function stopLiveSession(): Promise<void> {
+  const sess = liveSession;
+  if (!sess) return;
+  sess.stopped = true;
+  liveSession = null;
+  if (!sess.ready) return;   // startLiveSession 側が後始末する
+  const endAt = Math.max(0, (Date.now() - sess.startMs) / 1000);
+  const tail = await voskStopLive().catch(() => null);
+  if (tail) {
+    sess.segments.push({ start: sess.phraseStart ?? Math.max(0, endAt - 5), end: endAt, text: tail });
+  }
+  broadcast('app-event', { type: 'live:state', callId: sess.callId, active: false });
+  logInfo('live', `session stopped for ${sess.callId} (${sess.segments.length} segments)`);
+  // 暫定の文字起こしとして保存する（whisper が完了したら置き換わる）。
+  // whisper 側のステータス (queued/running) が先に付いていたら上書きしない。
+  const rec = store.getCall(sess.callId);
+  if (!rec || sess.segments.length === 0 || rec.transcript) return;
+  const status = (!rec.transcriptStatus || rec.transcriptStatus === 'none' || rec.transcriptStatus === 'error')
+    ? 'done' as const
+    : rec.transcriptStatus;
+  const transcript: CallTranscript = {
+    text: sess.segments.map((x) => x.text).join('\n'),
+    language: 'ja',
+    model: 'vosk ライブ（暫定）',
+    createdAt: new Date().toISOString(),
+    segments: sess.segments,
+  };
+  setTranscriptStatus(sess.callId, { transcript, transcriptStatus: status }, { status, transcript });
 }
 
 /**
@@ -434,6 +538,10 @@ function setupIpc(): void {
     setMinimizeToTray(next.minimizeToTray);
     if (prev.hudSize !== next.hudSize) setHudSize(next.hudSize);
     if (prev.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next.launchAtLogin);
+    // ライブ文字起こしを無効化したらモデルをメモリから解放（セッション中は保持）
+    if (prev.transcription.liveEnabled && !next.transcription.liveEnabled && !liveSession) {
+      voskUnloadModel();
+    }
     broadcast('app-event', { type: 'settings:updated', settings: next });
     return next;
   });
@@ -679,7 +787,7 @@ function setupIpc(): void {
 
   // 録音サービスウィンドウが録音開始時に使う構成を解決する
   // （ダイアログの上書きがあれば消費し、なければ種別ごとの既定値）
-  ipcMain.handle('recording:get-start-config', (_e, kind: RecordKind) => {
+  ipcMain.handle('recording:get-start-config', async (_e, kind: RecordKind) => {
     const s = store.getSettings();
     const override = pendingSourceOverride;
     pendingSourceOverride = null;
@@ -691,7 +799,58 @@ function setupIpc(): void {
       windowId: override?.windowId ?? null,
       micDeviceId: override?.micDeviceId ?? s.recording.micDeviceId,
       soundFeedback: s.soundFeedback,
+      // ライブ文字起こし用の PCM タップを有効にするか
+      live: await isLiveReady(s),
     };
+  });
+
+  // ============ ライブ文字起こし（Vosk） ============
+  ipcMain.handle('vosk:status', async () => ({
+    engine: await isVoskEngineInstalled(),
+    models: {
+      'small-ja': await isVoskModelInstalled('small-ja'),
+      ja: await isVoskModelInstalled('ja'),
+    } as Record<VoskLiveModel, boolean>,
+  }));
+
+  ipcMain.handle('vosk:download', async (_e, what: 'engine' | VoskLiveModel) => {
+    try {
+      await downloadVosk(what, (p) => {
+        broadcast('app-event', {
+          type: 'vosk:download', what, step: p.step,
+          receivedBytes: p.receivedBytes, totalBytes: p.totalBytes,
+        });
+      });
+      broadcast('app-event', {
+        type: 'vosk:download', what, step: 'done', receivedBytes: 0, totalBytes: null,
+      });
+      return { ok: true };
+    } catch (err) {
+      const message = (err as Error).message;
+      broadcast('app-event', {
+        type: 'vosk:download', what, step: 'error', receivedBytes: 0, totalBytes: null, error: message,
+      });
+      return { ok: false, error: message };
+    }
+  });
+
+  // 編集ダイアログを途中から開いたとき、これまでのライブ認識結果を取得する
+  ipcMain.handle('live:get', () => {
+    if (!liveSession) return null;
+    return { callId: liveSession.callId, segments: liveSession.segments };
+  });
+
+  // 録音サービスウィンドウからの 16kHz/mono/Int16 PCM（fire-and-forget で高頻度に届く）
+  ipcMain.on('live:pcm', (_e, buf: ArrayBuffer) => {
+    const sess = liveSession;
+    if (!sess || sess.stopped) return;
+    const b = Buffer.from(buf);
+    if (!sess.ready) {
+      // モデルロード完了までバッファ（8KB×120 ≒ 30秒で頭打ち）
+      if (sess.pending.length < 120) sess.pending.push(b);
+      return;
+    }
+    voskFeedPcm(b);
   });
 
   // 録音ファイル (MP3) を名前を付けて保存

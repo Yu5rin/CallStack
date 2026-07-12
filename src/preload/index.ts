@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, IpcRendererEvent } from 'electron';
 import type {
   CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
-  AudioSourceLabel, RecordingSourceConfig,
+  AudioSourceLabel, RecordingSourceConfig, VoskLiveModel,
 } from '../shared/types';
 
 type SaveAsResult =
@@ -112,6 +112,8 @@ const api = {
       windowId: string | null;
       micDeviceId: string | null;
       soundFeedback: boolean;
+      /** ライブ文字起こし用に 16kHz PCM を送信するか */
+      live: boolean;
     }> => ipcRenderer.invoke('recording:get-start-config', kind),
     saveAs: (callId: string): Promise<SaveAsResult> =>
       ipcRenderer.invoke('recording:save-as', callId),
@@ -121,6 +123,19 @@ const api = {
       ipcRenderer.invoke('whisper:binary-status', variant),
     downloadBinary: (variant?: 'cpu' | 'gpu'): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('whisper:download-binary', variant),
+  },
+  vosk: {
+    status: (): Promise<{ engine: boolean; models: Record<VoskLiveModel, boolean> }> =>
+      ipcRenderer.invoke('vosk:status'),
+    download: (what: 'engine' | VoskLiveModel): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('vosk:download', what),
+  },
+  live: {
+    /** 16kHz/mono/Int16 PCM をライブ認識へ送る（fire-and-forget） */
+    sendPcm: (buf: ArrayBuffer): void => ipcRenderer.send('live:pcm', buf),
+    /** 進行中のライブ認識セッションのこれまでの結果（なければ null） */
+    get: (): Promise<{ callId: string; segments: Array<{ start: number; end: number; text: string }> } | null> =>
+      ipcRenderer.invoke('live:get'),
   },
   capture: {
     listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),

@@ -20,6 +20,8 @@ export class RecordingManager {
   private stream: MediaStream | null = null;
   private mixStreams: MediaStream[] = [];
   private audioCtx: AudioContext | null = null;
+  private pcmCtx: AudioContext | null = null;
+  private pcmNode: ScriptProcessorNode | null = null;
   private analyser: AnalyserNode | null = null;
   private rafId: number | null = null;
   private callId: string | null = null;
@@ -73,6 +75,39 @@ export class RecordingManager {
     return 'mic';
   }
 
+  /**
+   * ライブ文字起こし用の PCM タップを開始する。
+   * 録音中の合成ストリームを 16kHz でリサンプリングし、Int16 PCM を main へ送る。
+   * （AudioWorklet は CSP script-src 'self' で blob が使えないため ScriptProcessorNode を使用）
+   */
+  startPcmTap(): void {
+    if (!this.stream || this.pcmCtx) return;
+    try {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const src = ctx.createMediaStreamSource(this.stream);
+      // 4096 サンプル @16kHz = 約 256ms ごとに送信
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        // 一時停止中は送らない（録音ファイルと同じ扱いにする）
+        if (this.recorder?.state !== 'recording') return;
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) {
+          const v = Math.max(-1, Math.min(1, f32[i]));
+          i16[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+        }
+        window.api.live.sendPcm(i16.buffer);
+      };
+      src.connect(node);
+      // ScriptProcessor は出力に接続しないと発火しない環境がある（出力バッファは無音のまま）
+      node.connect(ctx.destination);
+      this.pcmCtx = ctx;
+      this.pcmNode = node;
+    } catch (err) {
+      console.warn('[recorder] PCM tap failed:', err);
+    }
+  }
+
   /** 一時停止/再開をトグルし、トグル後の paused 状態を返す。録音していなければ null。 */
   togglePause(): boolean | null {
     const rec = this.recorder;
@@ -118,6 +153,15 @@ export class RecordingManager {
   private cleanup(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.rafId = null;
+    if (this.pcmNode) {
+      this.pcmNode.onaudioprocess = null;
+      this.pcmNode.disconnect();
+      this.pcmNode = null;
+    }
+    if (this.pcmCtx && this.pcmCtx.state !== 'closed') {
+      this.pcmCtx.close().catch(() => {});
+    }
+    this.pcmCtx = null;
     for (const s of [this.stream, ...this.mixStreams]) {
       s?.getTracks().forEach((t) => t.stop());
     }

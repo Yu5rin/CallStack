@@ -20,7 +20,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron/main',
             rollupOptions: {
-              external: ['electron'],
+              external: ['electron', 'koffi'],
             },
           },
           resolve: {
