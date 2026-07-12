@@ -186,6 +186,14 @@ export interface Settings {
   saveDirMode?: 'auto' | 'fixed';
   /** saveDirMode='fixed' のときの保存先フォルダ */
   fixedSaveDir?: string | null;
+  /** Teams 会議/通話を検知して自動録音する（実験的・ウィンドウタイトル監視） */
+  teamsDetectEnabled?: boolean;
+  /** 検知時の動作。auto=即録音開始 / confirm=通知をクリックで開始 */
+  teamsDetectMode?: 'auto' | 'confirm';
+  /** タイトルから会議/通話を判別できないときの既定の種別 */
+  teamsDefaultKind?: RecordKind;
+  /** 会議と判定するキーワード（読点・カンマ区切り）。既定「会議,ミーティング,meeting」 */
+  teamsMeetingKeywords?: string;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -376,6 +384,10 @@ export const DEFAULT_SETTINGS: Settings = {
   hudLiveVisible: true,
   liveFontSize: 'sm',
   transcriptSeekOffsetSec: 1.0,
+  teamsDetectEnabled: false,
+  teamsDetectMode: 'confirm',
+  teamsDefaultKind: 'meeting',
+  teamsMeetingKeywords: '会議,ミーティング,meeting',
 };
 
 /** ソース構成から保存用ラベルを導出。両方 OFF なら null（録音しない） */

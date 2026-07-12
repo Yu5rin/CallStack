@@ -271,6 +271,106 @@ interface LiveSession {
 }
 let liveSession: LiveSession | null = null;
 
+// ============ Teams 会議/通話の自動検知（実験的・ウィンドウタイトル監視） ============
+let teamsPollTimer: NodeJS.Timeout | null = null;
+let teamsPresentCount = 0;
+let teamsAbsentCount = 0;
+/** 検知によって自動開始した記録の ID（手動開始の記録を勝手に終了しないため） */
+let teamsAutoCallId: string | null = null;
+let teamsNotifiedForSession = false;
+
+/** ウィンドウタイトル群から Teams の会議/通話セッションを推定する */
+function findTeamsSession(
+  titles: string[],
+  s: Settings,
+): { kind: RecordKind; title: string | undefined } | null {
+  const teams = titles.filter((t) => /Microsoft Teams/i.test(t));
+  if (teams.length === 0) return null;
+  // メイン窓・各タブ（チャット/予定表/通話 一覧 等）は録音対象外
+  const isBaseWindow = (t: string): boolean => {
+    const n = t.trim();
+    if (/^Microsoft Teams$/i.test(n)) return true;
+    return /(チャット|Chat|アクティビティ|Activity|予定表|Calendar|通話|Calls|ファイル|Files|設定|Settings|Teams と Outlook|Home)\s*[|｜]\s*Microsoft Teams$/i.test(n);
+  };
+  const sessionWins = teams.filter((t) => !isBaseWindow(t));
+  if (sessionWins.length === 0) return null;
+  const kws = (s.teamsMeetingKeywords ?? '会議,ミーティング,meeting')
+    .split(/[、,]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const meetingWin = sessionWins.find((t) => kws.some((k) => t.toLowerCase().includes(k)));
+  const chosen = meetingWin ?? sessionWins[0];
+  const kind: RecordKind = meetingWin ? 'meeting' : (s.teamsDefaultKind ?? 'meeting');
+  const title = chosen.replace(/\s*[|｜]\s*Microsoft Teams\s*$/i, '').trim() || undefined;
+  return { kind, title };
+}
+
+async function pollTeamsDetection(): Promise<void> {
+  const s = store.getSettings();
+  if (!s.teamsDetectEnabled || !s.recording.enabled) return;
+  let sources: Electron.DesktopCapturerSource[];
+  try {
+    sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+  } catch {
+    return;
+  }
+  const sess = findTeamsSession(sources.map((x) => x.name), s);
+  if (sess) {
+    teamsAbsentCount = 0;
+    teamsPresentCount += 1;
+    // 立ち上がり（2 回連続で検知）かつ 進行中の記録がなければ開始
+    if (teamsPresentCount >= 2 && !getActive() && !teamsAutoCallId) {
+      const meta = sess.kind === 'meeting' ? { title: sess.title } : undefined;
+      if (s.teamsDetectMode === 'auto') {
+        const rec = startCall(sess.kind, meta);
+        if (rec) {
+          teamsAutoCallId = rec.id;
+          logInfo('teams', `auto-started ${sess.kind} for "${sess.title ?? ''}"`);
+        }
+      } else if (!teamsNotifiedForSession) {
+        teamsNotifiedForSession = true;
+        notify(
+          `Teams${sess.kind === 'meeting' ? '会議' : '通話'}を検知しました`,
+          'クリックで録音を開始します',
+          () => {
+            if (!getActive()) {
+              const rec = startCall(sess.kind, meta);
+              if (rec) teamsAutoCallId = rec.id;
+            }
+          },
+        );
+      }
+    }
+  } else {
+    teamsPresentCount = 0;
+    teamsNotifiedForSession = false;
+    teamsAbsentCount += 1;
+    // 立ち下がり（2 回連続で不在）で、自動開始した記録を終了する
+    if (teamsAbsentCount >= 2 && teamsAutoCallId) {
+      const id = teamsAutoCallId;
+      teamsAutoCallId = null;
+      if (getActive()?.id === id) {
+        logInfo('teams', `session ended — stopping auto-started ${id}`);
+        void endCall();
+      }
+    }
+  }
+}
+
+function startTeamsPolling(): void {
+  if (teamsPollTimer) return;
+  teamsPollTimer = setInterval(() => { void pollTeamsDetection(); }, 4000);
+  logInfo('teams', 'detection polling started');
+}
+
+function stopTeamsPolling(): void {
+  if (teamsPollTimer) {
+    clearInterval(teamsPollTimer);
+    teamsPollTimer = null;
+  }
+  teamsPresentCount = 0;
+  teamsAbsentCount = 0;
+  teamsNotifiedForSession = false;
+}
+
 /** 置換辞書（単語登録）を適用して認識結果の表記を補正する。ライブ・whisper 共通 */
 function applyTermReplacements(text: string): string {
   const list = store.getSettings().transcription.termReplacements ?? [];
@@ -593,6 +693,11 @@ function setupIpc(): void {
     if (prev.hudLiveVisible !== next.hudLiveVisible
       || prev.transcription.liveEnabled !== next.transcription.liveEnabled) {
       updateLiveWindow();
+    }
+    // Teams 検知の ON/OFF に追随
+    if (prev.teamsDetectEnabled !== next.teamsDetectEnabled) {
+      if (next.teamsDetectEnabled) startTeamsPolling();
+      else stopTeamsPolling();
     }
     return next;
   });
@@ -1742,6 +1847,9 @@ async function main() {
     store.setSettings({ ...store.getSettings(), liveWindowBounds: bounds });
   });
 
+  // Teams 検知が有効なら監視を開始
+  if (store.getSettings().teamsDetectEnabled) startTeamsPolling();
+
   createTray(trayHandlers);
   updateTray({ active: false, today: todayStats() }, trayHandlers);
 
@@ -1810,6 +1918,7 @@ app.on('will-quit', () => {
   if (!app.isReady()) return;
   unregisterAll();
   stopTickLoop();
+  stopTeamsPolling();
   stopDailyCleanup();
   destroyTray();
   destroyRecorderWindow();

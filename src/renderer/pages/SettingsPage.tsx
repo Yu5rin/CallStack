@@ -5,7 +5,7 @@ import {
 } from '../../shared/types';
 import {
   Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
-  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines, Plus, X,
+  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines, Plus, X, Video,
 } from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
@@ -718,6 +718,67 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             />
             録音を有効化する時に確認モーダルを表示する
           </label>
+        </Row>
+      </section>
+
+      {/* ============ Teams 連携（実験的） ============ */}
+      <section className={sectionClass}>
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Video size={16} className="text-slate-400" />Teams 連携（実験的）</h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          Microsoft Teams の会議/通話ウィンドウを監視して自動で記録・録音を開始します（完全オフライン・サインイン不要）。
+          Teams のバージョンや表示言語によってはウィンドウ名の書式が異なり、検知精度が変わる場合があります。録音を有効にしてご利用ください。
+        </p>
+        <Row label="Teams を検知して自動録音">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={draft.teamsDetectEnabled ?? false}
+              onChange={(e) => update({ teamsDetectEnabled: e.target.checked })}
+              disabled={!draft.recording.enabled}
+            />
+            会議/通話を検知したら記録を開始する
+            {!draft.recording.enabled && <span className="text-xs text-slate-500 dark:text-slate-400">— 先に録音を有効にしてください</span>}
+          </label>
+        </Row>
+        <Row label="検知時の動作">
+          <div className="flex gap-4 text-sm text-slate-700 dark:text-slate-300">
+            {([['confirm', '通知をクリックで開始'], ['auto', '自動で即開始']] as const).map(([v, label]) => (
+              <label key={v} className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={(draft.teamsDetectMode ?? 'confirm') === v}
+                  onChange={() => update({ teamsDetectMode: v })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </Row>
+        <Row label="判別できないときの種別">
+          <div className="flex gap-4 text-sm text-slate-700 dark:text-slate-300">
+            {([['meeting', '会議'], ['call', '通話']] as const).map(([v, label]) => (
+              <label key={v} className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={(draft.teamsDefaultKind ?? 'meeting') === v}
+                  onChange={() => update({ teamsDefaultKind: v })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">種別は記録の編集で後から変更できます</span>
+        </Row>
+        <Row label="会議と判定する語">
+          <input
+            value={draft.teamsMeetingKeywords ?? '会議,ミーティング,meeting'}
+            onChange={(e) => update({ teamsMeetingKeywords: e.target.value })}
+            className={`w-full ${inputClass}`}
+            placeholder="会議,ミーティング,meeting"
+          />
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            Teams のウィンドウ名にこれらの語が含まれれば「会議」、なければ上の既定の種別として開始します（読点・カンマ区切り）
+          </span>
         </Row>
       </section>
 

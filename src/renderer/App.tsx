@@ -49,9 +49,8 @@ function AppContent() {
   const [recError, setRecError] = useState<string | null>(null);
   const recErrorTimer = useRef<number | null>(null);
 
-  // ゴミ箱の記録は集計から除外する。フッターは通話のみを対象にする。
+  // ゴミ箱の記録は集計から除外する。フッターは通話＋会議の両方を対象にする。
   const callsAlive = useMemo(() => calls.filter((c) => !c.deletedAt), [calls]);
-  const callsOnly = useMemo(() => callsAlive.filter((c) => c.kind !== 'meeting'), [callsAlive]);
   const isMeeting = active?.kind === 'meeting';
 
   const navigateToContact = (name: string) => {
@@ -319,7 +318,7 @@ function AppContent() {
         )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
-      <SummaryFooter calls={callsOnly} />
+      <SummaryFooter calls={callsAlive} />
 
       {startDialogOpen && settings && (
         <StartRecordDialog
