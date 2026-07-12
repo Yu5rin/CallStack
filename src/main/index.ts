@@ -271,6 +271,16 @@ interface LiveSession {
 }
 let liveSession: LiveSession | null = null;
 
+/** 置換辞書（単語登録）を適用して認識結果の表記を補正する。ライブ・whisper 共通 */
+function applyTermReplacements(text: string): string {
+  const list = store.getSettings().transcription.termReplacements ?? [];
+  let out = text;
+  for (const { from, to } of list) {
+    if (from) out = out.split(from).join(to);
+  }
+  return out;
+}
+
 /** ライブ文字起こしが使える構成か（設定 ON + エンジン・モデル配置済み） */
 async function isLiveReady(s: Settings): Promise<boolean> {
   if (!s.recording.enabled || !s.transcription.liveEnabled) return false;
@@ -311,12 +321,14 @@ async function startLiveSession(rec: CallRecord): Promise<void> {
     await voskStartLive(modelId, {
       onSegment: (seg) => {
         if (liveSession !== sess) return;
+        // 単語登録（置換辞書）で専門用語・固有名詞の表記を補正する
+        const text = applyTermReplacements(seg.text);
         // タイムスタンプはワーカーが消費した音声位置（秒）。壁時計の遅延を受けない。
         if (seg.final) {
-          sess.segments.push({ start: seg.startSec, end: seg.endSec, text: seg.text });
+          sess.segments.push({ start: seg.startSec, end: seg.endSec, text });
         }
         broadcast('app-event', {
-          type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at: seg.startSec,
+          type: 'live:segment', callId: sess.callId, text, final: seg.final, at: seg.startSec,
         });
       },
       onError: (message) => {
@@ -362,7 +374,7 @@ async function stopLiveSession(): Promise<void> {
   if (!sess.ready) return;   // startLiveSession 側が後始末する
   const tail = await voskStopLive().catch(() => null);
   if (tail && tail.text) {
-    sess.segments.push({ start: tail.startSec, end: tail.endSec, text: tail.text });
+    sess.segments.push({ start: tail.startSec, end: tail.endSec, text: applyTermReplacements(tail.text) });
   }
   broadcast('app-event', { type: 'live:state', callId: sess.callId, active: false });
   logInfo('live', `session stopped for ${sess.callId} (${sess.segments.length} segments)`);
@@ -1460,10 +1472,17 @@ function setupTranscriptionHandlers(): void {
       updatePowerBlocker();
     },
     onDone: (callId, transcript) => {
+      // 単語登録（置換辞書）を whisper の確定版にも適用する
+      const segments = (transcript.segments ?? []).map((s) => ({ ...s, text: applyTermReplacements(s.text) }));
+      const corrected: CallTranscript = {
+        ...transcript,
+        segments,
+        text: segments.length > 0 ? segments.map((s) => s.text).join('\n') : applyTermReplacements(transcript.text),
+      };
       setTranscriptStatus(
         callId,
-        { transcript, transcriptStatus: 'done', transcriptError: undefined },
-        { status: 'done', transcript },
+        { transcript: corrected, transcriptStatus: 'done', transcriptError: undefined },
+        { status: 'done', transcript: corrected },
       );
       endJobProgress(callId);
       updatePowerBlocker();

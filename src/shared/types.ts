@@ -129,6 +129,17 @@ export interface TranscriptionSettings {
   liveEnabled?: boolean;
   /** ライブ文字起こしに使う Vosk モデル */
   liveModel?: VoskLiveModel;
+  /**
+   * 単語登録（置換辞書）。認識結果に含まれる誤変換を from → to で自動置換する。
+   * ライブ（Vosk）にも whisper の確定版にも適用され、専門用語・固有名詞の表記を補正する。
+   */
+  termReplacements?: TermReplacement[];
+}
+
+/** 置換辞書の1エントリ（誤り from を正しい語 to に置換） */
+export interface TermReplacement {
+  from: string;
+  to: string;
 }
 
 export type VoskLiveModel = 'small-ja' | 'ja';

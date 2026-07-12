@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel,
-  VoskLiveModel, VOSK_MODELS, TranscriptionSettings,
+  VoskLiveModel, VOSK_MODELS, TranscriptionSettings, TermReplacement,
 } from '../../shared/types';
 import {
   Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
-  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines,
+  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines, Plus, X,
 } from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
@@ -297,6 +297,60 @@ function LiveTranscribeSetup({
       {dlError && (
         <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{dlError}</div>
       )}
+    </div>
+  );
+}
+
+/** 単語登録（置換辞書）の編集 UI。誤り → 正しい語 のペアを増減・編集できる */
+function TermReplacementEditor({
+  list,
+  onChange,
+}: {
+  list: TermReplacement[];
+  onChange: (next: TermReplacement[]) => void;
+}) {
+  const setAt = (i: number, patch: Partial<TermReplacement>) => {
+    onChange(list.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
+  const remove = (i: number) => onChange(list.filter((_, idx) => idx !== i));
+  const add = () => onChange([...list, { from: '', to: '' }]);
+
+  return (
+    <div className="w-full space-y-1.5">
+      {list.length > 0 && (
+        <div className="space-y-1.5">
+          {list.map((r, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                value={r.from}
+                onChange={(e) => setAt(i, { from: e.target.value })}
+                placeholder="誤り（認識される語）"
+                className={`min-w-0 flex-1 ${inputClass}`}
+              />
+              <span className="flex-none text-slate-400">→</span>
+              <input
+                value={r.to}
+                onChange={(e) => setAt(i, { to: e.target.value })}
+                placeholder="正しい語"
+                className={`min-w-0 flex-1 ${inputClass}`}
+              />
+              <button
+                onClick={() => remove(i)}
+                className="flex-none rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                title="この行を削除"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={add}
+        className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+      >
+        <Plus size={12} /> 単語を追加
+      </button>
     </div>
   );
 }
@@ -714,7 +768,19 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               placeholder="例: CallStack、山田太郎、御見積、リスケ"
             />
             <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-              社名・人名・専門用語を読点区切りで書くと、固有名詞の認識精度が上がります
+              社名・人名・専門用語を読点区切りで書くと、whisper（確定版）の固有名詞の認識精度が上がります。
+              ※ ライブ文字起こし（Vosk）にはこのヒントは効きません。下の「単語登録」をお使いください
+            </span>
+          </Row>
+          <Row label="単語登録（置換辞書）">
+            <TermReplacementEditor
+              list={draft.transcription.termReplacements ?? []}
+              onChange={(termReplacements) => updateTranscription({ termReplacements })}
+            />
+            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              認識結果の誤変換を「誤り → 正しい語」で自動置換します。<b>ライブ（Vosk）にも whisper の確定版にも適用</b>されます。
+              ライブで専門用語が別の語に誤認識されるときは、その誤認識語を左に、正しい語を右に登録してください
+              （例: 「コールスタック → CallStack」）
             </span>
           </Row>
         </div>
