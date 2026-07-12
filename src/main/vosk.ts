@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import { app, utilityProcess, UtilityProcess } from 'electron';
 import extract from 'extract-zip';
 import { logInfo } from './log';
 import { downloadTo, fetchJson, BinDownloadProgress } from './whisperBinary';
@@ -8,10 +8,11 @@ import { downloadTo, fetchJson, BinDownloadProgress } from './whisperBinary';
 /**
  * Vosk によるライブ文字起こし。
  *
- * - libvosk.dll（vosk-api の Windows ビルド）を koffi (FFI) で直接呼ぶ。
- *   公式 npm パッケージは ffi-napi 依存で新しい Electron では動かないため使わない。
- * - モデルロードと認識は koffi の非同期呼び出し（ワーカープール）で実行し、
- *   main プロセスのイベントループをブロックしない。
+ * - libvosk.dll（vosk-api の Windows ビルド）を koffi (FFI) で呼ぶが、
+ *   FFI は専用の utilityProcess（electron/voskWorker.cjs）に隔離する。
+ *   ネイティブ側のクラッシュは try/catch では防げず main プロセスごと
+ *   落としてしまうため、別プロセスにするのが唯一の安全策。
+ * - 公式 npm パッケージは ffi-napi 依存で新しい Electron では動かないため使わない。
  * - あくまで「録音中の暫定表示」用。確定版は従来どおり whisper が生成する。
  */
 
@@ -152,152 +153,163 @@ export async function downloadVosk(
 }
 
 // ============ ライブ認識エンジン ============
+// libvosk.dll の FFI 呼び出しは専用の utilityProcess（electron/voskWorker.cjs）に
+// 隔離する。ネイティブ側がクラッシュしてもワーカーが落ちるだけで、
+// アプリ本体・録音には影響しない（exit を検知してエラー通知する）。
 
 export interface LiveSegment {
   text: string;
   final: boolean;
 }
 
-type KoffiFunc = {
-  async: (...args: unknown[]) => void;
-  (...args: unknown[]): unknown;
-};
-
-interface VoskLib {
-  setLogLevel: KoffiFunc;
-  modelNew: KoffiFunc;
-  modelFree: KoffiFunc;
-  recNew: KoffiFunc;
-  recFree: KoffiFunc;
-  accept: KoffiFunc;
-  result: KoffiFunc;
-  partial: KoffiFunc;
-  finalResult: KoffiFunc;
+export interface LiveHandlers {
+  onSegment: (seg: LiveSegment) => void;
+  /** ワーカーの異常終了・認識エラー（セッションは継続不能） */
+  onError: (message: string) => void;
 }
 
-let lib: VoskLib | null = null;
-let model: unknown = null;
-let loadedModelDir: string | null = null;
-let recognizer: unknown = null;
-let feeding = Promise.resolve();
-let onSegment: ((seg: LiveSegment) => void) | null = null;
-let lastPartial = '';
-
-function loadLib(): VoskLib {
-  if (lib) return lib;
-  // koffi はネイティブモジュールのため実行時 require（バンドル対象外）
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const koffi = require('koffi');
-  const dllPath = dllPathCache;
-  if (!dllPath) throw new Error('libvosk.dll が見つかりません');
-  const k = koffi.load(dllPath);
-  lib = {
-    setLogLevel: k.func('void vosk_set_log_level(int)'),
-    modelNew: k.func('void* vosk_model_new(const char*)'),
-    modelFree: k.func('void vosk_model_free(void*)'),
-    recNew: k.func('void* vosk_recognizer_new(void*, float)'),
-    recFree: k.func('void vosk_recognizer_free(void*)'),
-    accept: k.func('int vosk_recognizer_accept_waveform(void*, const uint8_t*, int)'),
-    result: k.func('const char* vosk_recognizer_result(void*)'),
-    partial: k.func('const char* vosk_recognizer_partial_result(void*)'),
-    finalResult: k.func('const char* vosk_recognizer_final_result(void*)'),
-  };
-  lib.setLogLevel(-1);
-  return lib;
+interface WorkerMsg {
+  type: 'ready' | 'started' | 'segment' | 'stopped' | 'unloaded' | 'error';
+  text?: string | null;
+  final?: boolean;
+  message?: string;
 }
 
-let dllPathCache: string | null = null;
+let worker: UtilityProcess | null = null;
+let sessionActive = false;
+let handlers: LiveHandlers | null = null;
+let startWaiter: { resolve: () => void; reject: (e: Error) => void } | null = null;
+let stopWaiter: ((text: string | null) => void) | null = null;
 
-function callAsync<T>(fn: KoffiFunc, ...args: unknown[]): Promise<T> {
-  return new Promise((resolve, reject) => {
-    fn.async(...args, (err: Error | null, result: T) => {
-      if (err) reject(err);
-      else resolve(result);
-    });
+function workerPath(): string {
+  // 開発時: <プロジェクト>/electron/voskWorker.cjs
+  // パッケージ時: app.asar/electron/voskWorker.cjs（__dirname は dist-electron/main）
+  return path.join(__dirname, '../../electron/voskWorker.cjs');
+}
+
+function spawnWorker(): UtilityProcess {
+  if (worker) return worker;
+  const w = utilityProcess.fork(workerPath(), [], { serviceName: 'vosk-live', stdio: 'pipe' });
+  w.stdout?.on('data', (d: Buffer) => logInfo('vosk', `[worker] ${String(d).trim()}`));
+  w.stderr?.on('data', (d: Buffer) => logInfo('vosk', `[worker:err] ${String(d).trim()}`));
+  w.on('message', (raw: unknown) => {
+    const msg = raw as WorkerMsg;
+    switch (msg.type) {
+      case 'started':
+        startWaiter?.resolve();
+        startWaiter = null;
+        break;
+      case 'segment':
+        if (sessionActive && typeof msg.text === 'string') {
+          handlers?.onSegment({ text: msg.text, final: !!msg.final });
+        }
+        break;
+      case 'stopped':
+        stopWaiter?.(msg.text ?? null);
+        stopWaiter = null;
+        break;
+      case 'error': {
+        const message = msg.message ?? '不明なエラー';
+        logInfo('vosk', `worker error: ${message}`);
+        if (startWaiter) {
+          startWaiter.reject(new Error(message));
+          startWaiter = null;
+        } else if (stopWaiter) {
+          stopWaiter(null);
+          stopWaiter = null;
+        } else if (sessionActive) {
+          sessionActive = false;
+          handlers?.onError(message);
+        }
+        break;
+      }
+    }
   });
+  w.on('exit', (code: number) => {
+    logInfo('vosk', `worker exited (code=${code})`);
+    worker = null;
+    if (startWaiter) {
+      startWaiter.reject(new Error(`ライブ認識プロセスが起動できませんでした (code=${code})`));
+      startWaiter = null;
+    }
+    if (stopWaiter) {
+      stopWaiter(null);
+      stopWaiter = null;
+    }
+    if (sessionActive) {
+      sessionActive = false;
+      handlers?.onError(`ライブ認識プロセスが異常終了しました (code=${code})`);
+    }
+  });
+  worker = w;
+  logInfo('vosk', `worker spawned (${workerPath()})`);
+  return w;
 }
 
-/** ライブ認識セッションを開始する（モデルは初回のみロードし、以後キャッシュ） */
-export async function startLive(
-  modelId: VoskModelId,
-  handler: (seg: LiveSegment) => void,
-): Promise<void> {
-  dllPathCache = await findDll(getVoskDir());
-  if (!dllPathCache) throw new Error('Vosk エンジンが未インストールです');
+/** ライブ認識セッションを開始する（モデルはワーカー内で初回のみロードし、以後キャッシュ） */
+export async function startLive(modelId: VoskModelId, h: LiveHandlers): Promise<void> {
+  const dllPath = await findDll(getVoskDir());
+  if (!dllPath) throw new Error('Vosk エンジンが未インストールです');
   const modelRoot = await findModelRoot(getVoskModelDir(modelId));
   if (!modelRoot) throw new Error(`Vosk モデル '${modelId}' が未インストールです`);
 
-  const l = loadLib();
-  if (!model || loadedModelDir !== modelRoot) {
-    if (model) {
-      l.modelFree(model);
-      model = null;
-    }
-    logInfo('vosk', `loading model ${modelRoot}`);
-    model = await callAsync(l.modelNew, modelRoot);
-    if (!model) throw new Error('Vosk モデルの読み込みに失敗しました');
-    loadedModelDir = modelRoot;
-    logInfo('vosk', 'model loaded');
-  }
-  recognizer = await callAsync(l.recNew, model, 16000.0);
-  if (!recognizer) throw new Error('Vosk 認識器の初期化に失敗しました');
-  onSegment = handler;
-  lastPartial = '';
-  feeding = Promise.resolve();
+  const w = spawnWorker();
+  handlers = h;
+  await new Promise<void>((resolve, reject) => {
+    // モデルロードは大きいモデルで数十秒〜数分かかることがある
+    const timer = setTimeout(() => {
+      if (startWaiter) {
+        startWaiter = null;
+        reject(new Error('Vosk の初期化がタイムアウトしました'));
+      }
+    }, 5 * 60 * 1000);
+    startWaiter = {
+      resolve: () => { clearTimeout(timer); resolve(); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    };
+    w.postMessage({ type: 'start', dllPath, modelDir: modelRoot });
+  });
+  sessionActive = true;
+  logInfo('vosk', `live session ready (model=${modelId})`);
 }
 
-/** 16kHz/mono/Int16 PCM を投入する（呼び出し順を保証するため直列化） */
+/** 16kHz/mono/Int16 PCM を投入する（ワーカー側で到着順に処理される） */
 export function feedPcm(buf: Buffer): void {
-  if (!recognizer || !lib) return;
-  const l = lib;
-  const rec = recognizer;
-  feeding = feeding.then(async () => {
-    if (recognizer !== rec) return;   // 停止後の遅延チャンクは捨てる
-    try {
-      const hasFinal = await callAsync<number>(l.accept, rec, buf, buf.length);
-      if (recognizer !== rec) return;
-      if (hasFinal) {
-        const raw = l.result(rec) as string;
-        const text = (JSON.parse(raw)?.text ?? '').trim();
-        lastPartial = '';
-        if (text) onSegment?.({ text, final: true });
-      } else {
-        const raw = l.partial(rec) as string;
-        const text = (JSON.parse(raw)?.partial ?? '').trim();
-        if (text && text !== lastPartial) {
-          lastPartial = text;
-          onSegment?.({ text, final: false });
-        }
-      }
-    } catch (err) {
-      logInfo('vosk', `feed error: ${(err as Error).message}`);
-    }
-  });
+  if (!sessionActive || !worker) return;
+  worker.postMessage({ type: 'pcm', data: buf });
 }
 
 /** セッションを終了し、末尾の確定テキストを返す */
 export async function stopLive(): Promise<string | null> {
-  const rec = recognizer;
-  recognizer = null;
-  onSegment = null;
-  if (!rec || !lib) return null;
-  await feeding.catch(() => {});
-  try {
-    const raw = lib.finalResult(rec) as string;
-    lib.recFree(rec);
-    const text = (JSON.parse(raw)?.text ?? '').trim();
-    return text || null;
-  } catch {
+  if (!sessionActive || !worker) {
+    sessionActive = false;
     return null;
   }
+  sessionActive = false;
+  const w = worker;
+  return new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => {
+      if (stopWaiter) {
+        stopWaiter = null;
+        resolve(null);
+      }
+    }, 10 * 1000);
+    stopWaiter = (text) => { clearTimeout(timer); resolve(text); };
+    w.postMessage({ type: 'stop' });
+  });
 }
 
 /** モデルをメモリから解放する（設定でライブを無効化したときなど） */
 export function unloadModel(): void {
-  if (model && lib) {
-    lib.modelFree(model);
-    model = null;
-    loadedModelDir = null;
-    logInfo('vosk', 'model unloaded');
+  worker?.postMessage({ type: 'unload' });
+}
+
+/** アプリ終了時: ワーカープロセスを残さない */
+export function shutdownVosk(): void {
+  sessionActive = false;
+  handlers = null;
+  if (worker) {
+    worker.kill();
+    worker = null;
   }
 }

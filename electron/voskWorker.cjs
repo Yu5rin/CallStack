@@ -1,0 +1,124 @@
+/**
+ * Vosk ライブ認識ワーカー（Electron utilityProcess で実行される専用プロセス）。
+ *
+ * libvosk.dll（ネイティブライブラリ）のクラッシュや例外がアプリ本体を
+ * 巻き込まないよう、FFI 呼び出しはすべてこのプロセス内に隔離する。
+ * ここが落ちても main 側は exit イベントで検知してエラー表示するだけで済む。
+ *
+ * main との通信は process.parentPort のメッセージのみ:
+ *  受信: {type:'start', dllPath, modelDir}
+ *        {type:'pcm', data: Uint8Array}     16kHz/mono/Int16 PCM
+ *        {type:'stop'} / {type:'unload'}
+ *  送信: {type:'ready'} / {type:'started'} / {type:'segment', text, final}
+ *        {type:'stopped', text} / {type:'unloaded'} / {type:'error', message}
+ *
+ * 認識は同期呼び出しで行う（ブロックするのはこのプロセスだけで、
+ * メッセージはキューに溜まり順に処理されるため音声の取りこぼしもない）。
+ */
+
+const koffi = require('koffi');
+
+let lib = null;
+let model = null;
+let loadedModelDir = null;
+let recognizer = null;
+let lastPartial = '';
+
+const port = process.parentPort;
+const send = (msg) => port.postMessage(msg);
+
+function loadLib(dllPath) {
+  if (lib) return lib;
+  const k = koffi.load(dllPath);
+  lib = {
+    setLogLevel: k.func('void vosk_set_log_level(int)'),
+    modelNew: k.func('void* vosk_model_new(const char*)'),
+    modelFree: k.func('void vosk_model_free(void*)'),
+    recNew: k.func('void* vosk_recognizer_new(void*, float)'),
+    recFree: k.func('void vosk_recognizer_free(void*)'),
+    accept: k.func('int vosk_recognizer_accept_waveform(void*, const uint8_t*, int)'),
+    result: k.func('const char* vosk_recognizer_result(void*)'),
+    partial: k.func('const char* vosk_recognizer_partial_result(void*)'),
+    finalResult: k.func('const char* vosk_recognizer_final_result(void*)'),
+  };
+  lib.setLogLevel(-1);
+  return lib;
+}
+
+port.on('message', (e) => {
+  const msg = e.data;
+  try {
+    switch (msg.type) {
+      case 'start': {
+        const l = loadLib(msg.dllPath);
+        if (!model || loadedModelDir !== msg.modelDir) {
+          if (model) {
+            l.modelFree(model);
+            model = null;
+            loadedModelDir = null;
+          }
+          console.log(`[vosk-worker] loading model: ${msg.modelDir}`);
+          model = l.modelNew(msg.modelDir);
+          if (!model) throw new Error('Vosk モデルの読み込みに失敗しました');
+          loadedModelDir = msg.modelDir;
+          console.log('[vosk-worker] model loaded');
+        }
+        if (recognizer) l.recFree(recognizer);
+        recognizer = l.recNew(model, 16000.0);
+        if (!recognizer) throw new Error('Vosk 認識器の初期化に失敗しました');
+        lastPartial = '';
+        send({ type: 'started' });
+        break;
+      }
+      case 'pcm': {
+        if (!recognizer || !lib) break;
+        const buf = Buffer.from(msg.data.buffer ?? msg.data, msg.data.byteOffset ?? 0, msg.data.byteLength);
+        const hasFinal = lib.accept(recognizer, buf, buf.length);
+        if (hasFinal) {
+          const text = (JSON.parse(lib.result(recognizer)).text || '').trim();
+          lastPartial = '';
+          if (text) send({ type: 'segment', text, final: true });
+        } else {
+          const text = (JSON.parse(lib.partial(recognizer)).partial || '').trim();
+          if (text && text !== lastPartial) {
+            lastPartial = text;
+            send({ type: 'segment', text, final: false });
+          }
+        }
+        break;
+      }
+      case 'stop': {
+        let text = null;
+        if (recognizer && lib) {
+          try {
+            text = (JSON.parse(lib.finalResult(recognizer)).text || '').trim() || null;
+          } catch (err) {
+            console.error(`[vosk-worker] final_result failed: ${err && err.message}`);
+          }
+          lib.recFree(recognizer);
+          recognizer = null;
+        }
+        send({ type: 'stopped', text });
+        break;
+      }
+      case 'unload': {
+        if (recognizer && lib) {
+          lib.recFree(recognizer);
+          recognizer = null;
+        }
+        if (model && lib) {
+          lib.modelFree(model);
+          model = null;
+          loadedModelDir = null;
+        }
+        send({ type: 'unloaded' });
+        break;
+      }
+    }
+  } catch (err) {
+    console.error(`[vosk-worker] ${msg && msg.type}: ${err && err.message}`);
+    send({ type: 'error', message: (err && err.message) || String(err) });
+  }
+});
+
+send({ type: 'ready' });

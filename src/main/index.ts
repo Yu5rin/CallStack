@@ -48,7 +48,7 @@ import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
 import {
   isVoskEngineInstalled, isVoskModelInstalled, downloadVosk,
   startLive as voskStartLive, stopLive as voskStopLive, feedPcm as voskFeedPcm,
-  unloadModel as voskUnloadModel,
+  unloadModel as voskUnloadModel, shutdownVosk,
 } from './vosk';
 import { checkForUpdate, checkOnStartup } from './updates';
 
@@ -290,16 +290,29 @@ async function startLiveSession(rec: CallRecord): Promise<void> {
   };
   liveSession = sess;
   try {
-    await voskStartLive(modelId, (seg) => {
-      if (liveSession !== sess) return;
-      const at = Math.max(0, (Date.now() - sess.startMs) / 1000);
-      if (seg.final) {
-        sess.segments.push({ start: sess.phraseStart ?? Math.max(0, at - 5), end: at, text: seg.text });
-        sess.phraseStart = null;
-      } else if (sess.phraseStart === null) {
-        sess.phraseStart = at;
-      }
-      broadcast('app-event', { type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at });
+    await voskStartLive(modelId, {
+      onSegment: (seg) => {
+        if (liveSession !== sess) return;
+        const at = Math.max(0, (Date.now() - sess.startMs) / 1000);
+        if (seg.final) {
+          sess.segments.push({ start: sess.phraseStart ?? Math.max(0, at - 5), end: at, text: seg.text });
+          sess.phraseStart = null;
+        } else if (sess.phraseStart === null) {
+          sess.phraseStart = at;
+        }
+        broadcast('app-event', { type: 'live:segment', callId: sess.callId, text: seg.text, final: seg.final, at });
+      },
+      onError: (message) => {
+        // ワーカーの異常終了など。録音・記録には影響しないため通知のみ。
+        // セッションは残し、既に得られたセグメントは終了時に暫定保存される。
+        if (liveSession !== sess) return;
+        logInfo('live', `session error: ${message}`);
+        broadcast('app-event', { type: 'live:state', callId: sess.callId, active: false, error: message });
+        broadcast('app-event', {
+          type: 'recording:error',
+          message: `ライブ文字起こしが停止しました（録音は継続しています）: ${message}`,
+        });
+      },
     });
     if (liveSession !== sess || sess.stopped) {
       // モデルロード中に記録が終了した
@@ -1730,6 +1743,8 @@ app.on('will-quit', () => {
   destroyRecorderWindow();
   // 実行中の whisper プロセスを残さない
   shutdownTranscription();
+  // Vosk ライブ認識ワーカーも残さない
+  shutdownVosk();
   if (powerBlockerId !== null) powerSaveBlocker.stop(powerBlockerId);
 });
 
