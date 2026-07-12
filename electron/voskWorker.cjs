@@ -16,7 +16,14 @@
  * メッセージはキューに溜まり順に処理されるため音声の取りこぼしもない）。
  */
 
+const path = require('node:path');
 const koffi = require('koffi');
+
+// 【重要】koffi は FFI 呼び出しを専用スタック（既定 1MiB）で実行するが、
+// Kaldi のモデル読込はそれを超えるスタックを消費し、スタックオーバーフローで
+// プロセスごとクラッシュする（検証済み）。上限の 16MiB まで引き上げる。
+// ※ koffi.load / 関数呼び出しより前に設定する必要がある
+koffi.config({ sync_stack_size: 16 * 1024 * 1024, sync_heap_size: 8 * 1024 * 1024 });
 
 let lib = null;
 let model = null;
@@ -29,6 +36,10 @@ const send = (msg) => port.postMessage(msg);
 
 function loadLib(dllPath) {
   if (lib) return lib;
+  // 依存 DLL（libgcc/libstdc++ 等）を確実に解決できるよう、DLL のフォルダを PATH に加える
+  if (process.platform === 'win32') {
+    process.env.Path = `${path.dirname(dllPath)};${process.env.Path ?? ''}`;
+  }
   const k = koffi.load(dllPath);
   lib = {
     setLogLevel: k.func('void vosk_set_log_level(int)'),
