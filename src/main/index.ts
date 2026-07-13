@@ -621,6 +621,8 @@ function setupIpc(): void {
 
   // 削除はまずゴミ箱へ（ソフトデリート）。録音ファイルは完全削除まで保持する。
   ipcMain.handle('calls:delete', async (_e, id: string) => {
+    // ゴミ箱の記録は文字起こし対象外。進行中・待機中なら中止する。
+    if (isTranscriptionActive(id)) cancelTranscription(id);
     const updated = store.updateCall(id, { deletedAt: new Date().toISOString() });
     if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
     return !!updated;
@@ -759,6 +761,7 @@ function setupIpc(): void {
         endTime: p.record.endTime ?? null,
         durationSec: p.record.durationSec ?? null,
         tag: p.record.tag ?? null,
+        tags: p.record.tags,
         memo: p.record.memo ?? '',
         contactName: p.record.contactName,
         phoneNumber: p.record.phoneNumber,
@@ -852,13 +855,20 @@ function setupIpc(): void {
     updatePowerBlocker();
     let r: recording.FinalizeResult | null;
     try {
-      r = await recording.finalize(callId, s.recording.mp3Bitrate);
+      r = await recording.finalize(callId, s.recording.mp3Bitrate, s.recording.trimSilence ?? true);
     } finally {
       finalizingCount -= 1;
       updatePowerBlocker();
     }
-    logInfo('recorder', `finalize done ${callId} (${r ? `${r.bytes}B ${r.durationSec}s` : 'no data'})`);
+    logInfo('recorder', `finalize done ${callId} (${r ? `${r.bytes}B ${r.durationSec}s trim=${r.leadingTrimSec.toFixed(2)}s` : 'no data'})`);
     if (!r) return null;
+    // 先頭無音をカットした分だけマーカー位置を前へずらす（音声とずれないように）
+    const rec0 = store.getCall(callId);
+    const shiftedMarkers = (r.leadingTrimSec > 0 && rec0?.markers?.length)
+      ? rec0.markers
+          .map((m) => ({ ...m, at: Math.max(0, m.at - r!.leadingTrimSec) }))
+          .sort((a, b) => a.at - b.at)
+      : undefined;
     const updated = store.updateCall(callId, {
       audio: {
         path: r.path,
@@ -867,6 +877,7 @@ function setupIpc(): void {
         durationSec: r.durationSec,
         source: sourceLabel ?? 'mic',
       },
+      ...(shiftedMarkers ? { markers: shiftedMarkers } : {}),
     });
     if (updated) {
       broadcast('app-event', {
@@ -1087,6 +1098,7 @@ function setupIpc(): void {
     const rec = store.getCall(callId);
     if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
     if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
+    if (rec.deletedAt) return { ok: false, error: 'ゴミ箱の記録は文字起こしできません。' };
     // 二重開始の防止（すでに待機中・実行中なら受け付けない）
     if (isTranscriptionActive(callId) || rec.transcriptStatus === 'queued' || rec.transcriptStatus === 'running') {
       return { ok: false, error: 'この記録の文字起こしはすでに進行中です。' };
@@ -1346,6 +1358,7 @@ function setupIpc(): void {
 function queueTranscription(callId: string, modelOverride?: WhisperModel): void {
   const rec = store.getCall(callId);
   if (!rec || !rec.audio) return;
+  if (rec.deletedAt) return;   // ゴミ箱の記録は文字起こししない
   const { recordings } = getDirs();
   const abs = path.join(recordings, rec.audio.path);
   const s = store.getSettings();

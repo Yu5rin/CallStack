@@ -1,7 +1,7 @@
 import { promises as fs, createWriteStream, WriteStream } from 'node:fs';
 import path from 'node:path';
 import { getDirs } from './paths';
-import { convertWebmToMp3 } from './ffmpeg';
+import { convertWebmToMp3, detectLeadingSilenceSec } from './ffmpeg';
 
 interface Session {
   callId: string;
@@ -45,9 +45,11 @@ export interface FinalizeResult {
   absPath: string;
   bytes: number;
   durationSec: number;
+  /** 先頭無音カットで削られた秒数（マーカー位置の補正用） */
+  leadingTrimSec: number;
 }
 
-export async function finalize(callId: string, mp3Bitrate: number): Promise<FinalizeResult | null> {
+export async function finalize(callId: string, mp3Bitrate: number, trimSilence = false): Promise<FinalizeResult | null> {
   const s = sessions.get(callId);
   if (!s) return null;
   await new Promise<void>((resolve) => s.stream.end(() => resolve()));
@@ -62,10 +64,12 @@ export async function finalize(callId: string, mp3Bitrate: number): Promise<Fina
   const { recordings } = getDirs();
   const rel = `${callId}.mp3`;
   const abs = path.join(recordings, rel);
-  const { durationSec } = await convertWebmToMp3(s.tmpPath, abs, mp3Bitrate);
+  // 無音カットが有効なら先頭無音の長さを先に測る（マーカー補正のため）
+  const leadingTrimSec = trimSilence ? await detectLeadingSilenceSec(s.tmpPath).catch(() => 0) : 0;
+  const { durationSec } = await convertWebmToMp3(s.tmpPath, abs, mp3Bitrate, trimSilence);
   const stat = await fs.stat(abs);
   await fs.unlink(s.tmpPath).catch(() => {});
-  return { path: rel, absPath: abs, bytes: stat.size, durationSec };
+  return { path: rel, absPath: abs, bytes: stat.size, durationSec, leadingTrimSec };
 }
 
 export async function deleteRecording(relPath: string): Promise<void> {

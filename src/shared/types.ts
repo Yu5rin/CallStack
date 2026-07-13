@@ -129,6 +129,8 @@ export interface RecordingSettings {
   mp3Bitrate: 64 | 96 | 128 | 192;
   autoTranscribe: boolean;
   retentionDays: number | null;
+  /** 録音の前後の無音を自動でカットする */
+  trimSilence?: boolean;
 }
 
 export interface TranscriptionSettings {
@@ -379,6 +381,7 @@ export const DEFAULT_SETTINGS: Settings = {
     mp3Bitrate: 96,
     autoTranscribe: true,
     retentionDays: 90,
+    trimSilence: true,
   },
   transcription: {
     model: 'small',

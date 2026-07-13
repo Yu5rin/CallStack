@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, Contact } from 'lucide-react';
+import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, Contact, Hand } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
 import { formatHMS } from './utils/format';
 import { AppEvent, Settings, CallRecord, getRecordTags } from '../shared/types';
@@ -400,12 +400,18 @@ export function HudApp() {
     </button>
   );
 
-  // ============ mini (200×32) ============
+  // 密集アイコンボタン（compact 用）
+  const dense = (on: boolean) =>
+    `hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${
+      on ? 'bg-brand-500 text-white' : 'bg-slate-700/70 text-slate-100 hover:bg-slate-600'
+    }`;
+
+  // ============ mini (240×34) ============
   if (size === 'mini') {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag flex h-8 w-full flex-none select-none items-center gap-1.5 rounded-xl px-2 text-slate-100 shadow-2xl ring-1 ring-white/10"
+          className="hud-drag flex h-[34px] w-full flex-none select-none items-center gap-1 rounded-xl px-2 text-slate-100 shadow-2xl ring-1 ring-white/10"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
           title={`${isMeeting ? '会議中' : '通話中'}${displayName ? ` — ${displayName}` : ''}\nダブルクリックでメイン窓`}
@@ -458,12 +464,12 @@ export function HudApp() {
     );
   }
 
-  // ============ compact (330×64) ============
+  // ============ compact (400×70) ============
   if (size === 'compact') {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag h-16 w-full flex-none select-none rounded-xl px-3 py-1.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
+          className="hud-drag h-[70px] w-full flex-none select-none rounded-xl px-3 py-1.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
           title="ダブルクリックでメイン窓を開く"
@@ -475,17 +481,45 @@ export function HudApp() {
             {recording && !paused && <MiniLevel level={level} />}
             {sizeButton}
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5">
+          <div className="mt-1 flex items-center gap-1.5">
             <div className="font-mono text-lg font-bold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
-            <div className="hud-no-drag ml-auto flex items-center gap-1">
-              {markerButton(true)}
-              {pauseButton}
-              {holdButton}
-              {editButton}
-              {liveToggleButton}
-              {infoButton}
-              {memoButton}
-              {endButton}
+            {/* アイコンのみで省スペース化し、終了ボタンまで必ず表示されるようにする */}
+            <div className="hud-no-drag ml-auto flex flex-none items-center gap-0.5">
+              <button onClick={handleMarker} className={dense(markerFlash)} title="マーカーを打つ">
+                <Bookmark size={13} strokeWidth={2.25} />
+                {markerCount > 0 && <span className="ml-0.5 text-[9px] font-semibold">{markerCount}</span>}
+              </button>
+              {recording && (
+                <button onClick={handleTogglePause} className={dense(paused)} title={paused ? '録音を再開' : '録音を一時停止'}>
+                  {paused ? <Play size={13} strokeWidth={2.25} /> : <Pause size={13} strokeWidth={2.25} />}
+                </button>
+              )}
+              {!isMeeting && (
+                <button onClick={handleToggleHold} className={dense(holding)} title={holding ? '保留を解除' : '保留にする'}>
+                  <Hand size={13} strokeWidth={2.25} />
+                </button>
+              )}
+              <button onClick={handleOpenEdit} className={dense(false)} title="記録の編集を開く">
+                <Pencil size={13} strokeWidth={2.25} />
+              </button>
+              {liveEnabled && (
+                <button
+                  onClick={handleToggleLive}
+                  className={`hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${liveVisible ? 'bg-sky-500 text-white' : 'bg-slate-700/70 text-slate-100 hover:bg-slate-600'}`}
+                  title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
+                >
+                  <AudioLines size={13} strokeWidth={2.25} />
+                </button>
+              )}
+              <button onClick={handleOpenInfo} className={dense(infoOpen)} title={isMeeting ? 'タイトル・参加者・タグ' : '連絡先・電話番号・タグ'}>
+                <Contact size={13} strokeWidth={2.25} />
+              </button>
+              <button onClick={handleOpenMemo} className={dense(memoOpen)} title="メモを編集">
+                <StickyNote size={13} strokeWidth={2.25} />
+              </button>
+              <button onClick={handleEnd} className="hud-no-drag inline-flex flex-none items-center rounded-md bg-red-500 p-1 text-white hover:bg-red-600" title="記録を終了">
+                <Square size={12} strokeWidth={2.5} fill="currentColor" />
+              </button>
             </div>
           </div>
         </div>
@@ -495,12 +529,12 @@ export function HudApp() {
     );
   }
 
-  // ============ full (400×118) ============
+  // ============ full (470×122) ============
   return (
     <div className="flex h-full w-full flex-col">
       <div
         className="hud-drag w-full flex-none select-none rounded-2xl px-4 py-2.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
-        style={{ ...containerStyle, height: 118 }}
+        style={{ ...containerStyle, height: 122 }}
         onDoubleClick={handleOpenMain}
         title="ダブルクリックでメイン窓を開く"
       >

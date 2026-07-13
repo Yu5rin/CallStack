@@ -510,7 +510,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                   checked={draft.hudSize === s}
                   onChange={() => update({ hudSize: s })}
                 />
-                {s === 'mini' ? 'ミニ (200×32)' : s === 'compact' ? 'コンパクト (330×64)' : 'フル (400×118)'}
+                {s === 'mini' ? 'ミニ (240×34)' : s === 'compact' ? 'コンパクト (400×70)' : 'フル (470×122)'}
               </label>
             ))}
           </div>
@@ -838,6 +838,19 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               />
               録音完了後に自動で文字起こし
             </label>
+          </Row>
+          <Row label="無音の自動カット">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={draft.recording.trimSilence ?? true}
+                onChange={(e) => updateRecording({ trimSilence: e.target.checked })}
+              />
+              録音の前後の無音を自動でカットする
+            </label>
+            <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+              録音終了時に先頭・末尾の無音を削除します（マーカー位置も自動で補正）
+            </span>
           </Row>
           <Row label="言語">
             <select

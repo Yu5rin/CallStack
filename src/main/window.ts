@@ -69,9 +69,9 @@ export function setBeforeCloseHandler(h: (() => 'close' | 'prevent') | null): vo
 }
 
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
-  mini:    { width: 200, height: 32 },
-  compact: { width: 330, height: 64 },
-  full:    { width: 400, height: 118 },
+  mini:    { width: 240, height: 34 },
+  compact: { width: 400, height: 70 },
+  full:    { width: 470, height: 122 },
 };
 
 const HUD_SIZE_ORDER: HudSize[] = ['mini', 'compact', 'full'];
@@ -142,16 +142,14 @@ export function createMainWindow(): BrowserWindow {
     wc.setBackgroundThrottling(false);
     wc.invalidate();
   };
-  mainWindow.on('show', wakeRenderer);
-  mainWindow.on('focus', wakeRenderer);
-  mainWindow.on('minimize', () => logInfo('window', 'main minimized'));
-  mainWindow.on('restore', () => {
-    logInfo('window', 'main restored');
+  // 復帰（最小化解除・トレイからの再表示）後の自己修復。トレイに格納すると
+  // hide()→show() で戻るため 'restore' が発火しない。'show' でも同じ回復処理を行う。
+  const healAfterAppear = () => {
     wakeRenderer();
     // invalidate で回復しない環境向けの最終手段: 1px リサイズで
     // コンポジタに新しいフレームの生成を強制する。
     setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized() || !mainWindow.isVisible()) return;
       const [w, h] = mainWindow.getSize();
       mainWindow.setSize(w, h + 1);
       mainWindow.setSize(w, h);
@@ -159,17 +157,21 @@ export function createMainWindow(): BrowserWindow {
     // 自己修復: 復帰後にレンダラが応答するか確認し、死んでいれば再読み込みする。
     // 記録データは main プロセス側にあるため失われない。
     setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized() || !mainWindow.isVisible()) return;
       const wc = mainWindow.webContents;
       let alive = false;
       wc.executeJavaScript('1').then(() => { alive = true; }).catch(() => {});
       setTimeout(() => {
         if (alive || !mainWindow || mainWindow.isDestroyed()) return;
-        logInfo('window', 'main renderer did not answer ping after restore — reloading');
+        logInfo('window', 'main renderer did not answer after appear — reloading');
         wc.reload();
       }, 4000);
     }, 500);
-  });
+  };
+  mainWindow.on('show', () => { logInfo('window', 'main shown'); healAfterAppear(); });
+  mainWindow.on('focus', wakeRenderer);
+  mainWindow.on('minimize', () => logInfo('window', 'main minimized'));
+  mainWindow.on('restore', () => { logInfo('window', 'main restored'); healAfterAppear(); });
 
   attachEditContextMenu(mainWindow);
   attachUnresponsiveRecovery(mainWindow, 'main');
