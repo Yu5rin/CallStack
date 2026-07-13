@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { app } from 'electron';
@@ -145,12 +146,15 @@ function runWhisper(
   cancelToken?: { cancelled: boolean; kill: (() => void) | null },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // スレッド数を CPU コア数に合わせて高速化（whisper.cpp 既定は最大4スレッド）
+    const threads = Math.max(1, Math.min(16, os.cpus()?.length ?? 4));
     const args = [
       '-m', model,
       '-f', wav,
       '-of', outBase,
       '-oj',                                  // output JSON with timestamps
       '-l', lang === 'auto' ? 'auto' : lang,
+      '-t', String(threads),                  // スレッド数（高速化）
       '-pp',                                  // print progress
     ];
     if (prompt && prompt.trim()) {

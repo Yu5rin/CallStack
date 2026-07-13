@@ -142,6 +142,10 @@ const api = {
   capture: {
     listWindows: (): Promise<CaptureWindow[]> => ipcRenderer.invoke('capture:list-windows'),
   },
+  teams: {
+    /** 現在開いているウィンドウ名の一覧（Teams 検知の調整・診断用） */
+    listWindows: (): Promise<string[]> => ipcRenderer.invoke('teams:list-windows'),
+  },
   audio: {
     pick: (): Promise<
       { canceled: true } | { canceled: false; path: string; name: string; sizeBytes: number; mtime: string }

@@ -210,7 +210,12 @@ npm run dist:installer
 | tiny   | 約 75 MB  | 速度優先 |
 | base   | 約 142 MB | 軽量 |
 | **small**  | **約 466 MB** | **バランス・推奨（日本語実用レベル）** |
+| **Kotoba-Whisper v2.0** | 約 1.5 GB | **日本語特化・高速（distil 系）。日本語会議におすすめ** |
 | medium | 約 1.5 GB | 高精度（CPU でも動作可、時間はかかる） |
+| large-v3-turbo | 約 1.6 GB | 最高精度・medium より高速 |
+
+> 高速化のヒント: 文字起こしは自動で CPU コア数ぶんのスレッドを使います。さらに速くしたい場合は
+> **Kotoba-Whisper v2.0**（日本語特化で high-speed）や **GPU (CUDA) 版**（設定の隠しコマンドで解放）が有効です。
 
 ダウンロードしたモデルは `%APPDATA%\CallStack\models\` に保存されます。
 

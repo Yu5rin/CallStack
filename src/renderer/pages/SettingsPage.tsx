@@ -356,6 +356,46 @@ function TermReplacementEditor({
   );
 }
 
+/** 現在のウィンドウ名を一覧表示（Teams 検知の調整・診断用） */
+function TeamsWindowProbe() {
+  const [wins, setWins] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const probe = async () => {
+    setLoading(true);
+    try {
+      setWins(await window.api.teams.listWindows());
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="w-full">
+      <button onClick={probe} disabled={loading} className={ghostBtn}>
+        {loading ? '取得中…' : '現在のウィンドウ名を表示'}
+      </button>
+      {wins && (
+        <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+          {wins.length === 0 ? (
+            <div className="text-slate-500 dark:text-slate-400">ウィンドウが取得できませんでした</div>
+          ) : (
+            <ul className="space-y-0.5">
+              {wins.map((w, i) => (
+                <li key={i} className={`truncate ${/teams/i.test(w) ? 'font-semibold text-brand-600 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300'}`} title={w}>
+                  {w}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Teams 会議/通話を開いた状態でこのボタンを押すと、その名前が一覧に出ます（青字は「teams」を含む候補）。
+            上の「Teams ウィンドウ判定語」を、会議中だけ現れるウィンドウ名に共通する語に合わせてください。
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
 const GPU_UNLOCK_KEY = 'callstack.gpuUnlocked';
 
@@ -809,6 +849,21 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
             Teams のウィンドウ名にこれらの語が含まれれば「会議」、なければ上の既定の種別として開始します（読点・カンマ区切り）
           </span>
+        </Row>
+        <Row label="Teams ウィンドウ判定語">
+          <input
+            value={draft.teamsWindowMatch ?? 'Microsoft Teams'}
+            onChange={(e) => update({ teamsWindowMatch: e.target.value })}
+            className={`w-full ${inputClass}`}
+            placeholder="Microsoft Teams"
+          />
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            この文字を含むウィンドウを Teams とみなします（部分一致）。検知されない場合は、下の一覧で実際の
+            Teams ウィンドウ名を確認し、共通する語（例: 「Teams」）に変更してください
+          </span>
+        </Row>
+        <Row label="ウィンドウ名を確認">
+          <TeamsWindowProbe />
         </Row>
       </section>
 

@@ -99,7 +99,7 @@ export interface ShortcutSettings {
   assignTag4: string;
 }
 
-export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3-turbo';
+export type WhisperModel = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3-turbo' | 'kotoba-v2';
 
 export type ThemePref = 'system' | 'light' | 'dark' | 'black';
 
@@ -210,6 +210,8 @@ export interface Settings {
   teamsDefaultKind?: RecordKind;
   /** 会議と判定するキーワード（読点・カンマ区切り）。既定「会議,ミーティング,meeting」 */
   teamsMeetingKeywords?: string;
+  /** Teams のウィンドウと判定する語（部分一致）。既定「Microsoft Teams」。環境に合わせて調整可 */
+  teamsWindowMatch?: string;
 }
 
 export type CallStartedEvent = { type: 'call:started'; record: CallRecord };
@@ -419,6 +421,7 @@ export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: st
   { id: 'tiny',   sizeMb: 75,   label: 'tiny (約 75MB, 速度優先)' },
   { id: 'base',   sizeMb: 142,  label: 'base (約 142MB)' },
   { id: 'small',  sizeMb: 466,  label: 'small (約 466MB, バランス・推奨)' },
+  { id: 'kotoba-v2', sizeMb: 1500, label: 'Kotoba-Whisper v2.0 (約 1.5GB, 日本語特化・高速・推奨)' },
   { id: 'medium', sizeMb: 1500, label: 'medium (約 1.5GB, 高精度)' },
   { id: 'large-v3-turbo', sizeMb: 1620, label: 'large-v3-turbo (約 1.6GB, 最高精度・medium より高速。会議向け)' },
 ];

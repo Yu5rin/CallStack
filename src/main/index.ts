@@ -59,6 +59,13 @@ import { checkForUpdate, checkOnStartup } from './updates';
 
 registerAppProtocolPrivilege();
 
+// Windows のネイティブ・オクルージョン検知は、最小化・遮蔽されたウィンドウの
+// 描画を停止させ、復帰時に画面が固まる原因になる（録音の有無に関わらず発生）。
+// この機能を無効化して、復帰時のフリーズを根本的に防ぐ。
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+// 遮蔽ウィンドウのバックグラウンド化（レンダラのスロットリング/停止）も抑止する。
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 const store = new Store();
 
 let tickInterval: NodeJS.Timeout | null = null;
@@ -279,13 +286,15 @@ let teamsAbsentCount = 0;
 /** 検知によって自動開始した記録の ID（手動開始の記録を勝手に終了しないため） */
 let teamsAutoCallId: string | null = null;
 let teamsNotifiedForSession = false;
+let teamsLastDiagLog = 0;
 
 /** ウィンドウタイトル群から Teams の会議/通話セッションを推定する */
 function findTeamsSession(
   titles: string[],
   s: Settings,
 ): { kind: RecordKind; title: string | undefined } | null {
-  const teams = titles.filter((t) => /Microsoft Teams/i.test(t));
+  const match = (s.teamsWindowMatch ?? 'Microsoft Teams').toLowerCase();
+  const teams = titles.filter((t) => t.toLowerCase().includes(match));
   if (teams.length === 0) return null;
   // メイン窓・各タブ（チャット/予定表/通話 一覧 等）は録音対象外
   const isBaseWindow = (t: string): boolean => {
@@ -313,7 +322,16 @@ async function pollTeamsDetection(): Promise<void> {
   } catch {
     return;
   }
-  const sess = findTeamsSession(sources.map((x) => x.name), s);
+  const titles = sources.map((x) => x.name).filter(Boolean);
+  const sess = findTeamsSession(titles, s);
+  if (!sess) {
+    // 検知できないときは、原因調査のため現在のウィンドウ名を app.log に記録（30秒に1回）
+    const now = Date.now();
+    if (now - teamsLastDiagLog > 30_000) {
+      teamsLastDiagLog = now;
+      logInfo('teams', `no match. match="${s.teamsWindowMatch ?? 'Microsoft Teams'}" windows=[${titles.join(' | ')}]`);
+    }
+  }
   if (sess) {
     teamsAbsentCount = 0;
     teamsPresentCount += 1;
@@ -980,6 +998,16 @@ function setupIpc(): void {
   });
 
   // ============ ライブ文字起こし（Vosk） ============
+  // 現在のウィンドウ名一覧（Teams 検知の調整・診断用）
+  ipcMain.handle('teams:list-windows', async (): Promise<string[]> => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+      return sources.map((s) => s.name).filter(Boolean);
+    } catch {
+      return [];
+    }
+  });
+
   ipcMain.handle('vosk:status', async () => ({
     engine: await isVoskEngineInstalled(),
     models: {
