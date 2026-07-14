@@ -202,9 +202,10 @@ function runWhisper(
       if (code === 0xC0000135 || code === -1073741515 || code === 3221225781) {
         reject(new Error(
           'whisper-cli.exe が依存 DLL を読み込めません (STATUS_DLL_NOT_FOUND, 0xC0000135)。\n' +
-          'whisper.cpp の Windows release zip (例: whisper-bin-x64.zip) を解凍した\n' +
-          '中身を丸ごと resources\\whisper\\ にコピーしてください。\n' +
-          'whisper.dll / ggml*.dll などが exe と同じフォルダに必要です。',
+          '設定の「whisper.cpp をダウンロード」をもう一度実行してください（今回の更新で\n' +
+          'exe と DLL を同じフォルダに正しく展開するよう修正しました）。\n' +
+          'それでも直らない場合は「Microsoft Visual C++ 再頒布可能パッケージ (x64)」を\n' +
+          'インストールしてください（msvcp140.dll / vcruntime140.dll が必要です）。',
         ));
         return;
       }

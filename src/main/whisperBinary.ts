@@ -154,39 +154,54 @@ export function downloadTo(url: string, dest: string, onProgress: (p: BinDownloa
   });
 }
 
-/** zip 内の実行ファイルを whisper-cli.exe に揃える（古いビルドは main.exe） */
+/**
+ * 展開結果を整える。zip の構造（サブフォルダ入り・exe と DLL が別階層など）に
+ * 関わらず、exe・DLL を含む全ファイルを dir 直下へ集約（フラット化）する。
+ * whisper-cli.exe は依存 DLL（whisper.dll / ggml*.dll / openblas.dll 等）を
+ * 自分と同じフォルダから読むため、これらが同居していないと 0xC0000135 になる。
+ */
 async function normalizeExecutable(dir: string): Promise<void> {
-  const cli = path.join(dir, 'whisper-cli.exe');
-  try {
-    await fs.access(cli);
-    return;
-  } catch { /* fall through */ }
-  // サブフォルダ展開のケースも走査する
-  const candidates: string[] = [];
+  // 1. サブフォルダも含め全ファイルを収集
+  const files: string[] = [];
   const walk = async (d: string, depth: number): Promise<void> => {
-    if (depth > 2) return;
+    if (depth > 5) return;
     for (const entry of await fs.readdir(d, { withFileTypes: true })) {
       const p = path.join(d, entry.name);
       if (entry.isDirectory()) await walk(p, depth + 1);
-      else if (/^(whisper-cli|main)\.exe$/i.test(entry.name)) candidates.push(p);
+      else files.push(p);
     }
   };
   await walk(dir, 0);
-  if (candidates.length === 0) {
-    throw new Error('zip 内に whisper-cli.exe / main.exe が見つかりませんでした');
+
+  // 2. すべて dir 直下へ移動（exe と DLL を必ず同居させる）
+  for (const f of files) {
+    const dest = path.join(dir, path.basename(f));
+    if (path.resolve(f) === path.resolve(dest)) continue;
+    await fs.rename(f, dest).catch(async () => {
+      // 別ドライブ等で rename できない場合はコピー
+      await fs.copyFile(f, dest).catch(() => {});
+    });
   }
-  // 実行ファイルがサブフォルダにある場合は、その階層の全ファイルを直下へ移動
-  const found = candidates.find((p) => /whisper-cli\.exe$/i.test(p)) ?? candidates[0];
-  const foundDir = path.dirname(found);
-  if (foundDir !== dir) {
-    for (const entry of await fs.readdir(foundDir)) {
-      await fs.rename(path.join(foundDir, entry), path.join(dir, entry)).catch(() => {});
+
+  // 3. 空になったサブフォルダを掃除
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      await fs.rm(path.join(dir, entry.name), { recursive: true, force: true }).catch(() => {});
     }
   }
+
+  // 4. whisper-cli.exe を用意（古いビルドは main.exe）
+  const cli = path.join(dir, 'whisper-cli.exe');
   try {
     await fs.access(cli);
   } catch {
-    await fs.copyFile(path.join(dir, 'main.exe'), cli);
+    const mainExe = path.join(dir, 'main.exe');
+    try {
+      await fs.access(mainExe);
+      await fs.copyFile(mainExe, cli);
+    } catch {
+      throw new Error('zip 内に whisper-cli.exe / main.exe が見つかりませんでした');
+    }
   }
 }
 
@@ -195,6 +210,8 @@ export async function downloadWhisperBinary(
   variant: BinaryVariant = 'cpu',
 ): Promise<void> {
   const dir = getUserWhisperDir(variant);
+  // 以前の展開物（別階層に散った DLL など）が残らないよう、まず初期化する
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   await fs.mkdir(dir, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `whisper-bin-${Date.now()}.zip`);
 
