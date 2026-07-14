@@ -29,16 +29,21 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPl
     localStorage.setItem(SPEED_KEY, String(speed));
   }, [speed]);
 
-  // 音量の初期値を復元（音声要素が用意できたら適用）
+  // 音量の初期値を復元（音声要素が用意できたら適用）。
+  // 未保存(null)のときは触らない（Number(null)===0 で無音になる不具合の対策）。
   const applyStoredVolume = (el: HTMLAudioElement | null) => {
     audioRef.current = el;
     if (!el) return;
-    const v = Number(localStorage.getItem(VOL_KEY));
-    if (!Number.isNaN(v) && v >= 0 && v <= 1) el.volume = v;
+    const raw = localStorage.getItem(VOL_KEY);
+    if (raw !== null && raw !== '') {
+      const v = Number(raw);
+      if (!Number.isNaN(v) && v > 0 && v <= 1) el.volume = v;
+    }
     el.playbackRate = speed;
   };
   const handleVolumeChange = (el: HTMLAudioElement) => {
-    localStorage.setItem(VOL_KEY, String(el.volume));
+    // ユーザー操作による音量のみ保存（0 は保存しない＝次回無音を防ぐ）
+    if (el.volume > 0) localStorage.setItem(VOL_KEY, String(el.volume));
   };
 
   useImperativeHandle(ref, () => ({
