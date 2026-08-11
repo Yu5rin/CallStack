@@ -55,6 +55,17 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* メイン窓のヘッダー（Windows では titleBarStyle:'hidden' + titleBarOverlay の
+   カスタムタイトルバーを兼ねる）。ヘッダー自体をドラッグ領域にし、ボタン等
+   クリック可能な要素だけ no-drag で除外する。 */
+.app-titlebar {
+  -webkit-app-region: drag;
+}
+
+.app-titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 html.black body { background-color: #000; }
 html.black .dark\:bg-slate-950 { background-color: #000; }
 html.black .dark\:bg-slate-900 { background-color: #000; }

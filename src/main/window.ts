@@ -1,6 +1,7 @@
-import { BrowserWindow, screen, app, Menu, MenuItemConstructorOptions, dialog } from 'electron';
+import { BrowserWindow, screen, app, Menu, MenuItemConstructorOptions, dialog, BrowserWindowConstructorOptions } from 'electron';
 import path from 'node:path';
 import type { HudSize } from '../shared/types';
+import { TITLEBAR_COLORS, TITLEBAR_HEIGHT, EffectiveTheme } from '../shared/titlebarTheme';
 import { logInfo } from './log';
 
 /**
@@ -68,6 +69,17 @@ export function setBeforeCloseHandler(h: (() => 'close' | 'prevent') | null): vo
   beforeCloseHandler = h;
 }
 
+/**
+ * メイン窓を新規作成する際、Windows のタイトルバーオーバーレイに使う実効テーマ
+ * （'system' 解決済み）を取得するための関数。index.ts から起動時に登録される。
+ * 登録前・未登録時は 'light' にフォールバックする。
+ */
+let themeProvider: (() => EffectiveTheme) | null = null;
+
+export function setThemeProvider(fn: () => EffectiveTheme): void {
+  themeProvider = fn;
+}
+
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
   mini:    { width: 240, height: 34 },
   compact: { width: 400, height: 70 },
@@ -96,7 +108,7 @@ export function createMainWindow(): BrowserWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
   }
-  mainWindow = new BrowserWindow({
+  const winOpts: BrowserWindowConstructorOptions = {
     width: 1100,
     height: 720,
     minWidth: 760,
@@ -112,7 +124,20 @@ export function createMainWindow(): BrowserWindow {
       sandbox: false,
       backgroundThrottling: false,
     },
-  });
+  };
+  // Windows のみ: ネイティブタイトルバーを、アプリのテーマ色に連動する
+  // カスタムオーバーレイ（最小化/最大化/閉じるボタンは Windows 側が描画）に
+  // 置き換える。macOS/Linux は titleBarOverlay 非対応のため、これまでどおり
+  // 何も指定しない標準のタイトルバーのままにする（既存動作を変えない）。
+  if (process.platform === 'win32') {
+    const effective = themeProvider ? themeProvider() : 'light';
+    winOpts.titleBarStyle = 'hidden';
+    winOpts.titleBarOverlay = {
+      ...TITLEBAR_COLORS[effective],
+      height: TITLEBAR_HEIGHT,
+    };
+  }
+  mainWindow = new BrowserWindow(winOpts);
 
   mainWindow.on('close', (e) => {
     // 録音中の終了確認などのため、index.ts 側のフックに判断を委ねる
@@ -187,6 +212,16 @@ export function createMainWindow(): BrowserWindow {
   }
 
   return mainWindow;
+}
+
+/**
+ * テーマ切り替え時に、開いているメイン窓の Windows タイトルバー色を
+ * 即座に更新する。Windows 以外では何もしない（titleBarOverlay 非対応）。
+ */
+export function updateTitleBarOverlay(effective: EffectiveTheme): void {
+  if (process.platform !== 'win32') return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setTitleBarOverlay(TITLEBAR_COLORS[effective]);
 }
 
 function bringToFront(win: BrowserWindow): void {

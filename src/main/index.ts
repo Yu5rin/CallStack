@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session, shell, powerSaveBlocker, WebContents, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, shell, powerSaveBlocker, WebContents, desktopCapturer, nativeTheme } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
@@ -31,7 +31,10 @@ import {
   hideLiveWindow,
   getLiveWindow,
   setLiveBoundsHandler,
+  setThemeProvider,
+  updateTitleBarOverlay,
 } from './window';
+import { resolveEffectiveTheme, EffectiveTheme } from '../shared/titlebarTheme';
 import { createTray, updateTray, destroyTray, TrayHandlers } from './tray';
 import { exportCsv, parseCsv } from './csv';
 import { notify } from './notifications';
@@ -571,6 +574,9 @@ const trayHandlers: TrayHandlers = {
     store.setSettings(next);
     broadcast('app-event', { type: 'settings:updated', settings: next });
     updateTray({ active: !!getActive(), today: todayStats() }, trayHandlers);
+    // トレイからのテーマ変更は renderer を経由しないため、ここで直接
+    // タイトルバー色を更新する（renderer からは別途 theme:changed が届く）
+    updateTitleBarOverlay(resolveEffectiveTheme(next.theme, nativeTheme.shouldUseDarkColors));
   },
   getTheme: () => store.getSettings().theme,
 };
@@ -618,6 +624,12 @@ function reRegisterShortcuts(): void {
 }
 
 function setupIpc(): void {
+  // renderer 側でテーマ（'system' 解決後の実効テーマ）が確定/変化するたびに
+  // 届く。Windows のタイトルバーオーバーレイ色をその場で更新する。
+  ipcMain.on('theme:changed', (_e, effective: EffectiveTheme) => {
+    updateTitleBarOverlay(effective);
+  });
+
   ipcMain.handle('calls:list', () => store.getCalls());
   ipcMain.handle('calls:getActive', () => store.getActiveCall());
   ipcMain.handle('calls:get', (_e, id: string) => store.getCall(id));
@@ -1898,6 +1910,11 @@ async function main() {
   setLiveBoundsHandler((bounds) => {
     store.setSettings({ ...store.getSettings(), liveWindowBounds: bounds });
   });
+
+  // Windows のタイトルバーオーバーレイの初期色を、保存済みのテーマ設定から
+  // 解決する（createMainWindow() より前に登録し、起動直後から正しい色で
+  // 表示されるようにする＝既定色が一瞬見えてから切り替わる状態を避ける）。
+  setThemeProvider(() => resolveEffectiveTheme(store.getSettings().theme, nativeTheme.shouldUseDarkColors));
 
   // Teams 検知が有効なら監視を開始
   if (store.getSettings().teamsDetectEnabled) startTeamsPolling();

@@ -3,6 +3,7 @@ import type {
   CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
   AudioSourceLabel, RecordingSourceConfig, VoskLiveModel,
 } from '../shared/types';
+import type { EffectiveTheme } from '../shared/titlebarTheme';
 
 type SaveAsResult =
   | { canceled: true }
@@ -198,6 +199,11 @@ const api = {
   util: {
     /** ドラッグ&ドロップされた File の絶対パスを取得（Electron 32+ で File.path が廃止されたため） */
     getFilePath: (file: File): string => webUtils.getPathForFile(file),
+  },
+  theme: {
+    /** 実効テーマ（'system' 解決後）が確定/変化するたびに呼ぶ。
+     *  Windows のタイトルバーオーバーレイ色を即座に更新する（fire-and-forget）。 */
+    changed: (effective: EffectiveTheme): void => ipcRenderer.send('theme:changed', effective),
   },
   onEvent: (cb: (e: AppEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: AppEvent) => cb(payload);

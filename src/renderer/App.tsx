@@ -43,6 +43,11 @@ function AppContent() {
   const toast = useToast();
   useTheme(settings?.theme);
 
+  // Windows では titleBarStyle:'hidden' + titleBarOverlay でヘッダーが
+  // タイトルバーを兼ねる（main/window.ts 参照）。最小化/最大化/閉じるボタンは
+  // OS が右端に描画するため、ヘッダー右側の内容と重ならないよう余白を空ける。
+  const isWinTitleBarOverlay = useMemo(() => navigator.userAgent.includes('Windows'), []);
+
   // 録音は専用の不可視ウィンドウで実行される。ここでは状態表示のみを行う。
   const [recState, setRecState] = useState({ recording: false, paused: false });
   const [recLevel, setRecLevel] = useState(0);
@@ -176,13 +181,17 @@ function AppContent() {
 
   return (
     <div className="flex h-full flex-col bg-slate-50 dark:bg-slate-950">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <nav className="flex gap-1">
+      <header
+        className={`app-titlebar flex h-[52px] flex-none items-center justify-between border-b border-slate-200 bg-white pl-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 ${
+          isWinTitleBarOverlay ? 'pr-[150px]' : 'pr-6'
+        }`}
+      >
+        <nav className="app-titlebar-no-drag flex gap-1">
           <TabButton active={page === 'list'} onClick={() => setPage('list')}>記録</TabButton>
           <TabButton active={page === 'stats'} onClick={() => setPage('stats')}>統計</TabButton>
           <TabButton active={page === 'trash'} onClick={() => setPage('trash')}>ゴミ箱</TabButton>
         </nav>
-        <div className="flex items-center gap-3">
+        <div className="app-titlebar-no-drag flex items-center gap-3">
           {active ? (
             <span
               className={`flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ring-1 ${
