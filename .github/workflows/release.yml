@@ -67,12 +67,6 @@ jobs:
           echo "zip_path=$($zip.FullName)" >> $env:GITHUB_OUTPUT
           echo "zip_name=$($zip.Name)" >> $env:GITHUB_OUTPUT
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: teltimestack-windows-zip
-          path: ${{ steps.locate.outputs.zip_path }}
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
