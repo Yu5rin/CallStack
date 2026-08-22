@@ -58,7 +58,11 @@ import {
   startLive as voskStartLive, stopLive as voskStopLive, feedPcm as voskFeedPcm,
   unloadModel as voskUnloadModel, shutdownVosk,
 } from './vosk';
-import { checkForUpdate, checkOnStartup } from './updates';
+import { checkForUpdate, checkOnStartup, UpdateCheckResult } from './updates';
+import {
+  isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir,
+  getSelfUpdateStatus,
+} from './selfUpdate';
 
 registerAppProtocolPrivilege();
 
@@ -764,6 +768,21 @@ function setupIpc(): void {
     await shell.openExternal(url ?? 'https://github.com/Yu5rin/CallStack/releases/latest');
     return true;
   });
+
+  // 手動で「今すぐ更新を確認して準備する」（設定画面のボタンから）
+  ipcMain.handle('update:prepareNow', async () => {
+    const r = await checkForUpdate();
+    if (!r.ok) return { ok: false, error: r.error };
+    if (!r.hasUpdate) return { ok: true, hasUpdate: false as const };
+    if (!isSelfUpdateSupported()) {
+      return { ok: false, error: 'この環境では自動更新に対応していません（開発モード、または Windows 以外）。' };
+    }
+    void prepareUpdateFlow(r);
+    return { ok: true, hasUpdate: true as const, version: r.latest };
+  });
+
+  ipcMain.handle('update:applyNow', () => applyUpdateNow());
+  ipcMain.handle('update:selfStatus', () => getSelfUpdateStatus());
 
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
     const filePath = await showSaveDialogRemembered(
@@ -1729,6 +1748,53 @@ function buildWeeklyReport(calls: CallRecord[]): string {
 }
 
 /**
+ * 更新のダウンロード→検証→展開までを行い、準備ができたら通知する。
+ * 失敗しても記録・録音には一切影響しない（ログに残すのみ）。
+ */
+async function prepareUpdateFlow(result: UpdateCheckResult): Promise<void> {
+  broadcast('app-event', { type: 'selfupdate:status', status: 'downloading', version: result.latest });
+  const ok = await prepareUpdate(result, (s) => {
+    broadcast('app-event', {
+      type: 'selfupdate:status',
+      status: s.status,
+      version: result.latest,
+      receivedBytes: s.receivedBytes,
+      totalBytes: s.totalBytes,
+      error: s.error,
+    });
+  });
+  if (ok) {
+    notify(
+      `アップデート v${result.latest} の準備ができました`,
+      'クリックで今すぐ再起動して適用します',
+      () => { void applyUpdateNow(); },
+    );
+  }
+}
+
+/**
+ * 準備済みの更新を適用する。記録中・録音の保存待ち中は拒否し、
+ * データを危険に晒さない（このアプリにおける「未保存の作業」の扱い）。
+ */
+async function applyUpdateNow(): Promise<{ ok: boolean; error?: string }> {
+  if (getActive()) {
+    return { ok: false, error: '記録が進行中です。記録を終了してから適用してください。' };
+  }
+  if (lastRecordingState.recording || finalizingCount > 0) {
+    return { ok: false, error: '録音の保存が完了するまでお待ちください。' };
+  }
+  try {
+    await applyPreparedUpdate();
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+  logInfo('app', 'applying self-update — quitting');
+  markForceQuit();
+  app.quit();
+  return { ok: true };
+}
+
+/**
  * 録音中にウィンドウを閉じようとしたときの保護。
  * 確認のうえ記録を終了し、録音の保存（finalize）を待ってから終了する。
  */
@@ -1944,11 +2010,18 @@ async function main() {
     }
   }, 4000);
 
-  // 起動時の更新チェック（通知型。取得できない環境では静かにスキップ）
+  // 前回の更新適用で残った .old フォルダがあれば掃除する（失敗しても次回また試みる）
+  setTimeout(() => { void cleanupOldInstallDir(); }, 2000);
+
+  // 起動時の更新チェック（既定は通知型。autoUpdateEnabled が ON なら自動で
+  // ダウンロード・検証・展開まで済ませ、適用（再起動）だけユーザー操作にする）
   if (store.getSettings().checkUpdatesOnStartup) {
     setTimeout(() => {
       void checkOnStartup().then((r) => {
-        if (r?.hasUpdate) {
+        if (!r?.hasUpdate) return;
+        if (store.getSettings().autoUpdateEnabled && isSelfUpdateSupported()) {
+          void prepareUpdateFlow(r);
+        } else {
           notify(
             `新しいバージョン v${r.latest} があります`,
             `現在 v${r.current} — クリックでダウンロードページを開く`,

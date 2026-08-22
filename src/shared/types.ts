@@ -180,6 +180,12 @@ export interface Settings {
   launchAtLogin: boolean;
   /** 起動時に新バージョンを確認して通知する */
   checkUpdatesOnStartup: boolean;
+  /**
+   * 新バージョンを検知したら自動でダウンロード・検証・展開まで済ませ、
+   * 次回の適用（再起動）をワンクリックにする（Windows限定・実験的）。
+   * OFF の場合は従来どおり通知のみ（リリースページを開くだけ）。
+   */
+  autoUpdateEnabled?: boolean;
   /** 初回セットアップウィザードを完了したか */
   onboardingDone: boolean;
   confirmCallDelete: boolean;
@@ -304,6 +310,19 @@ export type ModelDownloadEvent = {
   done: boolean;
   error?: string;
 };
+/**
+ * 自動更新（ダウンロード→検証→展開→適用）の進行状況。
+ * 'ready' になったら applyNow() で再起動・適用できる。
+ */
+export type SelfUpdateStatusEvent = {
+  type: 'selfupdate:status';
+  status: 'idle' | 'downloading' | 'verifying' | 'extracting' | 'ready' | 'error';
+  version?: string;
+  receivedBytes?: number;
+  totalBytes?: number | null;
+  error?: string;
+};
+
 export type NavigateEvent = { type: 'navigate'; page: 'list' | 'stats' | 'settings' };
 /** 指定した記録の編集ダイアログを開く（HUD の編集ボタンなどから） */
 export type EditRecordEvent = { type: 'edit:record'; callId: string };
@@ -331,6 +350,7 @@ export type AppEvent =
   | MarkerAddedEvent
   | HudHoverEvent
   | ModelDownloadEvent
+  | SelfUpdateStatusEvent
   | WhisperBinDownloadEvent
   | NavigateEvent
   | EditRecordEvent
@@ -395,6 +415,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimizeToTray: false,
   launchAtLogin: false,
   checkUpdatesOnStartup: true,
+  autoUpdateEnabled: false,
   onboardingDone: false,
   confirmCallDelete: true,
   theme: 'system',

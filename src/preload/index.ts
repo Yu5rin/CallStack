@@ -49,6 +49,13 @@ const api = {
       ok: boolean; current: string; latest?: string; hasUpdate?: boolean; url?: string; error?: string;
     }> => ipcRenderer.invoke('update:check'),
     openReleases: (url?: string): Promise<boolean> => ipcRenderer.invoke('update:open-releases', url),
+    /** 今すぐ更新を確認し、あれば自動でダウンロード・検証・展開まで進める（Windows限定） */
+    prepareNow: (): Promise<{ ok: boolean; hasUpdate?: boolean; version?: string; error?: string }> =>
+      ipcRenderer.invoke('update:prepareNow'),
+    /** 準備済みの更新を適用して再起動する（記録中は拒否される） */
+    applyNow: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('update:applyNow'),
+    /** 自己更新の現在の進行状況 */
+    selfStatus: (): Promise<{ status: string; version: string | null }> => ipcRenderer.invoke('update:selfStatus'),
   },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),

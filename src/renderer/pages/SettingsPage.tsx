@@ -1096,6 +1096,8 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         <AboutSection
           checkOnStartup={draft.checkUpdatesOnStartup}
           onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
+          autoUpdateEnabled={draft.autoUpdateEnabled ?? false}
+          onToggleAutoUpdate={(v) => update({ autoUpdateEnabled: v })}
         />
       </section>
 
@@ -1136,17 +1138,32 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 function AboutSection({
   checkOnStartup,
   onToggleCheckOnStartup,
+  autoUpdateEnabled,
+  onToggleAutoUpdate,
 }: {
   checkOnStartup: boolean;
   onToggleCheckOnStartup: (v: boolean) => void;
+  autoUpdateEnabled: boolean;
+  onToggleAutoUpdate: (v: boolean) => void;
 }) {
   const [info, setInfo] = useState<{ version: string; logPath: string; dataDir: string } | null>(null);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [updateUrl, setUpdateUrl] = useState<string | null>(null);
+  // 自己更新（ダウンロード→検証→展開→適用）の進行状況
+  const [selfStatus, setSelfStatus] = useState<{ status: string; version?: string; pct?: number | null; error?: string }>({ status: 'idle' });
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
     window.api.app.info().then(setInfo).catch(() => {});
+    // 画面を開き直した場合に、進行中/準備済みの更新状態を復元する
+    window.api.update.selfStatus().then((s) => setSelfStatus({ status: s.status, version: s.version ?? undefined })).catch(() => {});
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type !== 'selfupdate:status') return;
+      const pct = e.totalBytes ? Math.round(((e.receivedBytes ?? 0) / e.totalBytes) * 100) : null;
+      setSelfStatus({ status: e.status, version: e.version, pct, error: e.error });
+    });
+    return () => off();
   }, []);
 
   const check = async () => {
@@ -1167,6 +1184,31 @@ function AboutSection({
     } finally {
       setChecking(false);
     }
+  };
+
+  const prepareNow = async () => {
+    setApplyError(null);
+    setSelfStatus({ status: 'downloading' });
+    const r = await window.api.update.prepareNow();
+    if (!r.ok) setSelfStatus({ status: 'error', error: r.error });
+    else if (!r.hasUpdate) setSelfStatus({ status: 'idle' });
+    // hasUpdate=true の場合、以降の進行状況は selfupdate:status イベントで更新される
+  };
+
+  const applyNow = async () => {
+    setApplyError(null);
+    const r = await window.api.update.applyNow();
+    if (!r.ok) setApplyError(r.error ?? '適用に失敗しました');
+    // 成功時はアプリが終了するため、ここには戻ってこない
+  };
+
+  const selfStatusLabel: Record<string, string> = {
+    idle: '',
+    downloading: 'ダウンロード中…',
+    verifying: '検証中…',
+    extracting: '展開中…',
+    ready: '適用の準備ができました',
+    error: 'エラー',
   };
 
   return (
@@ -1203,6 +1245,48 @@ function AboutSection({
           />
           起動時に新しいバージョンを確認して通知する
         </label>
+      </Row>
+      <Row label="自動更新（実験的・Windows限定）">
+        <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={autoUpdateEnabled}
+            disabled={!checkOnStartup}
+            onChange={(e) => onToggleAutoUpdate(e.target.checked)}
+          />
+          新しいバージョンを自動でダウンロード・検証・展開まで済ませる
+        </label>
+        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          OFF の場合は従来どおり通知のみです。ON でも実際にアプリを再起動して適用するのは、
+          下のボタンを押すか通知をクリックしたときだけです（記録中は適用されません）。
+        </span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={prepareNow}
+            disabled={selfStatus.status === 'downloading' || selfStatus.status === 'verifying' || selfStatus.status === 'extracting'}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            今すぐ更新を確認して準備
+          </button>
+          {selfStatus.status === 'ready' && (
+            <button
+              onClick={applyNow}
+              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+            >
+              v{selfStatus.version} を適用して再起動
+            </button>
+          )}
+          {selfStatus.status !== 'idle' && (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {selfStatusLabel[selfStatus.status] ?? selfStatus.status}
+              {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
+            </span>
+          )}
+        </div>
+        {selfStatus.status === 'error' && selfStatus.error && (
+          <div className="mt-1 text-xs text-red-600 dark:text-red-400">{selfStatus.error}</div>
+        )}
+        {applyError && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{applyError}</div>}
       </Row>
       <Row label="フォルダ">
         <div className="flex flex-wrap gap-2">
