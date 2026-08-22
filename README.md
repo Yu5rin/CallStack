@@ -305,4 +305,8 @@ Electron 33 + React 18 + TypeScript 5 + Vite 5 + Tailwind CSS 3 + Recharts + day
 
 ## ライセンス
 
-MIT
+MIT License — 詳細は [LICENSE](./LICENSE) を参照してください。
+
+依存ライブラリ（React・Electron・ffmpeg 等）はそれぞれのライセンスに従います。
+whisper.cpp・Vosk はアプリが初回セットアップ時に別途ダウンロードする外部バイナリで、
+このリポジトリには同梱していません。
