@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CallRecord, RecordKind, Settings } from '../../shared/types';
 import { FileAudio, FolderOpen, Phone, Users } from 'lucide-react';
 import { toDatetimeLocalValue, fromDatetimeLocalValue } from '../utils/format';
+import { toUserMessage } from '../utils/errorMessage';
 
 export interface ImportFile {
   path: string;
@@ -60,11 +61,13 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
         autoTranscribe,
       });
       if (!r.ok) {
-        setError(r.error);
+        setError(toUserMessage(r.error));
         return;
       }
       onImported(r.record);
       onClose();
+    } catch (err) {
+      setError(toUserMessage(err));
     } finally {
       setBusy(false);
     }

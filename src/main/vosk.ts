@@ -3,7 +3,7 @@ import path from 'node:path';
 import { app, utilityProcess, UtilityProcess } from 'electron';
 import extract from 'extract-zip';
 import { logInfo } from './log';
-import { downloadTo, fetchJson, BinDownloadProgress } from './whisperBinary';
+import { downloadTo, fetchJson, swapStagingDir, BinDownloadProgress } from './whisperBinary';
 
 /**
  * Vosk によるライブ文字起こし。
@@ -107,11 +107,11 @@ export async function downloadVosk(
 ): Promise<void> {
   const isEngine = what === 'engine' || what === 'engine-legacy';
   const dir = isEngine ? getVoskDir() : getVoskModelDir(what as VoskModelId);
-  if (isEngine) {
-    // バージョン違いの DLL が混在しないよう、エンジンは常に入れ直す
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-  await fs.mkdir(dir, { recursive: true });
+  // 既存の作業ディレクトリはダウンロード完了・検証後にのみ置き換える。
+  // オフライン等でダウンロードに失敗しても、既存の動作中インストールを壊さない。
+  const staging = `${dir}.staging`;
+  await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+  await fs.mkdir(staging, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `vosk-${Date.now()}.zip`);
 
   let urls: string[];
@@ -149,12 +149,27 @@ export async function downloadVosk(
     }
   }
   if (!ok) {
+    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    await fs.unlink(tmpZip).catch(() => {});
     throw new Error(`Vosk のダウンロードに失敗しました (${lastError?.message ?? '不明'})`);
   }
   try {
     onProgress({ receivedBytes: 0, totalBytes: null, step: 'extract' });
-    await extract(tmpZip, { dir });
+    await extract(tmpZip, { dir: staging });
+    // 展開結果を検証してから既存ディレクトリと入れ替える
+    // （半端に展開されたものを「配置済み」と誤検出させないため）
+    if (isEngine) {
+      const dll = await findDll(staging);
+      if (!dll) throw new Error('zip 内に libvosk.dll が見つかりませんでした');
+    } else {
+      const root = await findModelRoot(staging);
+      if (!root) throw new Error('zip 内にモデルデータ（am フォルダ）が見つかりませんでした');
+    }
+    await swapStagingDir(dir, staging);
     logInfo('vosk', `extracted to ${dir}`);
+  } catch (err) {
+    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw err;
   } finally {
     await fs.unlink(tmpZip).catch(() => {});
   }

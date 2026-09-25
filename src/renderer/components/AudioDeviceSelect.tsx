@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { toUserMessage } from '../utils/errorMessage';
 
 interface Props {
   value: string | null;
@@ -17,7 +18,7 @@ export function AudioDeviceSelect({ value, onChange }: Props) {
       setDevices(inputs);
       setNeedPermission(inputs.some((d) => !d.label));
     } catch (err) {
-      setError((err as Error).message);
+      setError(toUserMessage(err));
     }
   };
 
@@ -34,7 +35,7 @@ export function AudioDeviceSelect({ value, onChange }: Props) {
       stream.getTracks().forEach((t) => t.stop());
       await enumerate();
     } catch (err) {
-      setError((err as Error).message);
+      setError(toUserMessage(err));
     }
   };
 

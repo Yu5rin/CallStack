@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CallRecord, RecordKind, RecordingSourceConfig, Settings } from '../../shared/types';
-import { Phone, Users, Mic, Volume2, RefreshCw, AppWindow, Circle, Play } from 'lucide-react';
+import { Phone, Users, Mic, Volume2, RefreshCw, AppWindow, Circle, Play, AlertTriangle } from 'lucide-react';
 import { AudioDeviceSelect } from './AudioDeviceSelect';
+import { toUserMessage } from '../utils/errorMessage';
 
 interface CaptureWindow {
   id: string;
@@ -59,6 +60,7 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
   const [windows, setWindows] = useState<CaptureWindow[] | null>(null);
   const [windowId, setWindowId] = useState<string | null>(null);
   const [loadingWindows, setLoadingWindows] = useState(false);
+  const [windowsError, setWindowsError] = useState<string | null>(null);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
 
   const recordingEnabled = settings.recording.enabled;
@@ -73,10 +75,13 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
 
   const loadWindows = async () => {
     setLoadingWindows(true);
+    setWindowsError(null);
     try {
       const list = await window.api.capture.listWindows();
       setWindows(list);
       if (windowId && !list.some((w) => w.id === windowId)) setWindowId(null);
+    } catch (err) {
+      setWindowsError(toUserMessage(err, 'ウィンドウの一覧を取得できませんでした'));
     } finally {
       setLoadingWindows(false);
     }
@@ -266,6 +271,12 @@ export function StartRecordDialog({ initialKind, settings, calls, onCancel, onSt
                     {loadingWindows ? '更新中…' : <><RefreshCw size={11} className="mr-0.5 inline align-[-1px]" />更新</>}
                   </button>
                 </div>
+                {windowsError && (
+                  <div className="mb-2 flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                    <AlertTriangle size={13} className="shrink-0" />
+                    {windowsError}
+                  </div>
+                )}
                 <div className="grid max-h-[46vh] grid-cols-2 gap-2 overflow-auto pr-1">
                   {(windows ?? []).map((w) => (
                     <button

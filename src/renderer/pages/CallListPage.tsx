@@ -11,6 +11,7 @@ import { deleteCallWithConfirm } from '../hooks/useCalls';
 import { formatDateTime, formatHMS } from '../utils/format';
 import { highlight } from '../utils/highlight';
 import { useToast } from '../components/Toast';
+import { toUserMessage } from '../utils/errorMessage';
 
 interface Props {
   calls: CallRecord[];
@@ -349,6 +350,7 @@ export function CallListPage({
         const r = await window.api.csv.importText(text);
         setImportResult(r.result);
       } else if (name.endsWith('.json')) {
+        if (!window.confirm('JSON ファイルから復元します。現在のデータは復元前に自動バックアップされます。続行しますか？')) return;
         const text = await file.text();
         const json = JSON.parse(text);
         const r = await window.api.backup.restoreJson(json);
@@ -363,7 +365,7 @@ export function CallListPage({
         setDropError(`未対応のファイル形式: ${file.name}（.csv / .json / 音声ファイルに対応）`);
       }
     } catch (err) {
-      setDropError((err as Error).message);
+      setDropError(toUserMessage(err));
     }
   };
 
@@ -1004,7 +1006,7 @@ export function CallListPage({
       )}
 
       {dropError && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 shadow-lg dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+        <div className="fixed bottom-14 right-4 z-50 max-w-sm rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 shadow-lg dark:border-red-700 dark:bg-red-950 dark:text-red-200">
           {dropError}
           <button
             onClick={() => setDropError(null)}

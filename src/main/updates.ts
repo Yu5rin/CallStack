@@ -1,5 +1,9 @@
 import { app, net } from 'electron';
 import { logInfo } from './log';
+import { describeNetError } from './whisperBinary';
+
+/** 更新確認 API の全体タイムアウト（応答が来ないまま「確認中…」に固まるのを防ぐ） */
+const CHECK_TIMEOUT_MS = 15_000;
 
 /**
  * GitHub Releases を使った軽量な更新チェック（通知型）。
@@ -43,13 +47,25 @@ export function checkForUpdate(): Promise<UpdateCheckResult> {
   return new Promise((resolve) => {
     const req = net.request({ url: LATEST_API, method: 'GET', redirect: 'follow' });
     req.setHeader('Accept', 'application/vnd.github+json');
+    let settled = false;
+    const finish = (result: UpdateCheckResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    // 応答が来ないまま「確認中…」に固まらないよう、全体タイムアウトを設ける
+    const timer = setTimeout(() => {
+      req.abort();
+      finish({ ok: false, current, error: describeNetError(new Error('timeout')) });
+    }, CHECK_TIMEOUT_MS);
     req.on('response', (res) => {
       let body = '';
       res.on('data', (c: Buffer) => { body += c.toString(); });
       res.on('end', () => {
         if (res.statusCode !== 200) {
           // 非公開リポジトリやオフラインでは取得できない。エラーは静かに返す。
-          resolve({ ok: false, current, error: `HTTP ${res.statusCode}` });
+          finish({ ok: false, current, error: describeNetError(new Error(`HTTP ${res.statusCode}`), res.statusCode) });
           return;
         }
         try {
@@ -62,7 +78,7 @@ export function checkForUpdate(): Promise<UpdateCheckResult> {
           // Windows 用 zip 配布アセット（例: CallStack-2.6.0-win-x64.zip）を探す
           const asset = (json.assets ?? []).find((a) => /-win-x64\.zip$/i.test(a.name));
           const digestMatch = asset?.digest?.match(/^sha256:([0-9a-f]{64})$/i);
-          resolve({
+          finish({
             ok: true,
             current,
             latest: latest.replace(/^v/, ''),
@@ -72,12 +88,13 @@ export function checkForUpdate(): Promise<UpdateCheckResult> {
             assetSha256: digestMatch ? digestMatch[1].toLowerCase() : undefined,
           });
         } catch (err) {
-          resolve({ ok: false, current, error: (err as Error).message });
+          finish({ ok: false, current, error: describeNetError(err) });
         }
       });
-      res.on('error', (err: Error) => resolve({ ok: false, current, error: err.message }));
+      res.on('aborted', () => finish({ ok: false, current, error: describeNetError(new Error('aborted')) }));
+      res.on('error', (err: Error) => finish({ ok: false, current, error: describeNetError(err) }));
     });
-    req.on('error', (err) => resolve({ ok: false, current, error: err.message }));
+    req.on('error', (err) => finish({ ok: false, current, error: describeNetError(err) }));
     req.end();
   });
 }

@@ -202,23 +202,28 @@ export function parseCsv(raw: string): ParsedRow[] {
       continue;
     }
     const endTime = endIdx >= 0 ? cols[endIdx]?.trim() : '';
+    // end_time が空の行は「進行中の記録」として取り込むと、インポート後に
+    // 幽霊の進行中記録（getActiveCall が拾ってしまう）が生まれるため、
+    // 取り込み対象外としてエラー扱いで報告する。
+    if (!endTime) {
+      out.push({ rowNumber: r + 1, error: 'end_time が空です（進行中の記録は取り込めません）' });
+      continue;
+    }
     let endVal: string | null = null;
     let durationSec: number | null = null;
-    if (endTime) {
-      if (isNaN(new Date(endTime).getTime())) {
-        out.push({ rowNumber: r + 1, error: `end_time が不正: ${endTime}` });
-        continue;
-      }
-      if (new Date(endTime).getTime() < new Date(startTime).getTime()) {
-        out.push({ rowNumber: r + 1, error: `end_time が start_time より前です` });
-        continue;
-      }
-      endVal = new Date(endTime).toISOString();
-      durationSec = Math.max(
-        0,
-        Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000),
-      );
+    if (isNaN(new Date(endTime).getTime())) {
+      out.push({ rowNumber: r + 1, error: `end_time が不正: ${endTime}` });
+      continue;
     }
+    if (new Date(endTime).getTime() < new Date(startTime).getTime()) {
+      out.push({ rowNumber: r + 1, error: `end_time が start_time より前です` });
+      continue;
+    }
+    endVal = new Date(endTime).toISOString();
+    durationSec = Math.max(
+      0,
+      Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000),
+    );
     const holdSec = holdIdx >= 0 ? Number(cols[holdIdx] ?? 0) : 0;
     const memo = memoIdx >= 0 ? (cols[memoIdx] ?? '') : '';
     if (memo.length > 10000) {

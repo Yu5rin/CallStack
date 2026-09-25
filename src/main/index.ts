@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, session, shell, powerSaveBlocker, WebContents, desktopCapturer, nativeTheme } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
 import { Store } from './store';
@@ -115,6 +115,40 @@ function updatePowerBlocker(): void {
   }
 }
 
+// ============ クラッシュ復旧用ハートビート（F15） ============
+// 記録中はこのファイルへ定期的に現在時刻を書き込んでおき、クラッシュ・
+// 強制終了・停電等で異常終了した場合に、次回起動時に「実際に記録が
+// 生きていた最終時刻」を推定するために使う。
+let heartbeatTimer: NodeJS.Timeout | null = null;
+
+function getHeartbeatPath(): string {
+  return path.join(app.getPath('userData'), 'heartbeat.json');
+}
+
+function writeHeartbeat(callId: string): void {
+  try {
+    writeFileSync(getHeartbeatPath(), JSON.stringify({ callId, at: new Date().toISOString() }), 'utf-8');
+  } catch (err) {
+    console.error('[heartbeat] write failed:', err);
+  }
+}
+
+function startHeartbeat(callId: string): void {
+  stopHeartbeat();
+  writeHeartbeat(callId);
+  heartbeatTimer = setInterval(() => writeHeartbeat(callId), 30_000);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  try {
+    unlinkSync(getHeartbeatPath());
+  } catch { /* 存在しない場合は無視 */ }
+}
+
 function getActive(): CallRecord | null {
   return store.getActiveCall();
 }
@@ -188,6 +222,7 @@ function startCall(kind: RecordKind = 'call', meta?: Partial<CallRecord>): CallR
   };
   store.addCall(rec);
   longCallAlertFired = false;
+  startHeartbeat(rec.id);
   logInfo('call', `started ${kind} ${rec.id}`);
   const settings = store.getSettings();
   createHudWindow(settings.hudPosition, settings.hudSize);
@@ -212,6 +247,7 @@ async function endCall(): Promise<CallRecord | null> {
     Math.round((new Date(endTime).getTime() - new Date(active.startTime).getTime()) / 1000),
   );
   const updated = store.updateCall(active.id, { endTime, durationSec });
+  stopHeartbeat();
 
   // Wait briefly for recording to finalize (HUD pushes last chunk + finalize)
   // Then ask the renderer to stop and provide chunks.
@@ -333,11 +369,15 @@ async function pollTeamsDetection(): Promise<void> {
   const titles = sources.map((x) => x.name).filter(Boolean);
   const sess = findTeamsSession(titles, s);
   if (!sess) {
-    // 検知できないときは、原因調査のため現在のウィンドウ名を app.log に記録（30秒に1回）
+    // 検知できないときは、原因調査のためログを残す（30秒に1回）。
+    // ただし全ウィンドウ名にはメールの件名やブラウザタブ等の個人情報が含まれ得るため、
+    // ウィンドウ数と Teams 関連（設定した照合文字列を含む）のタイトルのみを記録する。
     const now = Date.now();
     if (now - teamsLastDiagLog > 30_000) {
       teamsLastDiagLog = now;
-      logInfo('teams', `no match. match="${s.teamsWindowMatch ?? 'Microsoft Teams'}" windows=[${titles.join(' | ')}]`);
+      const match = (s.teamsWindowMatch ?? 'Microsoft Teams').toLowerCase();
+      const teamsLike = titles.filter((t) => t.toLowerCase().includes('teams') || t.toLowerCase().includes(match));
+      logInfo('teams', `no match. match="${s.teamsWindowMatch ?? 'Microsoft Teams'}" windowCount=${titles.length} teamsLike=[${teamsLike.join(' | ')}]`);
     }
   }
   if (sess) {
@@ -628,6 +668,34 @@ function reRegisterShortcuts(): void {
   }
 }
 
+/**
+ * settings の変更に追随して必要な副作用（ショートカット再登録・トレイ設定・
+ * ライブ字幕ウィンドウ・Teams 検知ポーリング等）を反映する。
+ * settings:update ハンドラと、バックアップ復元（restoreFromJson）後の
+ * 反映処理とで共有する（S1: 復元時にも設定変更と同じ副作用を適用する）。
+ */
+function applySettingsSideEffects(prev: Settings, next: Settings): void {
+  reRegisterShortcuts();
+  setMinimizeToTray(next.minimizeToTray);
+  if (prev.hudSize !== next.hudSize) setHudSize(next.hudSize);
+  if (prev.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next.launchAtLogin);
+  // ライブ文字起こしを無効化したらモデルをメモリから解放（セッション中は保持）
+  if (prev.transcription.liveEnabled && !next.transcription.liveEnabled && !liveSession) {
+    voskUnloadModel();
+  }
+  broadcast('app-event', { type: 'settings:updated', settings: next });
+  // 表示切替・ライブ有効切替に追随してライブ字幕ウィンドウを出し入れ
+  if (prev.hudLiveVisible !== next.hudLiveVisible
+    || prev.transcription.liveEnabled !== next.transcription.liveEnabled) {
+    updateLiveWindow();
+  }
+  // Teams 検知の ON/OFF に追随
+  if (prev.teamsDetectEnabled !== next.teamsDetectEnabled) {
+    if (next.teamsDetectEnabled) startTeamsPolling();
+    else stopTeamsPolling();
+  }
+}
+
 function setupIpc(): void {
   // renderer 側でテーマ（'system' 解決後の実効テーマ）が確定/変化するたびに
   // 届く。Windows のタイトルバーオーバーレイ色をその場で更新する。
@@ -649,13 +717,35 @@ function setupIpc(): void {
     addMarkerTo(callId, label));
 
   ipcMain.handle('calls:update', (_e, id: string, patch: Partial<CallRecord>) => {
-    const updated = store.updateCall(id, patch);
+    const current = store.getCall(id);
+    const safePatch: Partial<CallRecord> = { ...patch };
+    // id はレンダラから変更させない（別レコードの上書きを防ぐ）
+    delete (safePatch as { id?: string }).id;
+    // audio（録音ファイルパス）はレンダラの編集対象外。patch に含まれていても
+    // 既存の audio をそのまま維持する（S1: 不正な audio.path への書き換え防止）。
+    if ('audio' in safePatch) {
+      safePatch.audio = current?.audio;
+    }
+    // F2: 既に終了済みの記録に対して、編集ダイアログ等から endTime: null/undefined が
+    // 明示的に送られてきても、無視して既存の終了時刻・通話時間を維持する
+    // （通話終了後に開かれていた編集ダイアログの保存で「進行中」へ戻ってしまう問題）。
+    if (current?.endTime && ('endTime' in safePatch) && (safePatch.endTime === null || safePatch.endTime === undefined)) {
+      delete safePatch.endTime;
+      safePatch.durationSec = current.durationSec;
+    }
+    const updated = store.updateCall(id, safePatch);
     if (updated) broadcast('app-event', { type: 'call:updated', record: updated });
     return updated;
   });
 
   // 削除はまずゴミ箱へ（ソフトデリート）。録音ファイルは完全削除まで保持する。
   ipcMain.handle('calls:delete', async (_e, id: string) => {
+    // 進行中の記録を削除しようとした場合、先に正しく終了させる（録音停止・
+    // HUD クローズ・finalize）。そうしないと HUD/録音が動いたまま、終了
+    // ショートカットが効かない状態が残ってしまう（F3）。
+    if (getActive()?.id === id) {
+      await endCall();
+    }
     // ゴミ箱の記録は文字起こし対象外。進行中・待機中なら中止する。
     if (isTranscriptionActive(id)) cancelTranscription(id);
     const updated = store.updateCall(id, { deletedAt: new Date().toISOString() });
@@ -725,25 +815,7 @@ function setupIpc(): void {
   ipcMain.handle('settings:update', (_e, next: Settings) => {
     const prev = store.getSettings();
     store.setSettings(next);
-    reRegisterShortcuts();
-    setMinimizeToTray(next.minimizeToTray);
-    if (prev.hudSize !== next.hudSize) setHudSize(next.hudSize);
-    if (prev.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next.launchAtLogin);
-    // ライブ文字起こしを無効化したらモデルをメモリから解放（セッション中は保持）
-    if (prev.transcription.liveEnabled && !next.transcription.liveEnabled && !liveSession) {
-      voskUnloadModel();
-    }
-    broadcast('app-event', { type: 'settings:updated', settings: next });
-    // 表示切替・ライブ有効切替に追随してライブ字幕ウィンドウを出し入れ
-    if (prev.hudLiveVisible !== next.hudLiveVisible
-      || prev.transcription.liveEnabled !== next.transcription.liveEnabled) {
-      updateLiveWindow();
-    }
-    // Teams 検知の ON/OFF に追随
-    if (prev.teamsDetectEnabled !== next.teamsDetectEnabled) {
-      if (next.teamsDetectEnabled) startTeamsPolling();
-      else stopTeamsPolling();
-    }
+    applySettingsSideEffects(prev, next);
     return next;
   });
 
@@ -1391,25 +1463,29 @@ function setupIpc(): void {
     if (result.canceled || result.filePaths.length === 0) return { canceled: true };
     const raw = await fs.readFile(result.filePaths[0], 'utf-8');
     const json = JSON.parse(raw);
+    const prevSettings = store.getSettings();
     const { calls } = await store.restoreFromJson(json);
     const backupPath = path.join(
       app.getPath('userData'),
       'backups',
       `data-${localDate(new Date()).replace(/-/g, '')}-pre-restore.json`,
     );
-    broadcast('app-event', { type: 'settings:updated', settings: store.getSettings() });
+    // 復元後の設定にも、通常の設定変更と同じ副作用（ショートカット再登録・
+    // Teams 検知ポーリング等）を反映する（S1）。
+    applySettingsSideEffects(prevSettings, store.getSettings());
     broadcast('app-event', { type: 'data:restored' });
     return { canceled: false, calls, backupPath };
   });
 
   ipcMain.handle('backup:restore-json', async (_e, json: unknown): Promise<{ calls: number; backupPath: string }> => {
+    const prevSettings = store.getSettings();
     const { calls } = await store.restoreFromJson(json);
     const backupPath = path.join(
       app.getPath('userData'),
       'backups',
       `data-${localDate(new Date()).replace(/-/g, '')}-pre-restore.json`,
     );
-    broadcast('app-event', { type: 'settings:updated', settings: store.getSettings() });
+    applySettingsSideEffects(prevSettings, store.getSettings());
     broadcast('app-event', { type: 'data:restored' });
     return { calls, backupPath };
   });
@@ -1840,8 +1916,53 @@ function setupSafeShutdown(): void {
 }
 
 /**
+ * 前回起動時に「進行中」のまま（endTime: null）残ってしまった記録を検出し、
+ * ハートビート（heartbeat.json）の最終時刻で終了させる。クラッシュ・強制
+ * 終了・停電などでアプリが正常終了できなかった場合に、経過時間へダウンタイム
+ * が含まれてしまう・録音が同じ webm に追記され続けて壊れる、といった問題を防ぐ。
+ * 自動的に記録を再開することはしない（F15）。
+ */
+async function recoverStaleActiveCall(): Promise<void> {
+  const active = getActive();
+  if (!active) return;
+
+  let endIso: string | null = null;
+  try {
+    const raw = await fs.readFile(getHeartbeatPath(), 'utf-8');
+    const hb = JSON.parse(raw) as { callId?: string; at?: string };
+    if (hb.callId === active.id) {
+      endIso = typeof hb.at === 'string' && !isNaN(new Date(hb.at).getTime()) ? hb.at : active.startTime;
+    }
+  } catch { /* heartbeat が無い・壊れている場合は下のフォールバックを使う */ }
+  if (!endIso) {
+    endIso = active.durationSec
+      ? new Date(new Date(active.startTime).getTime() + active.durationSec * 1000).toISOString()
+      : active.startTime;
+  }
+
+  const durationSec = Math.max(
+    0,
+    Math.round((new Date(endIso).getTime() - new Date(active.startTime).getTime()) / 1000),
+  );
+  const updated = store.updateCall(active.id, { endTime: endIso, durationSec });
+  stopHeartbeat();
+  if (updated) {
+    broadcast('app-event', { type: 'call:ended', record: updated });
+  }
+  const hhmm = new Date(endIso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false });
+  logInfo('recover', `stale active call ${active.id} ended at ${endIso} (heartbeat-based recovery)`);
+  notify(
+    'CallStack',
+    `前回、記録中にアプリが終了したため、最終確認時刻 ${hhmm} で記録を終了しました`,
+    () => showMainWindow(),
+  );
+}
+
+/**
  * 前回クラッシュ・強制終了などで残った録音断片 (.webm) を起動時に回収する。
  * 対応する記録があり録音が未保存なら MP3 化して添付、そうでなければ削除する。
+ * recoverStaleActiveCall() より後に呼び出すこと（進行中のまま残っていた記録は
+ * そちらで先に終了させておかないと、ここでスキップされてしまう）。
  */
 async function recoverOrphanRecordings(): Promise<void> {
   const { tmpRecordings, recordings } = getDirs();
@@ -1873,11 +1994,29 @@ async function recoverOrphanRecordings(): Promise<void> {
           recovered += 1;
           logInfo('recover', `salvaged orphan recording ${name} (${Math.round(durationSec)}s)`);
         }
+        await fs.unlink(tmpPath).catch(() => {});
+      } else {
+        // 対応する記録が既に音声を持っている／見つからない場合は不要な断片として削除する
+        await fs.unlink(tmpPath).catch(() => {});
       }
-      await fs.unlink(tmpPath).catch(() => {});
     } catch (err) {
+      // F5: 変換に失敗した webm は、サルベージ可能かもしれないため削除せず
+      // failed フォルダへ退避する（従来は unlink して失っていた）。
       logInfo('recover', `failed to salvage ${name}: ${(err as Error).message}`);
-      await fs.unlink(tmpPath).catch(() => {});
+      try {
+        const failedDir = path.join(recordings, 'failed');
+        await fs.mkdir(failedDir, { recursive: true });
+        await fs.rename(tmpPath, path.join(failedDir, name)).catch(async () => {
+          // rename が失敗（別ドライブ等）した場合はコピーしてから削除する
+          await fs.copyFile(tmpPath, path.join(failedDir, name));
+          await fs.unlink(tmpPath).catch(() => {});
+        });
+      } catch (moveErr) {
+        logInfo('recover', `failed to move ${name} to failed dir: ${(moveErr as Error).message}`);
+      }
+      // 変換失敗時に残った可能性のある不完全な mp3 出力は削除する
+      const partialMp3 = path.join(recordings, `${callId}.mp3`);
+      await fs.unlink(partialMp3).catch(() => {});
     }
   }
   if (recovered > 0) {
@@ -2006,6 +2145,30 @@ async function main() {
   createRecorderWindow();
   logInfo('app', `started v${app.getVersion()}`);
   scheduleDailyCleanup(store, broadcast);
+
+  // F1: data.json が破損していてバックアップから復旧した場合、起動後に一度だけ知らせる
+  if (store.recoveryInfo) {
+    const info = store.recoveryInfo;
+    setTimeout(() => {
+      void dialog.showMessageBox({
+        type: 'warning',
+        title: 'CallStack',
+        message: 'データファイルの破損を検出しました',
+        detail: info.restoredFrom
+          ? `保存されていたデータが壊れていたため、バックアップから復元しました。\n\n`
+            + `壊れていたファイル: ${info.corruptPath}\n`
+            + `復元元バックアップ: ${info.restoredFrom}\n\n`
+            + `直近のバックアップ以降の変更は失われている可能性があります。`
+          : `保存されていたデータが壊れており、有効なバックアップも見つからなかったため、`
+            + `空の状態で開始しました。\n\n壊れていたファイル: ${info.corruptPath}`,
+        buttons: ['OK'],
+      });
+    }, 1000);
+  }
+
+  // F15: 前回セッションで「進行中」のまま残っていた記録があれば、ハートビートを
+  // 元に終了させる（自動再開はしない）。録音断片の回収より先に行う必要がある。
+  await recoverStaleActiveCall();
   // 前回終了時に保存されなかった録音断片を回収（進行中の記録は除く）
   setTimeout(() => { void recoverOrphanRecordings(); }, 3000);
 
@@ -2050,12 +2213,8 @@ async function main() {
     }
   });
 
-  // Restart tick + HUD if there's a stale active call from previous run
-  if (getActive()) {
-    createHudWindow(store.getSettings().hudPosition, store.getSettings().hudSize);
-    updateTray({ active: true, elapsedSec: 0, today: todayStats() }, trayHandlers);
-    startTickLoop();
-  }
+  // F15: 進行中の記録は recoverStaleActiveCall() で必ず終了させているため、
+  // ここで HUD・tick を自動再開することはない。
 }
 
 app.on('window-all-closed', () => {
@@ -2081,8 +2240,13 @@ app.on('will-quit', () => {
   if (powerBlockerId !== null) powerSaveBlocker.stop(powerBlockerId);
 });
 
-app.on('before-quit', async () => {
-  await store.flush().catch(() => {});
+app.on('before-quit', () => {
+  // Electron は before-quit の非同期処理の完了を待たないため、終了直前
+  // （300ms のデバウンス中）の変更を確実に保存するには同期書き込みが必要（F8）。
+  store.flushSync();
+  // 記録中に終了する場合は、次回起動時に終了時刻として使えるよう最終時刻を残す（F15）
+  const active = getActive();
+  if (active) writeHeartbeat(active.id);
 });
 
 main().catch((err) => {

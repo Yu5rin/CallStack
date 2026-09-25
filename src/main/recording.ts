@@ -74,6 +74,17 @@ export async function finalize(callId: string, mp3Bitrate: number, trimSilence =
 
 export async function deleteRecording(relPath: string): Promise<void> {
   const { recordings } = getDirs();
-  const abs = path.join(recordings, relPath);
+  // relPath は録音フォルダからの相対パスである前提。絶対パスや `..` による
+  // 脱出（不正な復元データ等に由来する可能性）を拒否し、フォルダ外のファイルを
+  // 誤って消さないようにする。
+  if (path.isAbsolute(relPath)) {
+    console.error(`[recording] deleteRecording: refusing absolute path: ${relPath}`);
+    return;
+  }
+  const abs = path.resolve(recordings, relPath);
+  if (abs !== recordings && !abs.startsWith(recordings + path.sep)) {
+    console.error(`[recording] deleteRecording: refusing path outside recordings dir: ${relPath}`);
+    return;
+  }
   await fs.unlink(abs).catch(() => {});
 }

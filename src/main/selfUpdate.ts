@@ -35,6 +35,9 @@ export type SelfUpdateStatus = 'idle' | 'downloading' | 'verifying' | 'extractin
 let currentStatus: SelfUpdateStatus = 'idle';
 let preparedVersion: string | null = null;
 let preparedStagingDir: string | null = null;
+/** 準備処理が進行中の場合の Promise。起動時の自動チェックとボタン操作が
+ *  同時に走って同じステージングフォルダを取り合わないようにする。 */
+let preparingPromise: Promise<boolean> | null = null;
 
 export function getSelfUpdateStatus(): { status: SelfUpdateStatus; version: string | null } {
   return { status: currentStatus, version: preparedVersion };
@@ -91,11 +94,40 @@ export async function prepareUpdate(
   result: UpdateCheckResult,
   onStatus: (s: { status: SelfUpdateStatus; receivedBytes?: number; totalBytes?: number | null; error?: string }) => void,
 ): Promise<boolean> {
+  // 既に同じ準備処理が進行中なら、新たに並走させず同じ Promise を返す
+  // （起動時の自動チェックと「今すぐ更新」ボタンが同時に走るケースへの対策）。
+  if (preparingPromise) {
+    logInfo('selfupdate', 'prepare already in progress — reusing in-flight promise');
+    return preparingPromise;
+  }
+  // 既に同じバージョンが準備済み（ready）なら再ダウンロードしない。
+  if (currentStatus === 'ready' && preparedVersion === result.latest && preparedStagingDir) {
+    onStatus({ status: 'ready' });
+    return true;
+  }
+  const task = prepareUpdateInner(result, onStatus);
+  preparingPromise = task;
+  try {
+    return await task;
+  } finally {
+    preparingPromise = null;
+  }
+}
+
+async function prepareUpdateInner(
+  result: UpdateCheckResult,
+  onStatus: (s: { status: SelfUpdateStatus; receivedBytes?: number; totalBytes?: number | null; error?: string }) => void,
+): Promise<boolean> {
   if (!isSelfUpdateSupported()) return false;
   if (!result.assetUrl || !result.assetSha256 || !result.latest) {
     logInfo('selfupdate', 'skip: asset url or sha256 not available from release');
     return false;
   }
+  // 準備を開始する時点で、既存の ready 状態を無効化しておく。
+  // これにより、再準備中に古い（既に消えている可能性のある）ステージング
+  // フォルダへ apply が実行されてしまうのを防ぐ。
+  preparedVersion = null;
+  preparedStagingDir = null;
   if (!(await canWriteNextToInstallDir())) {
     logInfo('selfupdate', `skip: no write access next to install dir (${getInstallDir()})`);
     onStatus({ status: 'error', error: 'インストール先フォルダに書き込めません（管理者権限が必要な場所に配置されている可能性があります）' });
@@ -183,8 +215,8 @@ export function hasPreparedUpdate(): boolean {
  * 実際のフォルダ入れ替えはアプリが完全終了した後にスクリプトが行う。
  */
 export async function applyPreparedUpdate(): Promise<void> {
-  if (!preparedStagingDir || !preparedVersion) {
-    throw new Error('適用可能な更新の準備ができていません');
+  if (currentStatus !== 'ready' || !preparedStagingDir || !preparedVersion) {
+    throw new Error('適用可能な更新の準備ができていません（再準備中、または未準備の可能性があります）');
   }
   const installDir = getInstallDir();
   const stagingDir = preparedStagingDir;

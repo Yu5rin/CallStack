@@ -1,8 +1,9 @@
 import { app } from 'electron';
 import { localDateStamp } from './localTime';
-import { promises as fs } from 'node:fs';
+import { promises as fs, openSync, writeSync, fsyncSync, closeSync, renameSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { CallRecord, HoldSegment, Settings, DEFAULT_SETTINGS } from '../shared/types';
+import { getDirs } from './paths';
 
 interface DataFile {
   version: number;
@@ -12,11 +13,71 @@ interface DataFile {
 
 const FILE_VERSION = 1;
 
+/**
+ * parsed.settings（旧バージョンや破損復旧時の断片的な値）を DEFAULT_SETTINGS と
+ * ネストしたオブジェクトごとにマージし、常にフル充填された Settings を返す。
+ * init() と restoreFromJson() で同じロジックを共有するための共通ヘルパー。
+ */
+function mergeSettings(partial: Partial<Settings> | undefined): Settings {
+  const settings: Settings = { ...DEFAULT_SETTINGS, ...(partial ?? {}) };
+  // Ensure nested objects are fully populated (handle older versions)
+  settings.shortcuts = {
+    ...DEFAULT_SETTINGS.shortcuts,
+    ...(partial?.shortcuts ?? {}),
+  };
+  // v1.9.0 以前の 'Control+' 表記を 'Ctrl+' へ移行（accelerator としては等価）
+  for (const k of Object.keys(settings.shortcuts) as Array<keyof typeof settings.shortcuts>) {
+    settings.shortcuts[k] = settings.shortcuts[k].replace(/\bControl\b/g, 'Ctrl');
+  }
+  settings.recording = {
+    ...DEFAULT_SETTINGS.recording,
+    ...(partial?.recording ?? {}),
+    callSource: {
+      ...DEFAULT_SETTINGS.recording.callSource,
+      ...(partial?.recording?.callSource ?? {}),
+    },
+    meetingSource: {
+      ...DEFAULT_SETTINGS.recording.meetingSource,
+      ...(partial?.recording?.meetingSource ?? {}),
+    },
+  };
+  // v1.4 以前の recording.source ('mic' | 'mic+system') からの移行
+  const legacySource = (partial?.recording as { source?: string } | undefined)?.source;
+  if (legacySource && !partial?.recording?.callSource) {
+    const system = legacySource === 'mic+system';
+    settings.recording.callSource = { mic: true, system, systemScope: 'screen' };
+    settings.recording.meetingSource = { mic: true, system, systemScope: 'screen' };
+  }
+  delete (settings.recording as { source?: string }).source;
+  settings.transcription = {
+    ...DEFAULT_SETTINGS.transcription,
+    ...(partial?.transcription ?? {}),
+    modelDownloaded: {
+      ...(partial?.transcription?.modelDownloaded ?? {}),
+    },
+  };
+  return settings;
+}
+
+export interface RecoveryInfo {
+  /** リネームして保持した破損データファイルのパス */
+  corruptPath: string;
+  /** 復元元にしたバックアップファイルのパス（見つからなければ null＝空で開始） */
+  restoredFrom: string | null;
+}
+
 export class Store {
   private dataFile: string;
   private backupDir: string;
   private data: DataFile;
   private writeTimer: NodeJS.Timeout | null = null;
+  /** 直列化された flush の Promise チェーン（同じ tmp ファイルへの書き込み競合を防ぐ） */
+  private flushChain: Promise<void> = Promise.resolve();
+  /** 書き込み内容の世代番号。同期書き込みより前に取った内容で上書きしないために使う */
+  private writeSeq = 0;
+  private lastSyncSeq = 0;
+  /** data.json が破損しておりバックアップから復旧した場合の情報（起動後にユーザーへ通知する） */
+  recoveryInfo: RecoveryInfo | null = null;
 
   constructor() {
     const userData = app.getPath('userData');
@@ -29,6 +90,35 @@ export class Store {
     };
   }
 
+  /** バックアップディレクトリ内の JSON を新しい順に走査し、最初にパースできたものを返す */
+  private async loadNewestValidBackup(): Promise<{ file: string; data: DataFile } | null> {
+    let files: string[];
+    try {
+      files = (await fs.readdir(this.backupDir)).filter((f) => f.endsWith('.json')).sort();
+    } catch {
+      return null;
+    }
+    for (let i = files.length - 1; i >= 0; i--) {
+      const file = path.join(this.backupDir, files[i]);
+      try {
+        const buf = await fs.readFile(file, 'utf-8');
+        const parsed = JSON.parse(buf) as Partial<DataFile>;
+        if (!Array.isArray(parsed.calls)) continue;
+        return {
+          file,
+          data: {
+            version: FILE_VERSION,
+            calls: parsed.calls,
+            settings: mergeSettings(parsed.settings),
+          },
+        };
+      } catch {
+        continue; // このバックアップも壊れている場合は、より古いものを試す
+      }
+    }
+    return null;
+  }
+
   async init(): Promise<void> {
     try {
       const buf = await fs.readFile(this.dataFile, 'utf-8');
@@ -36,51 +126,47 @@ export class Store {
       this.data = {
         version: FILE_VERSION,
         calls: Array.isArray(parsed.calls) ? parsed.calls : [],
-        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
-      };
-      // Ensure nested objects are fully populated (handle older versions)
-      this.data.settings.shortcuts = {
-        ...DEFAULT_SETTINGS.shortcuts,
-        ...(parsed.settings?.shortcuts ?? {}),
-      };
-      // v1.9.0 以前の 'Control+' 表記を 'Ctrl+' へ移行（accelerator としては等価）
-      for (const k of Object.keys(this.data.settings.shortcuts) as Array<keyof typeof this.data.settings.shortcuts>) {
-        this.data.settings.shortcuts[k] = this.data.settings.shortcuts[k].replace(/\bControl\b/g, 'Ctrl');
-      }
-      this.data.settings.recording = {
-        ...DEFAULT_SETTINGS.recording,
-        ...(parsed.settings?.recording ?? {}),
-        callSource: {
-          ...DEFAULT_SETTINGS.recording.callSource,
-          ...(parsed.settings?.recording?.callSource ?? {}),
-        },
-        meetingSource: {
-          ...DEFAULT_SETTINGS.recording.meetingSource,
-          ...(parsed.settings?.recording?.meetingSource ?? {}),
-        },
-      };
-      // v1.4 以前の recording.source ('mic' | 'mic+system') からの移行
-      const legacySource = (parsed.settings?.recording as { source?: string } | undefined)?.source;
-      if (legacySource && !parsed.settings?.recording?.callSource) {
-        const system = legacySource === 'mic+system';
-        this.data.settings.recording.callSource = { mic: true, system, systemScope: 'screen' };
-        this.data.settings.recording.meetingSource = { mic: true, system, systemScope: 'screen' };
-      }
-      delete (this.data.settings.recording as { source?: string }).source;
-      this.data.settings.transcription = {
-        ...DEFAULT_SETTINGS.transcription,
-        ...(parsed.settings?.transcription ?? {}),
-        modelDownloaded: {
-          ...(parsed.settings?.transcription?.modelDownloaded ?? {}),
-        },
+        settings: mergeSettings(parsed.settings),
       };
     } catch (err: unknown) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code !== 'ENOENT') {
-        console.error('[store] failed to read data file:', err);
+      if (e.code === 'ENOENT') {
+        // First run — keep defaults and persist
+        await this.flush();
+      } else {
+        // data.json は存在するが読み込み・パースに失敗＝破損。
+        // 上書きして失うことのないよう退避し、バックアップからの復旧を試みる。
+        console.error('[store] failed to read data file (corrupt):', err);
+        const stamp = localDateStamp(new Date()).replace(/-/g, '') + '-' +
+          new Date().toISOString().slice(11, 19).replace(/:/g, '');
+        const corruptPath = `${this.dataFile}.corrupt-${stamp}`;
+        let renamed = false;
+        try {
+          await fs.rename(this.dataFile, corruptPath);
+          renamed = true;
+        } catch (renameErr) {
+          console.error('[store] failed to preserve corrupt data file:', renameErr);
+        }
+        const backup = await this.loadNewestValidBackup();
+        if (backup) {
+          this.data = backup.data;
+          console.error(`[store] restored from backup: ${backup.file}`);
+        } else {
+          this.data = {
+            version: FILE_VERSION,
+            calls: [],
+            settings: structuredClone(DEFAULT_SETTINGS),
+          };
+          console.error('[store] no valid backup found — starting with empty data');
+        }
+        this.recoveryInfo = {
+          corruptPath: renamed ? corruptPath : this.dataFile,
+          restoredFrom: backup ? backup.file : null,
+        };
+        // 復旧したデータを直ちに保存する（同日分の backup() が空データで
+        // 上書きしてしまわないよう、backup() より前に確定させておく）
+        await this.flush();
       }
-      // First run — keep defaults and persist
-      await this.flush();
     }
     await this.backup();
   }
@@ -219,6 +305,32 @@ export class Store {
     return target;
   }
 
+  /** 復元対象の call レコードが不正な audio.path（録音フォルダ外・絶対パス等）を
+   *  持たないよう検証し、id / startTime を欠くレコードは除外する。 */
+  private sanitizeRestoredCalls(calls: unknown): CallRecord[] {
+    if (!Array.isArray(calls)) return [];
+    const { recordings } = getDirs();
+    const out: CallRecord[] = [];
+    for (const item of calls) {
+      if (!item || typeof item !== 'object') continue;
+      const c = { ...(item as CallRecord) };
+      if (typeof c.id !== 'string' || !c.id) continue;
+      if (typeof c.startTime !== 'string' || !c.startTime) continue;
+      if (c.audio) {
+        const relPath = c.audio.path;
+        const abs = typeof relPath === 'string' ? path.resolve(recordings, relPath) : null;
+        const inside = typeof relPath === 'string' && !path.isAbsolute(relPath) && abs !== null
+          && (abs === recordings || abs.startsWith(recordings + path.sep));
+        if (!inside) {
+          console.error(`[store] restore: dropping unsafe audio.path for call ${c.id}: ${String(relPath)}`);
+          c.audio = undefined;
+        }
+      }
+      out.push(c);
+    }
+    return out;
+  }
+
   /** Replace in-memory data from a previously exported JSON. Used by manual restore. */
   async restoreFromJson(json: unknown): Promise<{ calls: number }> {
     if (!json || typeof json !== 'object') throw new Error('JSON ファイルの形式が不正です');
@@ -228,8 +340,8 @@ export class Store {
     await this.backupNow('pre-restore');
     this.data = {
       version: FILE_VERSION,
-      calls: parsed.calls as CallRecord[],
-      settings: parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : this.data.settings,
+      calls: this.sanitizeRestoredCalls(parsed.calls),
+      settings: parsed.settings ? mergeSettings(parsed.settings) : this.data.settings,
     };
     await this.flush();
     return { calls: this.data.calls.length };
@@ -247,15 +359,71 @@ export class Store {
     }, 300);
   }
 
+  /**
+   * data.json への書き込みを行う（tmp ファイルへ書いて fsync してから rename）。
+   * flush() は this.flushChain 経由で直列化して呼び出し、同じ tmp ファイルへの
+   * 書き込みが競合しないようにする。
+   */
+  private async writeDataFile(payload: string, seq: number): Promise<void> {
+    // 終了直前の flushSync がより新しい内容を書いた後なら、古い内容で上書きしない
+    if (seq < this.lastSyncSeq) return;
+    await fs.mkdir(path.dirname(this.dataFile), { recursive: true });
+    const tmp = `${this.dataFile}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const handle = await fs.open(tmp, 'w');
+    try {
+      await handle.writeFile(payload, 'utf-8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (seq < this.lastSyncSeq) {
+      await fs.unlink(tmp).catch(() => {});
+      return;
+    }
+    await fs.rename(tmp, this.dataFile);
+  }
+
   async flush(): Promise<void> {
     if (this.writeTimer) {
       clearTimeout(this.writeTimer);
       this.writeTimer = null;
     }
-    const tmp = `${this.dataFile}.tmp`;
-    await fs.mkdir(path.dirname(this.dataFile), { recursive: true });
-    await fs.writeFile(tmp, JSON.stringify(this.data, null, 2), 'utf-8');
-    await fs.rename(tmp, this.dataFile);
+    const payload = JSON.stringify(this.data, null, 2);
+    const seq = ++this.writeSeq;
+    // 直列化: 前の flush の完了（成功・失敗いずれでも）を待ってから書き込む。
+    const task = this.flushChain.then(
+      () => this.writeDataFile(payload, seq),
+      () => this.writeDataFile(payload, seq),
+    );
+    this.flushChain = task.catch(() => { /* チェーン自体は継続させる */ });
+    return task;
+  }
+
+  /**
+   * 同期版の flush。Electron の before-quit ハンドラは非同期処理の完了を
+   * 待たないため、終了直前（300ms のデバウンス中）の変更を確実に保存するために使う。
+   */
+  flushSync(): void {
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer);
+      this.writeTimer = null;
+    }
+    this.lastSyncSeq = ++this.writeSeq;
+    try {
+      mkdirSync(path.dirname(this.dataFile), { recursive: true });
+      const tmp = `${this.dataFile}.tmp-sync-${process.pid}-${Date.now()}`;
+      const buf = Buffer.from(JSON.stringify(this.data, null, 2), 'utf-8');
+      const fd = openSync(tmp, 'w');
+      try {
+        writeSync(fd, buf);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      renameSync(tmp, this.dataFile);
+    } catch (err) {
+      console.error('[store] flushSync failed:', err);
+    }
   }
 
   private async backup(): Promise<void> {

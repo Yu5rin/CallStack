@@ -12,6 +12,7 @@ import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
 import { useToast } from '../components/Toast';
+import { toUserMessage } from '../utils/errorMessage';
 
 const sectionClass =
   'rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900';
@@ -58,7 +59,7 @@ function WhisperSetup({
       } else if (e.step === 'error') {
         setDownloading(null);
         setProgress(null);
-        setDlError(e.error ?? 'ダウンロードに失敗しました');
+        setDlError(toUserMessage(e.error, 'ダウンロードに失敗しました'));
       } else {
         setProgress({ step: e.step, rec: e.receivedBytes, total: e.totalBytes });
       }
@@ -94,7 +95,7 @@ function WhisperSetup({
       )}
       {status && !status.ok && (
         <div className="space-y-2">
-          <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{status.error}</div>
+          <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{toUserMessage(status.error, '文字起こしの準備を確認できませんでした')}</div>
         </div>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -182,7 +183,7 @@ function LiveTranscribeSetup({
       } else if (e.step === 'error') {
         setDownloading(null);
         setProgress(null);
-        setDlError(e.error ?? 'ダウンロードに失敗しました');
+        setDlError(toUserMessage(e.error, 'ダウンロードに失敗しました'));
       } else {
         setProgress({ step: e.step, rec: e.receivedBytes, total: e.totalBytes });
       }
@@ -1161,7 +1162,7 @@ function AboutSection({
     const off = window.api.onEvent((e: AppEvent) => {
       if (e.type !== 'selfupdate:status') return;
       const pct = e.totalBytes ? Math.round(((e.receivedBytes ?? 0) / e.totalBytes) * 100) : null;
-      setSelfStatus({ status: e.status, version: e.version, pct, error: e.error });
+      setSelfStatus({ status: e.status, version: e.version, pct, error: e.error ? toUserMessage(e.error, '更新に失敗しました') : e.error });
     });
     return () => off();
   }, []);
@@ -1173,7 +1174,7 @@ function AboutSection({
     try {
       const r = await window.api.update.check();
       if (!r.ok) {
-        setResult(`更新を確認できませんでした（${r.error ?? '不明なエラー'}）。リリースページで直接確認してください。`);
+        setResult(`更新を確認できませんでした（${toUserMessage(r.error, '不明なエラー')}）。リリースページで直接確認してください。`);
         setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
       } else if (r.hasUpdate) {
         setResult(`新しいバージョン v${r.latest} が利用できます（現在 v${r.current}）`);
@@ -1190,7 +1191,7 @@ function AboutSection({
     setApplyError(null);
     setSelfStatus({ status: 'downloading' });
     const r = await window.api.update.prepareNow();
-    if (!r.ok) setSelfStatus({ status: 'error', error: r.error });
+    if (!r.ok) setSelfStatus({ status: 'error', error: toUserMessage(r.error, '更新の準備に失敗しました') });
     else if (!r.hasUpdate) setSelfStatus({ status: 'idle' });
     // hasUpdate=true の場合、以降の進行状況は selfupdate:status イベントで更新される
   };
@@ -1198,7 +1199,7 @@ function AboutSection({
   const applyNow = async () => {
     setApplyError(null);
     const r = await window.api.update.applyNow();
-    if (!r.ok) setApplyError(r.error ?? '適用に失敗しました');
+    if (!r.ok) setApplyError(toUserMessage(r.error, '適用に失敗しました'));
     // 成功時はアプリが終了するため、ここには戻ってこない
   };
 
@@ -1329,7 +1330,7 @@ function BackupRestoreRow() {
       const path = await window.api.backup.create();
       setMessage(`バックアップを保存しました: ${path}`);
     } catch (err) {
-      setError((err as Error).message);
+      setError(toUserMessage(err));
     } finally {
       setBusy(false);
     }
@@ -1346,7 +1347,7 @@ function BackupRestoreRow() {
         setMessage(`復元しました (${r.calls} 件)。直前のデータは ${r.backupPath} にあります。`);
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(toUserMessage(err));
     } finally {
       setBusy(false);
     }

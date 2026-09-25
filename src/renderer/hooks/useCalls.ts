@@ -4,19 +4,35 @@ import { CallRecord, AppEvent } from '../../shared/types';
 export function useCalls() {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
   const reload = useCallback(async () => {
-    const list = await window.api.calls.list();
-    setCalls(list);
+    setLoading(true);
+    try {
+      const list = await window.api.calls.list();
+      setCalls(list);
+      setError(null);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const list = await window.api.calls.list();
-      if (!mounted) return;
-      setCalls(list);
-      setLoading(false);
+      try {
+        const list = await window.api.calls.list();
+        if (!mounted) return;
+        setCalls(list);
+        setError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setError(err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
     const off = window.api.onEvent((e: AppEvent) => {
       if (
@@ -45,7 +61,7 @@ export function useCalls() {
     };
   }, []);
 
-  return { calls, loading, reload };
+  return { calls, loading, error, reload };
 }
 
 /**

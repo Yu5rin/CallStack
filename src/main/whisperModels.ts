@@ -1,8 +1,8 @@
-import { promises as fs, createWriteStream } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { net } from 'electron';
 import { WhisperModel } from '../shared/types';
 import { getDirs } from './paths';
+import { downloadTo } from './whisperBinary';
 
 const HF_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
 
@@ -51,40 +51,8 @@ export interface DownloadProgress {
   totalBytes: number | null;
 }
 
-function downloadOne(url: string, tmp: string, onProgress: (p: DownloadProgress) => void): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const req = net.request({ url, method: 'GET', redirect: 'follow' });
-    req.on('redirect', (_status, _method, redirectUrl) => {
-      req.followRedirect();
-      void redirectUrl;
-    });
-    req.on('response', (res) => {
-      const status = res.statusCode;
-      if (status !== 200) {
-        reject(new Error(`HTTP ${status}`));
-        res.on('data', () => {});
-        return;
-      }
-      const lenHdr = res.headers['content-length'];
-      const lenStr = Array.isArray(lenHdr) ? lenHdr[0] : lenHdr;
-      const total = lenStr ? Number(lenStr) : null;
-      let received = 0;
-      const out = createWriteStream(tmp);
-      let failed = false;
-      res.on('data', (chunk: Buffer) => {
-        if (failed) return;
-        received += chunk.length;
-        onProgress({ receivedBytes: received, totalBytes: total });
-        out.write(chunk);
-      });
-      res.on('end', () => { if (!failed) out.end(() => resolve()); });
-      res.on('error', (err: Error) => { failed = true; out.destroy(); reject(err); });
-      out.on('error', (err) => { failed = true; reject(err); });
-    });
-    req.on('error', (err) => reject(err));
-    req.end();
-  });
-}
+// ダウンロード本体（タイムアウト・完全性検証・エラーメッセージ変換）は
+// whisperBinary.ts の downloadTo を共通利用する。
 
 export async function downloadModel(
   model: WhisperModel,
@@ -98,7 +66,7 @@ export async function downloadModel(
   let lastErr: Error | null = null;
   for (const url of urls) {
     try {
-      await downloadOne(url, tmp, onProgress);
+      await downloadTo(url, tmp, onProgress);
       await fs.rename(tmp, target);
       return;
     } catch (err) {

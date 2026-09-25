@@ -41,23 +41,72 @@ const ASSET_PATTERNS: Record<BinaryVariant, RegExp[]> = {
   ],
 };
 
-export function fetchJson<T>(url: string): Promise<T> {
+/** JSON/API リクエストの全体タイムアウト（応答が来ないまま固まるのを防ぐ） */
+const JSON_TIMEOUT_MS = 15_000;
+/** ダウンロードの接続タイムアウト（response イベントが来るまで） */
+const CONNECT_TIMEOUT_MS = 20_000;
+/** ダウンロードのアイドルタイムアウト（データが来なくなってから） */
+const IDLE_TIMEOUT_MS = 30_000;
+
+/**
+ * ネットワーク系のエラーや HTTP ステータスを、ユーザー向けの日本語メッセージへ変換する。
+ * whisperBinary / whisperModels / vosk / updates から共通で利用する。
+ */
+export function describeNetError(err: unknown, statusCode?: number): string {
+  if (typeof statusCode === 'number' && statusCode !== 200) {
+    if (statusCode === 404) return 'ファイルが見つかりませんでした (HTTP 404)';
+    if (statusCode === 403 || statusCode === 429) {
+      return `アクセスが制限されています。しばらくしてから再試行してください (HTTP ${statusCode})`;
+    }
+    if (statusCode >= 500) return `サーバーでエラーが発生しました (HTTP ${statusCode})`;
+    return `ダウンロードに失敗しました (HTTP ${statusCode})`;
+  }
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  if (/timed?\s*out|タイムアウト/i.test(msg)) {
+    return '通信がタイムアウトしました。ネットワーク接続を確認してください';
+  }
+  if (/ENOTFOUND|ECONNREFUSED|net::ERR_NAME_NOT_RESOLVED|net::ERR_INTERNET_DISCONNECTED|net::ERR_PROXY|net::ERR_CONNECTION_(?!RESET)/i.test(msg)) {
+    return 'インターネットに接続できません。ネットワーク接続を確認してください';
+  }
+  if (/ECONNRESET|EPIPE|net::ERR_CONNECTION_RESET|net::ERR_ABORTED|net::ERR_EMPTY_RESPONSE/i.test(msg)) {
+    return '通信が切断されました。ネットワーク接続を確認してください';
+  }
+  return msg || '不明な通信エラーが発生しました';
+}
+
+export function fetchJson<T>(url: string, timeoutMs = JSON_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, method: 'GET', redirect: 'follow' });
     req.setHeader('Accept', 'application/vnd.github+json');
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      req.abort();
+      reject(new Error(describeNetError(new Error('timeout'))));
+    }, timeoutMs);
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
     req.on('response', (res) => {
       let body = '';
       res.on('data', (c: Buffer) => { body += c.toString(); });
       res.on('end', () => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}`));
-          return;
-        }
-        try { resolve(JSON.parse(body) as T); } catch (err) { reject(err as Error); }
+        finish(() => {
+          if (res.statusCode !== 200) {
+            reject(new Error(describeNetError(new Error(`HTTP ${res.statusCode}`), res.statusCode)));
+            return;
+          }
+          try { resolve(JSON.parse(body) as T); } catch (err) { reject(new Error(describeNetError(err))); }
+        });
       });
-      res.on('error', (err: Error) => reject(err));
+      res.on('aborted', () => finish(() => reject(new Error(describeNetError(new Error('aborted'))))));
+      res.on('error', (err: Error) => finish(() => reject(new Error(describeNetError(err)))));
     });
-    req.on('error', reject);
+    req.on('error', (err) => finish(() => reject(new Error(describeNetError(err)))));
     req.end();
   });
 }
@@ -123,33 +172,78 @@ export interface BinDownloadProgress {
 export function downloadTo(url: string, dest: string, onProgress: (p: BinDownloadProgress) => void): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const req = net.request({ url, method: 'GET', redirect: 'follow' });
+    let settled = false;
+    let idleTimer: NodeJS.Timeout | null = null;
+    let out: ReturnType<typeof createWriteStream> | null = null;
+
+    // response イベントが来るまでの接続タイムアウト
+    let connectTimer: NodeJS.Timeout | null = setTimeout(() => {
+      fail(new Error(describeNetError(new Error('timeout'))));
+    }, CONNECT_TIMEOUT_MS);
+
+    function clearTimers(): void {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    }
+
+    function fail(err: Error): void {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      try { req.abort(); } catch { /* noop */ }
+      out?.destroy();
+      // 不完全な部分ファイルを残さない
+      fs.unlink(dest).catch(() => {});
+      reject(err);
+    }
+
+    function resetIdleTimer(): void {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        fail(new Error(describeNetError(new Error('timeout'))));
+      }, IDLE_TIMEOUT_MS);
+    }
+
     req.on('response', (res) => {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
       const status = res.statusCode;
       if (status !== 200) {
         res.on('data', () => {});
-        reject(new Error(`HTTP ${status}`));
+        fail(new Error(describeNetError(new Error(`HTTP ${status}`), status)));
         return;
       }
       const lenHdr = res.headers['content-length'];
       const lenStr = Array.isArray(lenHdr) ? lenHdr[0] : lenHdr;
-      const total = lenStr ? Number(lenStr) : null;
+      // 圧縮転送(content-encoding)時は Content-Length が圧縮後のサイズで、受信バイト数
+      // （展開後）と一致しないため、完全性の照合には使わない
+      const encHdr = res.headers['content-encoding'];
+      const encoded = !!(Array.isArray(encHdr) ? encHdr[0] : encHdr) && !/^identity$/i.test(String(encHdr));
+      const total = lenStr && !encoded ? Number(lenStr) : null;
       let received = 0;
-      const out = createWriteStream(dest);
-      let failed = false;
+      out = createWriteStream(dest);
+      resetIdleTimer();
       res.on('data', (chunk: Buffer) => {
-        if (failed) return;
+        if (settled) return;
         received += chunk.length;
+        resetIdleTimer();
         onProgress({ receivedBytes: received, totalBytes: total });
-        out.write(chunk);
+        out!.write(chunk);
       });
       res.on('end', () => {
-        if (failed) return;
-        out.end(() => resolve());
+        if (settled) return;
+        if (total !== null && received !== total) {
+          fail(new Error('ダウンロードが途中で途切れました'));
+          return;
+        }
+        clearTimers();
+        settled = true;
+        out!.end(() => resolve());
       });
-      res.on('error', (err: Error) => { failed = true; out.destroy(); reject(err); });
-      out.on('error', (err) => { failed = true; reject(err); });
+      res.on('aborted', () => fail(new Error('ダウンロードが途中で途切れました')));
+      res.on('error', (err: Error) => fail(new Error(describeNetError(err))));
+      out.on('error', (err) => fail(new Error(describeNetError(err))));
     });
-    req.on('error', reject);
+    req.on('error', (err) => fail(new Error(describeNetError(err))));
     req.end();
   });
 }
@@ -205,14 +299,62 @@ async function normalizeExecutable(dir: string): Promise<void> {
   }
 }
 
+/**
+ * 検証済みの staging ディレクトリを target の位置へ入れ替える。
+ * target を一時バックアップへ退避 → staging を target にリネームする流れにし、
+ * 万一 staging への切り替えに失敗しても target を元の状態へ復元する
+ * （オフライン時の再ダウンロード失敗で既存インストールを壊さないため）。
+ */
+export async function swapStagingDir(target: string, staging: string): Promise<void> {
+  const backup = `${target}.bak`;
+  await fs.rm(backup, { recursive: true, force: true }).catch(() => {});
+  let hadOld = false;
+  try {
+    await fs.rename(target, backup);
+    hadOld = true;
+  } catch {
+    hadOld = false;
+  }
+  try {
+    await fs.rename(staging, target);
+  } catch {
+    // 別ドライブ等で rename できない場合はコピーで代替
+    try {
+      await fs.mkdir(target, { recursive: true });
+      const copyDir = async (src: string, dst: string): Promise<void> => {
+        for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+          const s = path.join(src, entry.name);
+          const d = path.join(dst, entry.name);
+          if (entry.isDirectory()) {
+            await fs.mkdir(d, { recursive: true });
+            await copyDir(s, d);
+          } else {
+            await fs.copyFile(s, d);
+          }
+        }
+      };
+      await copyDir(staging, target);
+      await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    } catch (copyErr) {
+      // 入れ替えに失敗した場合は旧インストールを復元する
+      await fs.rm(target, { recursive: true, force: true }).catch(() => {});
+      if (hadOld) await fs.rename(backup, target).catch(() => {});
+      throw copyErr;
+    }
+  }
+  await fs.rm(backup, { recursive: true, force: true }).catch(() => {});
+}
+
 export async function downloadWhisperBinary(
   onProgress: (p: BinDownloadProgress & { step: 'download' | 'extract' }) => void,
   variant: BinaryVariant = 'cpu',
 ): Promise<void> {
   const dir = getUserWhisperDir(variant);
-  // 以前の展開物（別階層に散った DLL など）が残らないよう、まず初期化する
-  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-  await fs.mkdir(dir, { recursive: true });
+  // 既存の作業ディレクトリはダウンロード完了・検証後にのみ置き換える。
+  // オフライン等でダウンロードに失敗しても、既存の動作中インストールを壊さない。
+  const staging = `${dir}.staging`;
+  await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+  await fs.mkdir(staging, { recursive: true });
   const tmpZip = path.join(app.getPath('temp'), `whisper-bin-${Date.now()}.zip`);
 
   const urls = await resolveAssetUrls(variant);
@@ -231,6 +373,8 @@ export async function downloadWhisperBinary(
     }
   }
   if (!downloaded) {
+    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    await fs.unlink(tmpZip).catch(() => {});
     throw new Error(
       `whisper.cpp のダウンロードに失敗しました (${lastError?.message ?? '不明'})。` +
       'ネットワークを確認するか、README の手順で手動配置してください。',
@@ -239,9 +383,15 @@ export async function downloadWhisperBinary(
 
   try {
     onProgress({ receivedBytes: 0, totalBytes: null, step: 'extract' });
-    await extract(tmpZip, { dir });
-    await normalizeExecutable(dir);
+    await extract(tmpZip, { dir: staging });
+    await normalizeExecutable(staging);
+    // 展開結果を検証（exe が存在しない不完全な展開を「配置済み」にしない）
+    await fs.access(path.join(staging, 'whisper-cli.exe'));
+    await swapStagingDir(dir, staging);
     logInfo('whisperbin', `extracted to ${dir}`);
+  } catch (err) {
+    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw err;
   } finally {
     await fs.unlink(tmpZip).catch(() => {});
   }

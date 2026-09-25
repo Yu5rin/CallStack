@@ -8,6 +8,7 @@ import { formatHMS, toDatetimeLocalValue, fromDatetimeLocalValue, formatDateTime
 import { AudioPlayer, AudioPlayerHandle } from './AudioPlayer';
 import { TranscriptView } from './TranscriptView';
 import { deleteCallWithConfirm } from '../hooks/useCalls';
+import { toUserMessage } from '../utils/errorMessage';
 
 const inputClass =
   'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
@@ -35,6 +36,14 @@ export function CallEditDialog({
   const [title, setTitle] = useState(call.title ?? '');
   const [participants, setParticipants] = useState((call.participants ?? []).join('、'));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // ユーザーが実際に編集したフィールドだけを保存時に送る（進行中の通話が終了した/
+  // HUD 側でメモ・タグが更新された等で `call:updated` が届いても、未編集フィールドは
+  // 最新の値に追従させ、編集済みフィールドは上書きしない）
+  const dirtyRef = useRef<Record<string, boolean>>({});
+  const markDirty = (key: string) => {
+    dirtyRef.current[key] = true;
+  };
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
   // 文字起こしに使うモデル（既定は設定のモデル。編集画面で個別に選べる）
@@ -47,7 +56,7 @@ export function CallEditDialog({
   const [liveLines, setLiveLines] = useState<Array<{ at: number; text: string }>>([]);
   const [livePartial, setLivePartial] = useState('');
   const liveScrollRef = useRef<HTMLDivElement | null>(null);
-  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportMessage, setExportMessage] = useState<{ text: string; error: boolean } | null>(null);
   const playerRef = useRef<AudioPlayerHandle | null>(null);
   // 種別は編集で変更できる（通話⇄会議）。保存時に反映される。
   const [kind, setKind] = useState<'call' | 'meeting'>(call.kind ?? 'call');
@@ -69,7 +78,7 @@ export function CallEditDialog({
         return;
       }
       if (
-        (e.type === 'call:updated' && e.record.id === current.id) ||
+        ((e.type === 'call:updated' || e.type === 'call:ended') && e.record.id === current.id) ||
         (e.type === 'transcription:status' && e.callId === current.id)
       ) {
         if (e.type === 'transcription:status') {
@@ -77,7 +86,20 @@ export function CallEditDialog({
           setQueuePos(e.status === 'queued' ? (e.queuePosition ?? null) : null);
         }
         window.api.calls.get(current.id).then((r) => {
-          if (r) setCurrent(r);
+          if (!r) return;
+          setCurrent(r);
+          // ユーザーが編集していないフィールドだけ、最新の記録内容に追従させる
+          // （例: 通話中に開いたまま通話が終了した、HUD でメモ・タグを編集した等）
+          const d = dirtyRef.current;
+          if (!d.startTime) setStartTime(toDatetimeLocalValue(r.startTime));
+          if (!d.endTime) setEndTime(toDatetimeLocalValue(r.endTime));
+          if (!d.tags) setTags(getRecordTags(r));
+          if (!d.memo) setMemo(r.memo);
+          if (!d.contactName) setContactName(r.contactName ?? '');
+          if (!d.phoneNumber) setPhoneNumber(r.phoneNumber ?? '');
+          if (!d.title) setTitle(r.title ?? '');
+          if (!d.participants) setParticipants((r.participants ?? []).join('、'));
+          if (!d.kind) setKind(r.kind ?? 'call');
         });
       }
     });
@@ -144,26 +166,41 @@ export function CallEditDialog({
   const onPhoneBlur = () => {
     if (!phoneNumber || contactName) return;
     const hit = phoneToContact.get(phoneNumber);
-    if (hit) setContactName(hit.name);
+    if (hit) { setContactName(hit.name); markDirty('contactName'); }
   };
 
   const handleSave = async () => {
+    setSaveError(null);
+    const d = dirtyRef.current;
+    // dayjs('') は Invalid Date になり toISOString() が例外を投げるため、先に弾く
+    if (d.startTime && !startTime.trim()) {
+      setSaveError('開始時刻を入力してください');
+      return;
+    }
     setSaving(true);
     try {
-      await window.api.calls.update(current.id, {
-        kind,
-        startTime: fromDatetimeLocalValue(startTime),
-        endTime: endTime ? fromDatetimeLocalValue(endTime) : null,
-        ...tagsPatch(tags),
-        memo,
-        contactName: contactName || undefined,
-        phoneNumber: phoneNumber || undefined,
-        title: title || undefined,
-        participants: participants
+      // 編集していないフィールドは送らない（進行中に他画面で更新された内容を
+      // 保存時に上書きしてしまわないように）
+      const patch: Partial<CallRecord> = {};
+      if (d.kind) patch.kind = kind;
+      if (d.startTime) patch.startTime = fromDatetimeLocalValue(startTime);
+      if (d.endTime) patch.endTime = endTime ? fromDatetimeLocalValue(endTime) : null;
+      if (d.tags) Object.assign(patch, tagsPatch(tags));
+      if (d.memo) patch.memo = memo;
+      if (d.contactName) patch.contactName = contactName || undefined;
+      if (d.phoneNumber) patch.phoneNumber = phoneNumber || undefined;
+      if (d.title) patch.title = title || undefined;
+      if (d.participants) {
+        patch.participants = participants
           ? participants.split(/[、,]/).map((p) => p.trim()).filter(Boolean)
-          : undefined,
-      });
+          : undefined;
+      }
+      if (Object.keys(patch).length > 0) {
+        await window.api.calls.update(current.id, patch);
+      }
       onClose();
+    } catch (err) {
+      setSaveError(toUserMessage(err, '保存に失敗しました'));
     } finally {
       setSaving(false);
     }
@@ -186,7 +223,7 @@ export function CallEditDialog({
       const result = await window.api.transcription.start(current.id, transcribeModel);
       if (!result.ok) setTranscribeError(result.error);
     } catch (err) {
-      setTranscribeError((err as Error).message);
+      setTranscribeError(toUserMessage(err));
     } finally {
       setTimeout(() => setTranscribing(false), 500);
     }
@@ -198,7 +235,11 @@ export function CallEditDialog({
 
   const showExportResult = (r: { canceled: boolean; path?: string; error?: string }) => {
     if (r.canceled) return;
-    setExportMessage(r.error ? `エラー: ${r.error}` : `保存しました: ${r.path}`);
+    setExportMessage(
+      r.error
+        ? { text: toUserMessage(r.error), error: true }
+        : { text: `保存しました: ${r.path}`, error: false },
+    );
     window.setTimeout(() => setExportMessage(null), 6000);
   };
 
@@ -247,7 +288,7 @@ export function CallEditDialog({
   const kindToggle = (
     <div className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold dark:border-slate-600">
       <button
-        onClick={() => setKind('call')}
+        onClick={() => { setKind('call'); markDirty('kind'); }}
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
           !isMeeting
             ? 'bg-brand-600 text-white'
@@ -258,7 +299,7 @@ export function CallEditDialog({
         <Phone size={12} /> 通話
       </button>
       <button
-        onClick={() => setKind('meeting')}
+        onClick={() => { setKind('meeting'); markDirty('kind'); }}
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
           isMeeting
             ? 'bg-violet-600 text-white'
@@ -312,7 +353,7 @@ export function CallEditDialog({
                 <Field label="会議タイトル">
                   <input
                     value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    onChange={(e) => { setTitle(e.target.value); markDirty('title'); }}
                     className={inputClass}
                     placeholder="例: 週次定例"
                   />
@@ -320,7 +361,7 @@ export function CallEditDialog({
                 <Field label="参加者（読点・カンマ区切り）">
                   <input
                     value={participants}
-                    onChange={(e) => setParticipants(e.target.value)}
+                    onChange={(e) => { setParticipants(e.target.value); markDirty('participants'); }}
                     className={inputClass}
                     placeholder="例: 山田、佐藤、鈴木"
                   />
@@ -331,7 +372,7 @@ export function CallEditDialog({
                 <Field label="連絡先名">
                   <input
                     value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
+                    onChange={(e) => { setContactName(e.target.value); markDirty('contactName'); }}
                     list="contact-name-suggestions"
                     className={inputClass}
                     placeholder="例: 山田太郎"
@@ -345,7 +386,7 @@ export function CallEditDialog({
                 <Field label="電話番号">
                   <input
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={(e) => { setPhoneNumber(e.target.value); markDirty('phoneNumber'); }}
                     onBlur={onPhoneBlur}
                     list="phone-number-suggestions"
                     className={inputClass}
@@ -366,7 +407,7 @@ export function CallEditDialog({
                   type="datetime-local"
                   step={1}
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={(e) => { setStartTime(e.target.value); markDirty('startTime'); }}
                   className={inputClass}
                 />
               </Field>
@@ -375,7 +416,7 @@ export function CallEditDialog({
                   type="datetime-local"
                   step={1}
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={(e) => { setEndTime(e.target.value); markDirty('endTime'); }}
                   className={inputClass}
                 />
               </Field>
@@ -396,7 +437,7 @@ export function CallEditDialog({
                     return (
                       <button
                         key={t.name}
-                        onClick={() => setTags(on ? tags.filter((x) => x !== t.name) : [...tags, t.name])}
+                        onClick={() => { setTags(on ? tags.filter((x) => x !== t.name) : [...tags, t.name]); markDirty('tags'); }}
                         className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
                           on
                             ? 'text-white ring-transparent'
@@ -412,7 +453,7 @@ export function CallEditDialog({
                   {tags.filter((tn) => !settings.tags.find((t) => t.name === tn)).map((tn) => (
                     <button
                       key={tn}
-                      onClick={() => setTags(tags.filter((x) => x !== tn))}
+                      onClick={() => { setTags(tags.filter((x) => x !== tn)); markDirty('tags'); }}
                       className="rounded-full bg-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200"
                       title="このタグを外す"
                     >
@@ -427,7 +468,7 @@ export function CallEditDialog({
               <Field label="メモ">
                 <textarea
                   value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
+                  onChange={(e) => { setMemo(e.target.value); markDirty('memo'); }}
                   rows={5}
                   className={inputClass}
                   placeholder={isMeeting ? '会議の要点・決定事項など' : '通話内容のメモ'}
@@ -679,12 +720,22 @@ export function CallEditDialog({
               </button>
             )}
             {exportMessage && (
-              <span className="max-w-md truncate text-xs text-emerald-700 dark:text-emerald-300" title={exportMessage}>
-                {exportMessage}
+              <span
+                className={`max-w-md text-xs ${
+                  exportMessage.error
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'truncate text-emerald-700 dark:text-emerald-300'
+                }`}
+                title={exportMessage.text}
+              >
+                {exportMessage.text}
               </span>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {saveError && (
+              <span className="max-w-sm text-xs text-red-600 dark:text-red-400">{saveError}</span>
+            )}
             <button
               onClick={onClose}
               disabled={saving}
@@ -697,7 +748,7 @@ export function CallEditDialog({
               disabled={saving}
               className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              保存
+              {saving ? '保存中…' : '保存'}
             </button>
           </div>
         </div>
