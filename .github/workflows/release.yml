@@ -85,7 +85,7 @@ jobs:
           $lines = @(
             '## 変更点'
             ''
-            '- （公開後に、この版の変更点を利用者向けの言葉で書き足す）'
+            '- （この版の変更点を利用者向けの言葉で書き入れてから公開する）'
             ''
             '## ダウンロード'
             ''
@@ -106,7 +106,9 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.value }}
           name: ${{ steps.tag.outputs.value }}
-          draft: false
+          # 下書きで作り、「変更点」を書き入れてから公開する（下書きは releases/latest に出ないので、
+          # 公開するまで自動更新の対象にならない）。公開したあとは下書きのまま残さないこと。
+          draft: true
           prerelease: false
           files: ${{ steps.locate.outputs.zip_path }}
           body_path: ${{ steps.notes.outputs.path }}

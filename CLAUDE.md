@@ -49,4 +49,4 @@ force push・履歴の書き換え（`git filter-branch` 等）・リポジト�
   - 添付の ZIP の名前は `-win-x64.zip` で終わる（`CallStack-<version>-win-x64.zip`）。この形の添付は1つだけにする
   - 検証に使う SHA256 は添付の `digest`（GitHub が付ける `sha256:...`）で、本文の表の SHA256 は読まない。
     本文の書き方を変えても自動更新には影響しない
-  - 下書き・プレリリースは `releases/latest` に出ないので、配布する版は公開済みの通常のリリースにする
+  - 下書き・プレリリースは `releases/latest` に出ない。Actions は下書きで作るので、変更点を書き入れたら必ず公開する（プレリリースにはしない）
