@@ -13,7 +13,8 @@
     "dist:win": "npm run build && electron-builder --win zip",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:installer": "npm run build && electron-builder --win nsis",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning \"src/**/__tests__/*.test.ts\""
   },
   "dependencies": {
     "dayjs": "^1.11.13",
