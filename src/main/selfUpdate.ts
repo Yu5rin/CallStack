@@ -1,9 +1,16 @@
 import { app, net, session } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
 import path from 'node:path';
-import extract from 'extract-zip';
+// electron のメインプロセスでは node:fs に asar 対応パッチが当たっており、
+// パス中に「*.asar」というセグメント（例: resources/app.asar）があると
+// アーカイブとして扱われてしまう。展開先（ステージング先）には配布 zip 由来の
+// resources/app.asar が、旧フォルダ(.old)にも入れ替え前の resources/app.asar が
+// 含まれるため、そこに触れる書き込み・削除・リネームが「Invalid package」等で
+// 失敗する。この対策として、このファイルではモジュール全体で node:fs の代わりに
+// asar パッチが当たっていない original-fs を使う。
+import originalFs from 'original-fs';
+import { extractZip } from './zipExtract';
 import { describeNetError } from './whisperBinary';
 import { logInfo } from './log';
 import type { UpdateCheckResult } from './updates';
@@ -11,6 +18,9 @@ import { checkForUpdate } from './updates';
 import { planCarryOver, USER_PLACED_RESOURCE_DIRS } from './updateCarryOver';
 import { isAllowedUpdateUrl, buildDownloadUrl } from './updateCheckLogic';
 import * as updateLeftoverPolicy from './updateLeftoverPolicy';
+
+const fs = originalFs.promises;
+const { createReadStream, createWriteStream } = originalFs;
 
 /**
  * Windows 向けの自己更新（ダウンロード → SHA256検証 → 展開 → 次回起動時に
@@ -328,7 +338,14 @@ async function prepareUpdateInner(
     // 前回の失敗分が残っていれば掃除してから展開する
     await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     await fs.mkdir(stagingDir, { recursive: true });
-    await extract(tmpZip, { dir: stagingDir });
+    try {
+      await extractZip(tmpZip, stagingDir, originalFs);
+    } catch (err) {
+      // 技術的な詳細はログへ、利用者への表示は日本語の文言にまとめる。
+      const detail = (err as Error).message;
+      logInfo('selfupdate', `zip 展開に失敗: ${detail}`);
+      throw new Error(`更新ファイルの展開に失敗しました: ${detail}`);
+    }
 
     // zip の中身がサブフォルダに包まれている場合（例: CallStack-2.6.0-win-x64/CallStack.exe）は
     // 直下へ引き上げる。既存の whisper.cpp 展開と同じ考え方。
