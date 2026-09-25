@@ -37,12 +37,37 @@
 - **システムトレイ常駐** と **通話中の HUD ウィンドウ**（常時最前面、経過時間を1秒更新）
 - **長電話アラート**（指定分経過で OS 通知）
 - **音声フィードバック**（開始／終了時のビープ音）
-- **週次マークダウンレポート** 出力（保留合計・純通話時間付き）
 - **録音の保管期限** 自動削除（既定 90 日、空欄で無制限）
 - **検索／フィルター**（タグ・メモ・連絡先・電話番号・文字起こし全文＋未タグ抽出）
 - **手動追加** で記録を後から作成も可能
 
-## 前提条件
+## インストール
+
+### 動作環境
+
+- Windows 10 / 11（64ビット）
+- インストーラは無く、ZIP を展開したフォルダからそのまま起動します（管理者権限は不要）
+
+### 手順
+
+1. [Releases](https://github.com/Yu5rin/CallStack/releases/latest) から `CallStack-<version>-win-x64.zip` をダウンロード
+2. ZIP を好きなフォルダに展開
+   - 自動更新を使う場合は、`Program Files` など書き込みに管理者権限が必要な場所を避けてください（[自動更新について](#自動更新について)）
+3. 展開したフォルダの `CallStack.exe` を実行
+
+設定と記録は `%APPDATA%\CallStack\` に保存されます（[データの保存場所](#データの保存場所)）。
+文字起こしを使う場合は [文字起こしの準備](#文字起こしの準備) を参照してください。
+
+### 更新
+
+起動時に GitHub の最新リリースを確認し、新しい版があれば通知します（設定 → バージョン情報 から手動でも確認できます）。
+
+- **自動更新を使う場合**: 設定で自動更新を ON にすると、ダウンロードから入れ替えまでアプリが行います。詳細は [自動更新について](#自動更新について)
+- **手動で更新する場合**: CallStack を終了し（トレイに残っていればトレイのメニューから終了）、新しい版の ZIP を展開したフォルダで古いフォルダを置き換えます
+  - 設定と記録は `%APPDATA%\CallStack\` にあるため、フォルダを置き換えても残ります
+  - `resources\whisper\` に手で置いた whisper.cpp はフォルダと一緒に置き換わるので、新しいフォルダへ移し直してください（設定画面からダウンロードした whisper.cpp は `%APPDATA%\CallStack\` 側にあるため影響しません）
+
+## 前提条件（ソースからビルドする場合）
 
 | 項目 | 必要バージョン |
 |------|---------------|
@@ -158,9 +183,14 @@ npm run dist:installer
 | 操作 | キー |
 |------|------|
 | 通話開始 | `Ctrl+Shift+S` |
-| 通話終了 | `Ctrl+Shift+E` |
+| 会議開始 | `Ctrl+Shift+M` |
+| 記録終了 | `Ctrl+Shift+E` |
 | 保留トグル | `Ctrl+Shift+H` |
+| 録音の一時停止/再開 | `Ctrl+Shift+P` |
+| マーカーを打つ | `Ctrl+Shift+K` |
+| タグ1〜4 を付け外し | `Ctrl+Shift+1` 〜 `Ctrl+Shift+4` |
 | メイン窓を表示/隠す | `Ctrl+Shift+T` |
+| 設定を開く | `Ctrl+Shift+,` |
 
 アプリの「設定」ページで自由に変更できます。
 
@@ -193,14 +223,18 @@ npm run dist:installer
 
 ### 1. whisper.cpp の実行ファイルを取得
 
+**設定 → 文字起こし** の「whisper.cpp をダウンロード」ボタンを押すと、Windows 用の実行ファイルを取得して自動で配置します（`%APPDATA%\CallStack\whisper\`。手で置いたものより優先して使われます）。
+
+手で配置する場合は次のとおりです。
+
 1. https://github.com/ggerganov/whisper.cpp/releases から最新の Windows ビルドをダウンロード
    - 例: `whisper-blas-bin-x64.zip`（CPU 高速化版、推奨）
-2. zip を解凍し、中の `main.exe`（新しい版なら `whisper-cli.exe`）を取り出す
-3. ファイル名を **`whisper-cli.exe`** にして以下に配置:
-   - 開発時: `resources\whisper\whisper-cli.exe`
-   - 配布された .zip 版: `<解凍フォルダ>\resources\whisper\whisper-cli.exe`
+2. zip を解凍し、**中のファイルをすべて**（`whisper.dll`・`ggml*.dll` などの DLL も含めて）以下のフォルダへコピー。exe だけでは DLL が見つからず `0xC0000135` で失敗します
+   - 開発時: `resources\whisper\`
+   - 配布された .zip 版: `<解凍フォルダ>\resources\whisper\`
+3. 実行ファイルの名前が `main.exe`（古い版）なら **`whisper-cli.exe`** に変更
 
-> 環境変数 `TELTIMESTACK_WHISPER_BIN` に絶対パスを設定するとそちらが優先されます。
+> アプリ内ダウンロード・`resources\whisper\` のどちらにも実行ファイルが無いときは、環境変数 `TELTIMESTACK_WHISPER_BIN` に設定した絶対パスが使われます（開発用）。
 
 ### 2. モデルファイルのダウンロード
 

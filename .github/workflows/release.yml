@@ -67,37 +67,50 @@ jobs:
           echo "zip_path=$($zip.FullName)" >> $env:GITHUB_OUTPUT
           echo "zip_name=$($zip.Name)" >> $env:GITHUB_OUTPUT
 
+      # リリース本文は「## 変更点」「## ダウンロード」と README への案内だけにする。
+      # インストール方法や主な機能など版をまたいで変わらない説明は README に書く。
+      # 自動更新（src/main/updates.ts）は本文を読まず、添付の名前と digest だけを使う。
+      - name: Build release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $zip = Get-Item -LiteralPath $env:ZIP_PATH
+          $inv = [System.Globalization.CultureInfo]::InvariantCulture
+          if ($zip.Length -ge 1MB) {
+            $size = [string]::Format($inv, '{0:F1} MB', $zip.Length / 1MB)
+          } else {
+            $size = [string]::Format($inv, '{0:F1} KB', $zip.Length / 1KB)
+          }
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip.FullName).Hash.ToLowerInvariant()
+          $lines = @(
+            '## 変更点'
+            ''
+            '- （この版の変更点を利用者向けの言葉で書き入れてから公開する）'
+            ''
+            '## ダウンロード'
+            ''
+            '| ファイル | サイズ | SHA256 |'
+            '|---|---|---|'
+            "| $($zip.Name) | $size | ``$sha`` |"
+            ''
+            'インストールと更新の方法は [README](https://github.com/Yu5rin/CallStack#インストール) をご覧ください。'
+          )
+          $path = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [System.IO.File]::WriteAllLines($path, [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
+          echo "path=$path" >> $env:GITHUB_OUTPUT
+        env:
+          ZIP_PATH: ${{ steps.locate.outputs.zip_path }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.value }}
-          name: CallStack ${{ steps.tag.outputs.value }}
-          draft: false
+          name: ${{ steps.tag.outputs.value }}
+          # 下書きで作り、「変更点」を書き入れてから公開する（下書きは releases/latest に出ないので、
+          # 公開するまで自動更新の対象にならない）。公開したあとは下書きのまま残さないこと。
+          draft: true
           prerelease: false
-          generate_release_notes: true
           files: ${{ steps.locate.outputs.zip_path }}
-          body: |
-            ## CallStack ${{ steps.tag.outputs.value }}
-
-            ### インストール方法
-            1. 下の Assets から `CallStack-*-win-x64.zip` をダウンロード
-            2. ZIP を解凍
-            3. `CallStack.exe` を実行（インストール不要）
-
-            ### 主な機能
-            - グローバルショートカットによる通話時間記録（Ctrl+Shift+S / E）
-            - 会議の記録・録音・文字起こし（Ctrl+Shift+M で開始）
-            - 録音ソースの自由な組み合わせ（マイク／システム音声、画面全体・ウィンドウ選択）
-            - 録音の一時停止/再開（Ctrl+Shift+P）
-            - マーカー（ブックマーク）打刻と議事録 (Markdown) エクスポート
-            - 通話中 HUD（レベルメータ・マーカー・一時停止対応）・システムトレイ常駐
-            - 統計ダッシュボード（日別・タグ別・連絡先別）
-            - CSV エクスポート／インポート
-            - 保留機能（Ctrl+Shift+H）
-            - 録音（MP3）＋ whisper.cpp によるオフライン文字起こし（進捗表示・キャンセル・用語ヒント対応）
-            - 録音 MP3・文字起こしテキストの保存（ダウンロード）
-
-            ### whisper.cpp 文字起こしの準備
-            `resources\whisper\README.txt` を参照してください。
+          body_path: ${{ steps.notes.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
