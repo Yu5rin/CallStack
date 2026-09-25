@@ -93,13 +93,13 @@ export function LiveApp() {
       {/* ヘッダー: ドラッグで移動。フォントサイズ切替と × */}
       <div className="hud-drag flex flex-none select-none items-center gap-1.5 border-b border-rule bg-chrome px-2 py-1">
         <AudioLines size={12} strokeWidth={2.25} className="flex-none text-accent-ink" />
-        <span className="text-[10px] font-medium text-ink-mute">ライブ字幕</span>
+        <span className="text-xs font-medium text-ink-mute">ライブ字幕</span>
         <div className="hud-no-drag ml-auto flex items-center gap-0.5">
           {(['sm', 'md', 'lg'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setFont(s)}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+              className={`rounded px-1.5 py-0.5 text-xs font-medium transition ${
                 fontSize === s ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10 hover:text-ink'
               }`}
               title={`文字サイズ: ${FONT[s].label}`}
@@ -110,7 +110,7 @@ export function LiveApp() {
           <button
             onClick={handleClose}
             className="ml-1 rounded p-0.5 text-ink-mute transition hover:bg-danger hover:text-on-accent"
-            title="ライブ字幕を閉じる（HUD の「字幕」ボタンで再表示）"
+            title="ライブ字幕を閉じる（小窓（HUD）の「字幕」ボタンで再表示）"
           >
             <X size={14} strokeWidth={2.5} />
           </button>
@@ -125,7 +125,7 @@ export function LiveApp() {
           className={`h-full overflow-y-auto px-3 py-2 ${font.cls}`}
         >
           {!hasContent ? (
-            <div className="text-[11px] text-ink-mute">
+            <div className="text-xs text-ink-mute">
               録音中の音声をここに文字起こしします…
             </div>
           ) : (
@@ -142,7 +142,7 @@ export function LiveApp() {
         {!autoFollow && (
           <button
             onClick={returnToLatest}
-            className="hud-no-drag absolute bottom-2 right-3 inline-flex items-center gap-0.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-on-accent shadow-lg hover:bg-accent/90"
+            className="hud-no-drag absolute bottom-2 right-3 inline-flex items-center gap-0.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-on-accent shadow-lg hover:bg-accent/90"
           >
             <ChevronDown size={12} strokeWidth={2.5} /> 最新へ
           </button>

@@ -287,8 +287,8 @@ function AppContent() {
                 {([
                   { action: 'audio-import', icon: <FileAudio size={16} />, label: '音声の取り込み…' },
                   { action: 'manual-add', icon: <Plus size={16} />, label: '手動で追加' },
-                  { action: 'csv-import', icon: <Upload size={16} />, label: 'CSV インポート…' },
-                  { action: 'csv-export', icon: <Download size={16} />, label: 'CSV エクスポート…' },
+                  { action: 'csv-import', icon: <Upload size={16} />, label: 'CSV を取り込む…' },
+                  { action: 'csv-export', icon: <Download size={16} />, label: 'CSV を書き出す…' },
                 ] as const).map((item) => (
                   <button
                     key={item.action}

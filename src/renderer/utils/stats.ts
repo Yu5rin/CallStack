@@ -132,6 +132,11 @@ export function computeByTitle(calls: CallRecord[]): ContactBucket[] {
   return computeByName(calls, (c) => c.title || '（無題の会議）');
 }
 
+/** 連絡先/会議名別サマリー（「すべて」タブ用。通話は連絡先名、会議は会議名で集計） */
+export function computeByContactOrTitle(calls: CallRecord[]): ContactBucket[] {
+  return computeByName(calls, (c) => (c.kind === 'meeting' ? (c.title || '（無題の会議）') : c.contactName));
+}
+
 function computeByName(calls: CallRecord[], getName: (c: CallRecord) => string | undefined): ContactBucket[] {
   const map = new Map<string, { name: string; count: number; totalSec: number; last: string; tagCounts: Map<string, number> }>();
   for (const c of calls) {

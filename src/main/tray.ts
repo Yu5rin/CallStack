@@ -97,8 +97,8 @@ function buildMenu(state: TrayState, h: TrayHandlers): Electron.Menu {
           { label: '会議を開始', click: h.onStartMeeting },
         ]),
     { type: 'separator' },
-    { label: 'メイン窓を開く', click: h.onOpen },
-    { label: 'CSV エクスポート…', click: h.onExport },
+    { label: 'メインウィンドウを開く', click: h.onOpen },
+    { label: 'CSV を書き出す…', click: h.onExport },
     { type: 'separator' },
     {
       label: '外観テーマ',

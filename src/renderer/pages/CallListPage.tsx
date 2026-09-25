@@ -327,7 +327,7 @@ export function CallListPage({
         ? { range: 'custom', from: customFrom || undefined, to: customTo || undefined }
         : { range: (period === 'thisWeek' || period === 'thisMonth') ? period : 'all' };
     const r = await window.api.csv.export(opts);
-    if (!r.canceled) toast.success(`${r.count} 件を ${r.path} にエクスポートしました`);
+    if (!r.canceled) toast.success(`${r.count} 件を ${r.path} に書き出しました`);
   };
 
   const handleImport = async () => {
@@ -394,6 +394,7 @@ export function CallListPage({
         { label: '書き出し', icon: null, header: true },
         ...(ctxMenu.call.audio ? [{ label: '録音を書き出す（MP3）', icon: <Download size={16} />, run: async () => showSaveResult(await window.api.recording.saveAs(ctxMenu.call.id)) }] : []),
         ...(ctxMenu.call.transcript ? [{ label: '文字起こしを書き出す', icon: <FileText size={16} />, run: async () => showSaveResult(await window.api.transcript.saveAs(ctxMenu.call.id, false)) }] : []),
+        ...(ctxMenu.call.transcript ? [{ label: '文字起こしを書き出す（時刻付き）', icon: <FileText size={16} />, run: async () => showSaveResult(await window.api.transcript.saveAs(ctxMenu.call.id, true)) }] : []),
         { label: '議事録を書き出す（Markdown）', icon: <FileText size={16} />, run: async () => showSaveResult(await window.api.minutes.saveAs(ctxMenu.call.id)) },
         { label: 'ゴミ箱へ移動', icon: <Trash2 size={16} />, danger: true, run: async () => {
             const removed = await deleteCallWithConfirm(ctxMenu.call.id, settings.confirmCallDelete);
@@ -647,10 +648,10 @@ export function CallListPage({
           </div>
           {!trashMode && (
             <div className="flex items-center justify-between gap-2">
-              <button onClick={() => { setTrashMode(true); setSelectedId(null); }} className="text-accent-ink hover:underline">
+              <button onClick={() => { setTrashMode(true); setSelectedId(null); }} className="shrink-0 whitespace-nowrap text-accent-ink hover:underline">
                 ゴミ箱（{trashCalls.length}）
               </button>
-              <span className="truncate">
+              <span className="min-w-0 truncate">
                 {periodLabel} {footerSummary.total}件・通話 {formatHMShort(footerSummary.callSec)}・会議 {formatHMShort(footerSummary.meetingSec)}
               </span>
             </div>
@@ -730,7 +731,7 @@ export function CallListPage({
       {importResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => setImportResult(null)}>
           <div className="w-full max-w-md rounded-lg bg-surface p-6 shadow-lg text-ink" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-lg font-medium">CSV インポート完了</h3>
+            <h3 className="mb-3 text-lg font-medium">CSV 取り込み完了</h3>
             <ul className="space-y-1 text-sm text-ink">
               <li>新規追加: <span className="font-medium">{importResult.inserted}</span></li>
               <li>更新: <span className="font-medium">{importResult.updated}</span></li>
@@ -754,7 +755,7 @@ export function CallListPage({
           <div className="w-full max-w-md rounded-lg bg-surface p-6 shadow-lg text-ink" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 text-lg font-medium">JSON 復元完了</h3>
             <div className="space-y-2 text-sm text-ink">
-              <p>{restoreResult.calls} 件の通話記録を読み込みました。</p>
+              <p>{restoreResult.calls} 件の記録を取り込みました。</p>
               <p className="break-all text-xs text-ink-mute">復元前のデータは {restoreResult.backupPath} にバックアップ済みです。</p>
             </div>
             <div className="mt-5 flex justify-end">

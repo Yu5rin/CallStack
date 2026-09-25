@@ -591,7 +591,7 @@ async function showSaveDialogRemembered(
 
 async function chooseAndExport(): Promise<{ count: number; path: string } | null> {
   const filePath = await showSaveDialogRemembered(
-    'CSV をエクスポート',
+    'CSV を書き出す',
     `callstack-${localDate(new Date())}.csv`,
     [{ name: 'CSV', extensions: ['csv'] }],
   );
@@ -607,7 +607,7 @@ const trayHandlers: TrayHandlers = {
   onOpen: () => showMainWindow(),
   onExport: async () => {
     const r = await chooseAndExport();
-    if (r) notify('CSV エクスポート完了', `${r.count} 件を ${r.path} に書き出しました`);
+    if (r) notify('CSV 書き出し完了', `${r.count} 件を ${r.path} に書き出しました`);
   },
   onQuit: () => {
     markForceQuit();
@@ -863,7 +863,7 @@ function setupIpc(): void {
 
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
     const filePath = await showSaveDialogRemembered(
-      'CSV をエクスポート',
+      'CSV を書き出す',
       `callstack-${localDate(new Date())}.csv`,
       [{ name: 'CSV', extensions: ['csv'] }],
     );
@@ -905,7 +905,7 @@ function setupIpc(): void {
 
   ipcMain.handle('csv:import', async (): Promise<{ canceled: true } | { canceled: false; result: CsvImportResult; backupPath: string }> => {
     const dlg = await dialog.showOpenDialog({
-      title: 'CSV を読み込み',
+      title: 'CSV を取り込む',
       filters: [{ name: 'CSV', extensions: ['csv'] }],
       properties: ['openFile'],
     });
@@ -1232,8 +1232,8 @@ function setupIpc(): void {
   // ============ Transcription ============
   ipcMain.handle('transcription:start', async (_e, callId: string, model?: WhisperModel) => {
     const rec = store.getCall(callId);
-    if (!rec) return { ok: false, error: '通話記録が見つかりません。' };
-    if (!rec.audio) return { ok: false, error: 'この通話には録音がありません。' };
+    if (!rec) return { ok: false, error: '記録が見つかりません。' };
+    if (!rec.audio) return { ok: false, error: 'この記録には録音がありません。' };
     if (rec.deletedAt) return { ok: false, error: 'ゴミ箱の記録は文字起こしできません。' };
     // 二重開始の防止（すでに待機中・実行中なら受け付けない）
     if (isTranscriptionActive(callId) || rec.transcriptStatus === 'queued' || rec.transcriptStatus === 'running') {

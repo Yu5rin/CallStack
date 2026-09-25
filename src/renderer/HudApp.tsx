@@ -248,10 +248,9 @@ export function HudApp() {
             <button
               key={t.name}
               onClick={() => handleAssignTag(t.name)}
-              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition ${
-                on ? 'text-on-accent' : 'text-ink-mute ring-rule hover:bg-ink/10'
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 transition ${
+                on ? 'bg-accent-soft text-accent-ink ring-accent-soft' : 'text-ink-mute ring-rule hover:bg-ink/10'
               }`}
-              style={on ? { backgroundColor: t.color, borderColor: t.color } : undefined}
               title={on ? 'タグを外す' : `タグ「${t.name}」を付ける`}
             >
               {t.name}
@@ -301,7 +300,7 @@ export function HudApp() {
       : <span className="inline-flex items-center gap-1 rounded bg-danger/20 px-1 py-px font-medium text-danger"><span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger" /> REC</span>
   );
 
-  const btnBase = 'hud-no-drag inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition';
+  const btnBase = 'hud-no-drag inline-flex min-h-7 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition';
   const btnGhost = `${btnBase} bg-ink/10 text-ink hover:bg-ink/15`;
 
   const markerButton = (compact = false) => (
@@ -339,7 +338,7 @@ export function HudApp() {
     <button
       onClick={handleOpenEdit}
       className={btnGhost}
-      title={`${isMeeting ? '会議' : '通話'}記録の編集を開く（メイン窓が前面に出ます）`}
+      title={`${isMeeting ? '会議' : '通話'}記録の編集を開く（メインウィンドウが前面に出ます）`}
     >
       <Pencil size={11} strokeWidth={2.25} />
       編集
@@ -394,49 +393,46 @@ export function HudApp() {
   const sizeButton = (
     <button
       onClick={handleCycleSize}
-      className="hud-no-drag rounded p-0.5 text-ink-mute transition hover:bg-ink/10 hover:text-ink"
+      className="hud-no-drag flex h-7 w-7 flex-none items-center justify-center rounded-md text-ink-mute transition hover:bg-ink/10 hover:text-ink"
       title="サイズ切替 (mini / compact / full)"
     >
       <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor"><path d="M3 3h6v2H5v4H3V3zm14 0v6h-2V5h-4V3h6zM3 17v-6h2v4h4v2H3zm14 0h-6v-2h4v-4h2v6z"/></svg>
     </button>
   );
 
-  // 密集アイコンボタン（compact 用）
+  // 密集アイコンボタン（compact/mini 用。当たり判定を 28×28px 確保しつつアイコン自体は小さいまま）
   const dense = (on: boolean) =>
-    `hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${
+    `hud-no-drag inline-flex h-7 w-7 flex-none items-center justify-center rounded-md transition ${
+      on ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'
+    }`;
+  // マーカー数バッジなど、正方形の枠に収まらない内容を持つボタン用（高さは 28px を維持しつつ横に伸びる）
+  const denseAuto = (on: boolean) =>
+    `hud-no-drag inline-flex h-7 min-w-7 flex-none items-center justify-center gap-0.5 rounded-md px-1.5 transition ${
       on ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'
     }`;
 
-  // ============ mini (240×34) ============
+  // ============ mini (320×40) ============
   if (size === 'mini') {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag flex h-[34px] w-full flex-none select-none items-center gap-1 rounded-lg px-2 text-ink shadow-lg ring-1 ring-rule"
+          className="hud-drag flex h-10 w-full flex-none select-none items-center gap-1 rounded-lg px-2 text-ink shadow-lg ring-1 ring-rule"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
-          title={`${isMeeting ? '会議中' : '通話中'}${displayName ? ` — ${displayName}` : ''}\nダブルクリックでメイン窓`}
+          title={`${isMeeting ? '会議中' : '通話中'}${displayName ? ` — ${displayName}` : ''}\nダブルクリックでメインウィンドウ`}
         >
-          <span className={`inline-block h-2 w-2 rounded-full ${recording && !paused ? 'animate-pulse bg-danger' : holding || paused ? 'bg-pending' : isMeeting ? 'bg-meeting' : 'bg-accent'}`} />
+          <span className={`inline-block h-2 w-2 flex-none rounded-full ${recording && !paused ? 'animate-pulse bg-danger' : holding || paused ? 'bg-pending' : isMeeting ? 'bg-meeting' : 'bg-accent'}`} />
           <div className="font-mono text-sm font-semibold tabular-nums">{formatHMS(elapsedSec)}</div>
-          <div className="min-w-0 flex-1 truncate text-[9px] text-ink-mute">{displayName}</div>
-          <button
-            onClick={handleMarker}
-            className={`hud-no-drag rounded p-0.5 ${markerFlash ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
-            title="マーカーを打つ"
-          >
+          <div className="min-w-0 flex-1 truncate text-[13px] text-ink-mute">{displayName}</div>
+          <button onClick={handleMarker} className={denseAuto(markerFlash)} title="マーカーを打つ">
             <Bookmark size={12} strokeWidth={2.25} />
           </button>
-          <button
-            onClick={handleOpenMemo}
-            className={`hud-no-drag rounded p-0.5 ${memoOpen ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
-            title="メモを編集"
-          >
+          <button onClick={handleOpenMemo} className={dense(memoOpen)} title="メモを編集">
             <StickyNote size={12} strokeWidth={2.25} />
           </button>
           <button
             onClick={handleOpenInfo}
-            className={`hud-no-drag rounded p-0.5 ${infoOpen ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
+            className={dense(infoOpen)}
             title={isMeeting ? 'タイトル・参加者・タグを追記' : '連絡先・電話番号・タグを追記'}
           >
             <Contact size={12} strokeWidth={2.25} />
@@ -444,7 +440,7 @@ export function HudApp() {
           {liveEnabled && (
             <button
               onClick={handleToggleLive}
-              className={`hud-no-drag rounded p-0.5 ${liveVisible ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
+              className={dense(liveVisible)}
               title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
             >
               <AudioLines size={12} strokeWidth={2.25} />
@@ -453,10 +449,10 @@ export function HudApp() {
           {sizeButton}
           <button
             onClick={handleEnd}
-            className="hud-no-drag rounded-md bg-danger p-0.5 text-on-accent hover:bg-danger/90"
+            className="hud-no-drag flex h-7 w-7 flex-none items-center justify-center rounded-md bg-danger text-on-accent hover:bg-danger/90"
             title="記録を終了"
           >
-            <X size={12} strokeWidth={2.5} />
+            <X size={13} strokeWidth={2.5} />
           </button>
         </div>
         {infoBox}
@@ -465,17 +461,17 @@ export function HudApp() {
     );
   }
 
-  // ============ compact (400×70) ============
+  // ============ compact (400×80) ============
   if (size === 'compact') {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag h-[70px] w-full flex-none select-none rounded-lg px-3 py-1.5 text-ink shadow-lg ring-1 ring-rule"
+          className="hud-drag h-20 w-full flex-none select-none rounded-lg px-3 py-1.5 text-ink shadow-lg ring-1 ring-rule"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
-          title="ダブルクリックでメイン窓を開く"
+          title="ダブルクリックでメインウィンドウを開く"
         >
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex items-center gap-2 text-xs">
             {statusLabel}
             <span className="min-w-0 flex-1 truncate text-ink-mute">{displayName}</span>
             {recBadge}
@@ -486,9 +482,9 @@ export function HudApp() {
             <div className="font-mono text-lg font-semibold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
             {/* アイコンのみで省スペース化し、終了ボタンまで必ず表示されるようにする */}
             <div className="hud-no-drag ml-auto flex flex-none items-center gap-0.5">
-              <button onClick={handleMarker} className={dense(markerFlash)} title="マーカーを打つ">
+              <button onClick={handleMarker} className={denseAuto(markerFlash)} title="マーカーを打つ">
                 <Bookmark size={13} strokeWidth={2.25} />
-                {markerCount > 0 && <span className="ml-0.5 text-[9px] font-medium">{markerCount}</span>}
+                {markerCount > 0 && <span className="ml-0.5 text-xs font-medium">{markerCount}</span>}
               </button>
               {recording && (
                 <button onClick={handleTogglePause} className={dense(paused)} title={paused ? '録音を再開' : '録音を一時停止'}>
@@ -506,7 +502,7 @@ export function HudApp() {
               {liveEnabled && (
                 <button
                   onClick={handleToggleLive}
-                  className={`hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${liveVisible ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
+                  className={dense(liveVisible)}
                   title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
                 >
                   <AudioLines size={13} strokeWidth={2.25} />
@@ -518,7 +514,7 @@ export function HudApp() {
               <button onClick={handleOpenMemo} className={dense(memoOpen)} title="メモを編集">
                 <StickyNote size={13} strokeWidth={2.25} />
               </button>
-              <button onClick={handleEnd} className="hud-no-drag inline-flex flex-none items-center rounded-md bg-danger p-1 text-on-accent hover:bg-danger/90" title="記録を終了">
+              <button onClick={handleEnd} className="hud-no-drag inline-flex h-7 w-7 flex-none items-center justify-center rounded-md bg-danger text-on-accent hover:bg-danger/90" title="記録を終了">
                 <Square size={12} strokeWidth={2.5} fill="currentColor" />
               </button>
             </div>
@@ -530,16 +526,16 @@ export function HudApp() {
     );
   }
 
-  // ============ full (470×122) ============
+  // ============ full (560×132) ============
   return (
     <div className="flex h-full w-full flex-col">
       <div
         className="hud-drag w-full flex-none select-none rounded-lg px-4 py-2.5 text-ink shadow-lg ring-1 ring-rule"
-        style={{ ...containerStyle, height: 122 }}
+        style={{ ...containerStyle, height: 132 }}
         onDoubleClick={handleOpenMain}
-        title="ダブルクリックでメイン窓を開く"
+        title="ダブルクリックでメインウィンドウを開く"
       >
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-xs">
           {statusLabel}
           <span className="min-w-0 flex-1 truncate text-ink-mute">{displayName}</span>
           {recBadge}
@@ -549,7 +545,7 @@ export function HudApp() {
         <div className="mt-1 flex items-center gap-2">
           <div className="font-mono text-3xl font-semibold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
           {holding && (
-            <span className="text-[10px] text-pending">保留 {formatHMS(holdSec)}</span>
+            <span className="text-xs text-pending">保留 {formatHMS(holdSec)}</span>
           )}
         </div>
         <div className="hud-no-drag mt-1.5 flex items-center gap-1.5">

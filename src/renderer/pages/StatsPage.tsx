@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
-import { CallRecord, RecordKind, Settings } from '../../shared/types';
-import { computeOverview, computeDaily, computeByTag, computeHourHistogram, computeByContact, computeByTitle } from '../utils/stats';
+import { CallRecord, Settings } from '../../shared/types';
+import {
+  computeOverview, computeDaily, computeByTag, computeHourHistogram,
+  computeByContact, computeByTitle, computeByContactOrTitle,
+} from '../utils/stats';
 import { formatHMS, formatHMShort, formatDateTime } from '../utils/format';
 import { Phone, Users } from 'lucide-react';
 import { HeatmapCalendar } from '../components/HeatmapCalendar';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LabelList,
 } from 'recharts';
 
 interface Props {
@@ -14,6 +16,8 @@ interface Props {
   settings: Settings;
   onSelectContact?: (name: string) => void;
 }
+
+type KindTab = 'call' | 'meeting' | 'all';
 
 // recharts のツールチップはインラインスタイルで渡す必要があるため、
 // トークン（CSS 変数）をそのまま文字列として使う（テーマ切り替えに自動追従する）
@@ -27,16 +31,18 @@ const TOOLTIP_STYLE: React.CSSProperties = {
 const TOOLTIP_LABEL_STYLE: React.CSSProperties = { color: 'rgb(var(--c-ink-mute))' };
 
 export function StatsPage({ calls, settings, onSelectContact }: Props) {
-  // 通話と会議は性質が違うためタブで分けて集計する
-  const [kindTab, setKindTab] = useState<RecordKind>('call');
+  // 通話・会議・すべてはタブで切り替える（連絡先/会議名別のクリック選択は通話タブのみ有効）
+  const [kindTab, setKindTab] = useState<KindTab>('call');
   const isMeetingTab = kindTab === 'meeting';
+  const isCallTab = kindTab === 'call';
   const target = useMemo(
-    () => calls.filter((c) => (c.kind === 'meeting') === isMeetingTab),
-    [calls, isMeetingTab],
+    () => (kindTab === 'all' ? calls : calls.filter((c) => (c.kind === 'meeting') === isMeetingTab)),
+    [calls, kindTab, isMeetingTab],
   );
   const meetingCount = useMemo(() => calls.filter((c) => c.kind === 'meeting').length, [calls]);
 
   const overview = useMemo(() => computeOverview(target), [target]);
+  const hasData = overview.totalCount > 0;
   const tagColors = useMemo(() => {
     const m: Record<string, string> = {};
     for (const t of settings.tags) m[t.name] = t.color;
@@ -46,86 +52,127 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
   const byTag = useMemo(() => computeByTag(target, tagColors), [target, tagColors]);
   const hourly = useMemo(() => computeHourHistogram(target), [target]);
   const byContact = useMemo(
-    () => (isMeetingTab ? computeByTitle(target) : computeByContact(target)),
-    [target, isMeetingTab],
+    () => (isMeetingTab ? computeByTitle(target) : kindTab === 'all' ? computeByContactOrTitle(target) : computeByContact(target)),
+    [target, isMeetingTab, kindTab],
   );
-  const noun = isMeetingTab ? '会議' : '通話';
+  const noun = isMeetingTab ? '会議' : isCallTab ? '通話' : '記録';
 
   const dailyChart = daily.map((d) => ({
     date: d.date.slice(5),
     minutes: Math.round((d.totalSec / 60) * 10) / 10,
     count: d.count,
   }));
+  const dailyHasData = dailyChart.some((d) => d.count > 0);
 
-  const tagPie = byTag.map((b) => ({ name: b.tag, value: b.totalSec, color: b.color }));
   const hourChart = hourly.map((h) => ({ hour: `${h.hour}時`, count: h.count }));
+  const hourlyHasData = hourChart.some((h) => h.count > 0);
   const top10Contacts = byContact.slice(0, 10).map((b) => ({ name: b.name, minutes: Math.round(b.totalSec / 60) }));
+
+  /** データが無いときは「0秒」「0件」ではなく「—」を表示する */
+  const tileTime = (sec: number) => (hasData ? formatHMShort(sec) : '—');
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center gap-1">
+      <div className="inline-flex items-center gap-0.5 rounded-md border border-rule bg-surface p-0.5" role="tablist" aria-label="種類">
         <button
+          role="tab"
+          aria-selected={isCallTab}
           onClick={() => setKindTab('call')}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-            !isMeetingTab ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-paper'
+          className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+            isCallTab ? 'bg-accent-soft text-accent-ink' : 'text-ink-mute hover:text-ink'
           }`}
         >
           <Phone size={14} className="mr-1.5 inline align-[-2px]" />通話
         </button>
         <button
+          role="tab"
+          aria-selected={isMeetingTab}
           onClick={() => setKindTab('meeting')}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-            isMeetingTab ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-paper'
+          className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+            isMeetingTab ? 'bg-accent-soft text-accent-ink' : 'text-ink-mute hover:text-ink'
           }`}
         >
           <Users size={14} className="mr-1.5 inline align-[-2px]" />会議 ({meetingCount})
         </button>
+        <button
+          role="tab"
+          aria-selected={kindTab === 'all'}
+          onClick={() => setKindTab('all')}
+          className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+            kindTab === 'all' ? 'bg-accent-soft text-accent-ink' : 'text-ink-mute hover:text-ink'
+          }`}
+        >
+          すべて
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label={`総${noun}数`} value={`${overview.totalCount}`} unit="件" />
-        <StatCard label="合計時間" value={formatHMShort(overview.totalSec)} />
-        <StatCard label="平均" value={formatHMShort(overview.avgSec)} />
-        <StatCard label="最長" value={formatHMShort(overview.longestSec)} />
-        <StatCard label="最短" value={formatHMShort(overview.shortestSec)} />
-        <StatCard label="今日 / 今週 / 今月" value={`${overview.todayCount} / ${overview.weekCount} / ${overview.monthCount}`} unit="件" />
+        <StatCard label={`総${noun}数`} value={hasData ? `${overview.totalCount}` : '—'} unit={hasData ? '件' : undefined} />
+        <StatCard label="合計時間" value={tileTime(overview.totalSec)} />
+        <StatCard label="平均" value={tileTime(overview.avgSec)} />
+        <StatCard label="最長" value={tileTime(overview.longestSec)} />
+        <StatCard label="最短" value={tileTime(overview.shortestSec)} />
+        <StatCard
+          label="今日 / 今週 / 今月"
+          value={
+            overview.todayCount === 0 && overview.weekCount === 0 && overview.monthCount === 0
+              ? '—'
+              : `${overview.todayCount} / ${overview.weekCount} / ${overview.monthCount}`
+          }
+          unit={overview.todayCount || overview.weekCount || overview.monthCount ? '件' : undefined}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 rounded-lg border border-rule bg-surface p-4">
           <h3 className="mb-3 text-sm font-medium text-ink">過去30日の{noun}時間（分）</h3>
-          <div className="h-64">
-            <ResponsiveContainer>
-              <BarChart data={dailyChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
-                <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
-                <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
-                <Bar dataKey="minutes" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {dailyHasData ? (
+            <div className="h-64">
+              <ResponsiveContainer>
+                <BarChart data={dailyChart}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                  <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                  <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                  <Bar dataKey="minutes" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex h-64 items-center justify-center text-sm text-ink-mute">この期間の記録はありません</div>
+          )}
         </div>
 
         <div className="rounded-lg border border-rule bg-surface p-4">
-          <h3 className="mb-3 text-sm font-medium text-ink">タグ別構成（時間）</h3>
-          <div className="h-64">
-            {tagPie.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-ink-mute">データなし</div>
-            ) : (
+          <h3 className="mb-3 text-sm font-medium text-ink">タグ別の時間</h3>
+          {byTag.length === 0 ? (
+            <div className="flex h-64 items-center justify-center text-sm text-ink-mute">この期間の記録はありません</div>
+          ) : (
+            <div style={{ height: Math.max(64 * 4, byTag.length * 32) }}>
               <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={tagPie} dataKey="value" nameKey="name" innerRadius={40} outerRadius={80}>
-                    {tagPie.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.color} />
-                    ))}
-                  </Pie>
+                <BarChart data={byTag} layout="vertical" margin={{ left: 8, right: 48 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" horizontal={false} />
+                  <XAxis type="number" hide />
+                  <YAxis
+                    type="category"
+                    dataKey="tag"
+                    width={88}
+                    tick={{ fontSize: 12, fill: 'rgb(var(--c-ink))' }}
+                    stroke="rgb(var(--c-rule))"
+                  />
                   <Tooltip formatter={(v: number | string) => formatHMS(Number(v))} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
-                  <Legend wrapperStyle={{ color: 'rgb(var(--c-ink-mute))', fontSize: 12 }} />
-                </PieChart>
+                  <Bar dataKey="totalSec" fill="rgb(var(--c-accent))" radius={[0, 4, 4, 0]} barSize={18}>
+                    <LabelList
+                      dataKey="totalSec"
+                      position="right"
+                      formatter={(v: number) => formatHMShort(v)}
+                      style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }}
+                    />
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -136,17 +183,21 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
 
       <div className="rounded-lg border border-rule bg-surface p-4">
         <h3 className="mb-3 text-sm font-medium text-ink">時間帯別の発生件数</h3>
-        <div className="h-56">
-          <ResponsiveContainer>
-            <BarChart data={hourChart}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
-              <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
-              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
-              <Bar dataKey="count" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {hourlyHasData ? (
+          <div className="h-56">
+            <ResponsiveContainer>
+              <BarChart data={hourChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
+                <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                <Bar dataKey="count" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="flex h-56 items-center justify-center text-sm text-ink-mute">この期間の記録はありません</div>
+        )}
       </div>
 
       <div className="rounded-lg border border-rule bg-surface p-4">
@@ -162,7 +213,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </thead>
           <tbody>
             {byTag.length === 0 && (
-              <tr><td colSpan={4} className="py-4 text-center text-ink-mute">データなし</td></tr>
+              <tr><td colSpan={4} className="py-4 text-center text-ink-mute">この期間の記録はありません</td></tr>
             )}
             {byTag.map((b) => (
               <tr key={b.tag} className="border-t border-rule">
@@ -174,7 +225,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
                     {b.tag}
                   </span>
                 </td>
-                <td className="py-2 text-right tabular-nums">{b.count}</td>
+                <td className="py-2 text-right font-mono tabular-nums">{b.count}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(Math.round(b.totalSec / b.count))}</td>
               </tr>
@@ -184,9 +235,9 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
       </div>
 
       <div className="rounded-lg border border-rule bg-surface p-4">
-        <h3 className="mb-3 text-sm font-medium text-ink">{isMeetingTab ? '会議名別サマリー（上位 TOP10 時間）' : '連絡先別サマリー（上位 TOP10 通話時間）'}</h3>
+        <h3 className="mb-3 text-sm font-medium text-ink">{isMeetingTab ? '会議名別（上位）' : '連絡先別（上位）'}</h3>
         {top10Contacts.length === 0 ? (
-          <div className="flex h-32 items-center justify-center text-sm text-ink-mute">{isMeetingTab ? '会議の記録がありません' : '連絡先名が設定された記録がありません'}</div>
+          <div className="flex h-32 items-center justify-center text-sm text-ink-mute">この期間の記録はありません</div>
         ) : (
           <div className="h-56">
             <ResponsiveContainer>
@@ -203,7 +254,7 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         <table className="mt-4 w-full text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-ink-mute">
             <tr>
-              <th className="py-2">{isMeetingTab ? '会議名' : '連絡先'}</th>
+              <th className="py-2">{isMeetingTab ? '会議名' : isCallTab ? '連絡先' : '連絡先 / 会議名'}</th>
               <th className="py-2 text-right">件数</th>
               <th className="py-2 text-right">合計</th>
               <th className="py-2 text-right">平均</th>
@@ -213,16 +264,16 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </thead>
           <tbody>
             {byContact.length === 0 && (
-              <tr><td colSpan={6} className="py-4 text-center text-ink-mute">データなし</td></tr>
+              <tr><td colSpan={6} className="py-4 text-center text-ink-mute">この期間の記録はありません</td></tr>
             )}
             {byContact.map((b) => (
               <tr
                 key={b.name}
-                onClick={() => { if (!isMeetingTab) onSelectContact?.(b.name); }}
-                className="cursor-pointer border-t border-rule hover:bg-accent-soft"
+                onClick={isCallTab ? () => onSelectContact?.(b.name) : undefined}
+                className={`border-t border-rule ${isCallTab ? 'cursor-pointer hover:bg-accent-soft' : ''}`}
               >
-                <td className="py-2 font-medium text-accent-ink">{b.name}</td>
-                <td className="py-2 text-right tabular-nums">{b.count}</td>
+                <td className={`py-2 font-medium ${isCallTab ? 'text-accent-ink' : 'text-ink'}`}>{b.name}</td>
+                <td className="py-2 text-right font-mono tabular-nums">{b.count}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.avgSec)}</td>
                 <td className="py-2 text-xs">{b.topTag ?? '—'}</td>

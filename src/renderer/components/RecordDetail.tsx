@@ -215,7 +215,8 @@ export function RecordDetail({
     window.setTimeout(() => setExportMessage(null), 6000);
   };
   const handleSaveAudio = async () => showExportResult(await window.api.recording.saveAs(current.id));
-  const handleSaveTranscript = async () => showExportResult(await window.api.transcript.saveAs(current.id, false));
+  const handleSaveTranscript = async (withTimestamps: boolean) =>
+    showExportResult(await window.api.transcript.saveAs(current.id, withTimestamps));
   const handleSaveMinutes = async () => showExportResult(await window.api.minutes.saveAs(current.id));
 
   const updateMarkers = async (markers: NonNullable<CallRecord['markers']>) => {
@@ -366,8 +367,13 @@ export function RecordDetail({
                     </button>
                   )}
                   {current.transcript && (
-                    <button onClick={() => { setMenuOpen(false); void handleSaveTranscript(); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft" role="menuitem">
+                    <button onClick={() => { setMenuOpen(false); void handleSaveTranscript(false); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft" role="menuitem">
                       <FileText size={14} className="text-ink-mute" />文字起こしを書き出す
+                    </button>
+                  )}
+                  {current.transcript && (
+                    <button onClick={() => { setMenuOpen(false); void handleSaveTranscript(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft" role="menuitem">
+                      <FileText size={14} className="text-ink-mute" />文字起こしを書き出す（時刻付き）
                     </button>
                   )}
                   {isMeeting && (
@@ -395,18 +401,19 @@ export function RecordDetail({
 
       {/* メタ情報 */}
       <div className="mb-6 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-        <div>
+        {/* 日時: 開始・終了の2入力を横に並べ、幅が足りない場合はここだけで折り返す（時間欄とは重ならない） */}
+        <div className="sm:col-span-2">
           <div className="mb-1 text-xs text-ink-mute">日時</div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <input
               type="datetime-local"
               step={1}
               value={startTime}
               disabled={readOnly}
               onChange={(e) => { setStartTime(e.target.value); markDirty('startTime', fromDatetimeLocalValue(e.target.value)); }}
-              className={`${inputClass} font-mono text-xs`}
+              className={`${inputClass} min-w-0 flex-1 basis-[13rem] font-mono text-xs`}
             />
-            <span className="text-ink-mute">–</span>
+            <span className="shrink-0 text-ink-mute">–</span>
             <input
               type="datetime-local"
               step={1}
@@ -416,11 +423,11 @@ export function RecordDetail({
                 setEndTime(e.target.value);
                 markDirty('endTime', (e.target.value ? fromDatetimeLocalValue(e.target.value) : null) as CallRecord['endTime']);
               }}
-              className={`${inputClass} font-mono text-xs`}
+              className={`${inputClass} min-w-0 flex-1 basis-[13rem] font-mono text-xs`}
             />
           </div>
         </div>
-        <div>
+        <div className="sm:col-span-2">
           <div className="mb-1 text-xs text-ink-mute">時間</div>
           <div className="py-1.5 font-mono text-sm tabular-nums text-ink">
             {computedDuration !== null ? formatHMS(computedDuration) : '—'}

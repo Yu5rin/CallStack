@@ -147,7 +147,7 @@ function WhisperSetup({
           className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           title="whisper.cpp の Windows ビルドを GitHub から取得して自動配置します"
         >
-          {downloading === 'cpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
+          {downloading === 'cpu' ? 'ダウンロード中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
         </button>
         {gpuUnlocked && (
           <button
@@ -156,7 +156,7 @@ function WhisperSetup({
             className="rounded-md border border-rule bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
             title="NVIDIA CUDA 対応ビルド（大容量）。NVIDIA GPU が必要です"
           >
-            {downloading === 'gpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />GPU (CUDA) 版をダウンロード</>}
+            {downloading === 'gpu' ? 'ダウンロード中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />GPU（CUDA）版をダウンロード</>}
           </button>
         )}
         {progress && (
@@ -172,7 +172,7 @@ function WhisperSetup({
       {gpuUnlocked && (
         <div className="mt-2 flex items-center gap-2 text-xs text-ink">
           <Switch id="swWhisperGpu" checked={useGpu} disabled={!gpuInstalled} onChange={onToggleGpu} />
-          <label htmlFor="swWhisperGpu" className="cursor-pointer">GPU (CUDA) 版を使用する</label>
+          <label htmlFor="swWhisperGpu" className="cursor-pointer">GPU（CUDA）版を使用する</label>
           <span className="text-ink-mute">
             {gpuInstalled ? '— 文字起こしが数倍高速になります（NVIDIA GPU 必須）' : '— 先に GPU 版をダウンロードしてください'}
           </span>
@@ -281,7 +281,7 @@ function LiveTranscribeSetup({
             disabled={downloading !== null}
             className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
-            {downloading === 'engine' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />エンジンをダウンロード (約7MB)</>}
+            {downloading === 'engine' ? 'ダウンロード中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />エンジンをダウンロード（約7MB）</>}
           </button>
         )}
         {engineOk && (
@@ -289,9 +289,9 @@ function LiveTranscribeSetup({
             onClick={() => download('engine-legacy')}
             disabled={downloading !== null}
             className="rounded border border-rule bg-surface px-2 py-1 text-xs text-ink-mute hover:bg-paper disabled:opacity-50"
-            title="ライブ文字起こしの開始に失敗する（エンジンがクラッシュする）場合、互換性の高い旧バージョン (0.3.42) に入れ替えて試せます"
+            title="ライブ文字起こしの開始に失敗する（エンジンがクラッシュする）場合、互換性の高い旧バージョン（0.3.42）に入れ替えて試せます"
           >
-            {downloading === 'engine-legacy' ? '取得中…' : '動かない場合: 旧バージョン (0.3.42) に入れ替える'}
+            {downloading === 'engine-legacy' ? 'ダウンロード中…' : '動かない場合: 旧バージョン（0.3.42）に入れ替える'}
           </button>
         )}
       </div>
@@ -316,7 +316,7 @@ function LiveTranscribeSetup({
             disabled={downloading !== null}
             className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
-            {downloading === model ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />モデルをダウンロード</>}
+            {downloading === model ? 'ダウンロード中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />モデルをダウンロード</>}
           </button>
         )}
       </div>
@@ -838,7 +838,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           konamiPos.current = 0;
           setGpuUnlocked(true);
           localStorage.setItem(GPU_UNLOCK_KEY, '1');
-          toast.success('隠しオプションを解放しました: GPU (CUDA) 版 whisper が利用できます');
+          toast.success('隠しオプションを解放しました: GPU（CUDA）版 whisper が利用できます');
         }
       } else {
         konamiPos.current = key === KONAMI[0] ? 1 : 0;
@@ -1062,16 +1062,16 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           rows: [
             {
               id: 'minimizeToTray',
-              label: '閉じるボタンで最小化してトレイに常駐',
-              description: 'ウィンドウを閉じても記録・文字起こしはバックグラウンドで継続します',
-              keywords: ['トレイ', '常駐', '最小化', 'タスクバー'],
+              label: 'ウィンドウを最小化したとき',
+              description: '「トレイに格納」にすると、最小化時にタスクバーから消えてトレイに常駐します（記録・文字起こしはそのままバックグラウンドで継続）。閉じるボタンは、この設定に関わらず常にアプリを終了します',
+              keywords: ['トレイ', '常駐', '最小化', 'タスクバー', '閉じるボタン'],
               render: () => (
                 <Segmented
-                  ariaLabel="最小化の動作"
+                  ariaLabel="最小化したときの動作"
                   value={draft.minimizeToTray ? 'tray' : 'taskbar'}
                   onChange={(v) => update({ minimizeToTray: v === 'tray' })}
                   options={[
-                    { value: 'taskbar', label: 'タスクバー' },
+                    { value: 'taskbar', label: 'タスクバーに残す' },
                     { value: 'tray', label: 'トレイに格納' },
                   ]}
                 />
@@ -1084,13 +1084,13 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               keywords: ['HUD', '小窓', 'サイズ'],
               render: () => (
                 <Segmented
-                  ariaLabel="HUD のサイズ"
+                  ariaLabel="小窓のサイズ"
                   value={draft.hudSize}
                   onChange={(v) => update({ hudSize: v })}
                   options={[
-                    { value: 'mini', label: 'ミニ (240×34)' },
-                    { value: 'compact', label: 'コンパクト (400×70)' },
-                    { value: 'full', label: 'フル (470×122)' },
+                    { value: 'mini', label: 'ミニ (320×40)' },
+                    { value: 'compact', label: 'コンパクト (400×80)' },
+                    { value: 'full', label: 'フル (560×132)' },
                   ]}
                 />
               ),
@@ -1098,7 +1098,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             {
               id: 'hudOpacity',
               label: '小窓（HUD）の透明度',
-              description: 'カーソルを HUD に乗せている間は自動的に不透明になります',
+              description: 'カーソルを小窓に乗せている間は自動的に不透明になります',
               keywords: ['HUD', '透明度', '不透明度'],
               controlId: 'rangeHudOpacity',
               render: () => (
@@ -1122,7 +1122,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             {
               id: 'hudLiveVisible',
               label: 'ライブ字幕ウィンドウを表示する',
-              description: '録音中のライブ文字起こしを独立したウィンドウに表示します。自由に移動・リサイズでき、HUD の「字幕」ボタンやウィンドウの × でも表示 ON/OFF できます',
+              description: '録音中のライブ文字起こしを独立したウィンドウに表示します。自由に移動・リサイズでき、小窓の「字幕」ボタンやウィンドウの × でも表示 ON/OFF できます',
               keywords: ['字幕', 'ライブ文字起こし', 'HUD'],
               controlId: 'swHudLiveVisible',
               render: () => (
@@ -1254,16 +1254,6 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               ),
             },
             {
-              id: 'askSourceOnStart',
-              label: '開始ダイアログ',
-              description: '「▶ 開始」ボタンで通話/会議・録音ソースの選択ダイアログを表示する。オフにするとボタンは前回の種別で即開始します。ショートカット・トレイからは常に既定ソースで即開始です',
-              keywords: ['開始ダイアログ', '録音ソース'],
-              controlId: 'swAskSourceOnStart',
-              render: () => (
-                <Switch id="swAskSourceOnStart" checked={draft.recording.askSourceOnStart} onChange={(v) => updateRecording({ askSourceOnStart: v })} />
-              ),
-            },
-            {
               id: 'micDeviceId',
               label: 'マイクデバイス',
               keywords: ['マイク', 'デバイス', '入力'],
@@ -1334,7 +1324,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             {
               id: 'whisperSetup',
               label: 'whisper.cpp のセットアップ',
-              description: '実行ファイルのダウンロードと GPU (CUDA) 版の利用可否',
+              description: '実行ファイルのダウンロードと GPU（CUDA）版の利用可否',
               keywords: ['whisper', 'エンジン', 'GPU', 'CUDA', 'NVIDIA', 'ダウンロード'],
               full: true,
               render: () => (
@@ -1611,7 +1601,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             {
               id: 'tagEditor',
               label: 'タグの管理',
-              description: '▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・HUD の「情報」から選択）。上位4つはクイックタグ（Ctrl+Shift+1〜4）に割り当てられます。',
+              description: '▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・小窓（HUD）の「情報」から選択）。上位4つはクイックタグ（Ctrl+Shift+1〜4）に割り当てられます。',
               keywords: ['タグ', '色分け', 'クイックタグ', 'ラベル'],
               full: true,
               render: () => (

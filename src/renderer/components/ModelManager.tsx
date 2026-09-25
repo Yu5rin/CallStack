@@ -67,7 +67,7 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onD
             {isDl ? (
               <span className="inline-flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-xs text-ok">
-                  <CircleCheck size={13} />ダウンロード済
+                  <CircleCheck size={13} />ダウンロード済み
                 </span>
                 <button
                   onClick={() => remove(m.id)}
@@ -83,7 +83,7 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onD
                 disabled={!!p && !p.done}
                 className="rounded-md border border-accent/40 bg-surface px-2 py-1 text-xs text-accent-ink hover:bg-accent-soft disabled:opacity-50"
               >
-                {p && !p.done ? '取得中…' : 'ダウンロード'}
+                {p && !p.done ? 'ダウンロード中…' : 'ダウンロード'}
               </button>
             )}
           </div>

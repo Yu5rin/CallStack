@@ -80,10 +80,12 @@ export function setThemeProvider(fn: () => EffectiveTheme): void {
   themeProvider = fn;
 }
 
+// 第5段階のデザイン見直しで最小文字サイズ(12px)・アイコンボタンの当たり判定(28px角)を
+// 満たすよう、旧サイズ（mini 240×34 / compact 400×70 / full 470×122）から拡大した。
 export const HUD_SIZES: Record<HudSize, { width: number; height: number }> = {
-  mini:    { width: 240, height: 34 },
-  compact: { width: 400, height: 70 },
-  full:    { width: 470, height: 122 },
+  mini:    { width: 320, height: 40 },
+  compact: { width: 400, height: 80 },
+  full:    { width: 560, height: 132 },
 };
 
 const HUD_SIZE_ORDER: HudSize[] = ['mini', 'compact', 'full'];
