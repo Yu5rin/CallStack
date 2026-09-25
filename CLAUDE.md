@@ -43,10 +43,14 @@ force push・履歴の書き換え（`git filter-branch` 等）・リポジト�
   - 題名行（`# CallStack vX.Y.Z` など）は書かない。自動生成の「What's Changed」「Full Changelog」も載せない
 - リリースのタイトルはタグと同じ表記（`vX.Y.Z`）にする
 - 自動更新（`src/main/updates.ts`・`src/main/selfUpdate.ts`）はリリース本文を読まない。読むのは
-  `releases/latest` の `tag_name`・`html_url`・`assets` の `name`・`browser_download_url`・`digest` だけ。
-  そのため次を崩さないこと:
+  `releases.atom`（各 entry のリンク末尾のタグ名）と、新しい版があったときだけ `releases/latest` の
+  `tag_name`・`html_url`・`assets` の `name`・`browser_download_url`・`digest`。
+  API が回数上限（会社などの共有回線で起きる）で使えないときは、タグからダウンロード URL を
+  `releases/download/<tag>/CallStack-<version>-win-x64.zip` の規則で組み立てる。そのため次を崩さないこと:
   - タグは `vMAJOR.MINOR.PATCH`（版の比較に使う）
-  - 添付の ZIP の名前は `-win-x64.zip` で終わる（`CallStack-<version>-win-x64.zip`）。この形の添付は1つだけにする
+  - 添付の ZIP の名前は正確に `CallStack-<version>-win-x64.zip`（`<version>` はタグから `v` を除いたもの）。
+    この形の添付は1つだけにする。名前の付け方を変えるなら `src/main/updateCheckLogic.ts` の
+    `buildAssetFileName` も直す
   - 検証に使う SHA256 は添付の `digest`（GitHub が付ける `sha256:...`）で、本文の表の SHA256 は読まない。
     本文の書き方を変えても自動更新には影響しない
   - 下書き・プレリリースは `releases/latest` に出ない。Actions は下書きで作るので、変更点を書き入れたら必ず公開する（プレリリースにはしない）

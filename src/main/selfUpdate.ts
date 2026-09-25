@@ -1,13 +1,16 @@
-import { app } from 'electron';
+import { app, net, session } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, promises as fs } from 'node:fs';
+import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import extract from 'extract-zip';
-import { downloadTo } from './whisperBinary';
+import { describeNetError } from './whisperBinary';
 import { logInfo } from './log';
 import type { UpdateCheckResult } from './updates';
+import { checkForUpdate } from './updates';
 import { planCarryOver, USER_PLACED_RESOURCE_DIRS } from './updateCarryOver';
+import { isAllowedUpdateUrl, buildDownloadUrl } from './updateCheckLogic';
+import * as updateLeftoverPolicy from './updateLeftoverPolicy';
 
 /**
  * Windows 向けの自己更新（ダウンロード → SHA256検証 → 展開 → 次回起動時に
@@ -86,6 +89,155 @@ async function sha256File(filePath: string): Promise<string> {
   });
 }
 
+/** 接続タイムアウト（response が来るまで）。 */
+const CONNECT_TIMEOUT_MS = 20_000;
+/** アイドルタイムアウト（データが来なくなってから）。 */
+const IDLE_TIMEOUT_MS = 30_000;
+/** ダウンロードするバイト数の上限。配布元がサイズを知らせてこない場合の歯止め。 */
+const MAX_DOWNLOAD_BYTES = 600 * 1024 * 1024;
+
+/** この起動で1回だけ、通信がプロキシを経由するかどうかをログに残したか。 */
+let networkEnvironmentLogged = false;
+
+/**
+ * 通信がどの経路を通るのかをログに残す（この起動で1回だけ）。会社のネットワークでは
+ * プロキシ経由になることが多く、経由するかどうかが分かるだけで切り分けの幅が狭まる。
+ * アドレス自体は社内のホスト名の場合があるため、ホストとポートだけを出す。
+ */
+async function logNetworkEnvironmentOnce(url: string): Promise<void> {
+  if (networkEnvironmentLogged) return;
+  networkEnvironmentLogged = true;
+  try {
+    const proxyStr = await session.defaultSession.resolveProxy(url);
+    if (!proxyStr || proxyStr.trim().toUpperCase() === 'DIRECT') {
+      logInfo('selfupdate', '通信: プロキシを経由しない(DIRECT)');
+    } else {
+      // "PROXY host:port" 等の先頭要素だけを出す（資格情報は含まれない）。
+      const first = proxyStr.split(';')[0]?.trim() ?? proxyStr;
+      logInfo('selfupdate', `通信: プロキシを経由する(${first})`);
+    }
+  } catch (err) {
+    logInfo('selfupdate', `通信: 経路を調べられなかった: ${(err as Error).message}`);
+  }
+}
+
+interface DownloadDiagnosticsResult {
+  finalUrl: string;
+  contentType: string;
+  receivedBytes: number;
+}
+
+/**
+ * 配布物をダウンロードし、途中経過を詳しくログへ残す。
+ *
+ * 【なぜ診断を厚くするか】
+ * 会社のネットワークで「確認はできるがダウンロードだけ失敗する」という報告があったとき、
+ * 原因の切り分けにはここが要る（Pane の docs/調査記録/修正-更新の失敗を追えるようにする.md）。
+ *   ・最終URL … github.com は objects.githubusercontent.com 等へ転送される。
+ *               転送先だけ許可されていない構成かどうかが分かる
+ *   ・状態コード … 403(拒否)・407(プロキシ認証)の区別
+ *   ・Content-Type … 中身が zip ではなくプロキシのエラーページにすり替わっていないか
+ *                    （text/html なら典型的にそれ）
+ *   ・Via … 途中に中継が入っているか
+ */
+function downloadAssetWithDiagnostics(
+  url: string,
+  dest: string,
+  onProgress: (p: { receivedBytes: number; totalBytes: number | null }) => void,
+): Promise<DownloadDiagnosticsResult> {
+  return new Promise((resolve, reject) => {
+    const currentVersion = app.getVersion();
+    let settled = false;
+    let received = 0;
+    let out: ReturnType<typeof createWriteStream> | null = null;
+    let idleTimer: NodeJS.Timeout | null = null;
+    let connectTimer: NodeJS.Timeout | null = null;
+
+    const clearTimers = (): void => {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    };
+    const fail = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      try { req.abort(); } catch { /* noop */ }
+      out?.destroy();
+      fs.unlink(dest).catch(() => {});
+      logInfo('selfupdate', `ダウンロードに失敗: ${describeNetError(err)} (受信済み ${received}バイト)`);
+      reject(err);
+    };
+    const resetIdleTimer = (): void => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => fail(new Error('timeout')), IDLE_TIMEOUT_MS);
+    };
+
+    const req = net.request({ url, method: 'GET', redirect: 'follow' });
+    req.setHeader('Accept', 'application/octet-stream');
+    req.setHeader('User-Agent', `CallStack-Updater/${currentVersion}`);
+
+    let finalUrl = url;
+    req.on('redirect', (_status, _method, redirectUrl) => {
+      finalUrl = redirectUrl;
+      logInfo('selfupdate', `ダウンロード: 転送先=${redirectUrl}`);
+      req.followRedirect();
+    });
+
+    connectTimer = setTimeout(() => fail(new Error('timeout')), CONNECT_TIMEOUT_MS);
+
+    req.on('response', (res) => {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      const status = res.statusCode;
+      const contentType = String(res.headers['content-type'] ?? '(なし)');
+      const contentLength = res.headers['content-length'];
+      const via = res.headers['via'] ? String(res.headers['via']) : '(なし)';
+      logInfo('selfupdate', `ダウンロード: 応答 ${status}, Content-Type=${contentType}, Content-Length=${contentLength ?? '(なし)'}, Via=${via}`);
+
+      if (status !== 200) {
+        res.on('data', () => {});
+        fail(new Error(describeNetError(new Error(`HTTP ${status}`), status)));
+        return;
+      }
+      if (/text\/html/i.test(contentType)) {
+        res.on('data', () => {});
+        fail(new Error('配布物ではなくWebページが返りました。社内ネットワークのプロキシ等で差し替えられている可能性があります'));
+        return;
+      }
+
+      const lenStr = Array.isArray(contentLength) ? contentLength[0] : contentLength;
+      const total = lenStr ? Number(lenStr) : null;
+      out = createWriteStream(dest);
+      resetIdleTimer();
+      res.on('data', (chunk: Buffer) => {
+        if (settled) return;
+        received += chunk.length;
+        if (received > MAX_DOWNLOAD_BYTES) {
+          fail(new Error(`配布物が想定より大きいためダウンロードを中止しました(上限${MAX_DOWNLOAD_BYTES}バイト)`));
+          return;
+        }
+        resetIdleTimer();
+        onProgress({ receivedBytes: received, totalBytes: total });
+        out!.write(chunk);
+      });
+      res.on('end', () => {
+        if (settled) return;
+        if (total !== null && received !== total) {
+          fail(new Error('ダウンロードが途中で途切れました'));
+          return;
+        }
+        clearTimers();
+        settled = true;
+        out!.end(() => resolve({ finalUrl, contentType, receivedBytes: received }));
+      });
+      res.on('aborted', () => fail(new Error('ダウンロードが途中で途切れました')));
+      res.on('error', (err: Error) => fail(err));
+      out.on('error', (err) => fail(err));
+    });
+    req.on('error', (err) => fail(err));
+    req.end();
+  });
+}
+
 /**
  * 更新の準備（ダウンロード→検証→展開）を行う。成功すると次回の適用が
  * 可能になる。失敗しても録音・記録には一切影響しない（通知のみに倒す）。
@@ -119,8 +271,16 @@ async function prepareUpdateInner(
   onStatus: (s: { status: SelfUpdateStatus; receivedBytes?: number; totalBytes?: number | null; error?: string }) => void,
 ): Promise<boolean> {
   if (!isSelfUpdateSupported()) return false;
-  if (!result.assetUrl || !result.assetSha256 || !result.latest) {
-    logInfo('selfupdate', 'skip: asset url or sha256 not available from release');
+  // SHA256 は無くてもよい（API の上限に当たり、ダウンロード URL を規則から組み立てた場合。
+  // updates.ts の newerButNoDetails 参照）。無い場合は検証を省いて続行する（下記 VerifyHash 相当）。
+  if (!result.assetUrl || !result.latest) {
+    logInfo('selfupdate', 'skip: asset url not available from release');
+    return false;
+  }
+  if (!isAllowedUpdateUrl(result.assetUrl, { requireDownloadPrefix: true })) {
+    logInfo('selfupdate', `skip: 許可されていないダウンロードURL: ${result.assetUrl}`);
+    onStatus({ status: 'error', error: '配布物のURLが正しくありません。リリースページから手動でご確認ください。' });
+    currentStatus = 'error';
     return false;
   }
   // 準備を開始する時点で、既存の ready 状態を無効化しておく。
@@ -141,17 +301,27 @@ async function prepareUpdateInner(
   try {
     currentStatus = 'downloading';
     onStatus({ status: 'downloading', receivedBytes: 0, totalBytes: null });
-    await downloadTo(result.assetUrl, tmpZip, (p) => {
+    logInfo('selfupdate', `更新のダウンロード開始: ${result.assetUrl}`);
+    await logNetworkEnvironmentOnce(result.assetUrl);
+    await downloadAssetWithDiagnostics(result.assetUrl, tmpZip, (p) => {
       onStatus({ status: 'downloading', receivedBytes: p.receivedBytes, totalBytes: p.totalBytes });
     });
 
     currentStatus = 'verifying';
     onStatus({ status: 'verifying' });
-    const actualSha256 = await sha256File(tmpZip);
-    if (actualSha256.toLowerCase() !== result.assetSha256.toLowerCase()) {
-      throw new Error(`SHA256 が一致しません（期待値と異なる配布物です。再ダウンロードしてください）`);
+    // 配布元が SHA256（digest）を提供していない場合（API の上限で詳細を取れず、URL だけ
+    // 組み立てて続行したケース）は照合を省いて続行する。HTTPS で取得している以上そこで
+    // 防げるのは転送中の破損だけで、防げないもの（配布元そのものの差し替え）は元々
+    // このハッシュでも検出できない、という限界は変わらない（README 参照）。
+    if (!result.assetSha256) {
+      logInfo('selfupdate', '更新の検証: 配布元がSHA256を提供していないため照合を省いて続行する');
+    } else {
+      const actualSha256 = await sha256File(tmpZip);
+      if (actualSha256.toLowerCase() !== result.assetSha256.toLowerCase()) {
+        throw new Error(`SHA256 が一致しません（期待値と異なる配布物です。再ダウンロードしてください）`);
+      }
+      logInfo('selfupdate', `sha256 verified for v${result.latest}`);
     }
-    logInfo('selfupdate', `sha256 verified for v${result.latest}`);
 
     currentStatus = 'extracting';
     onStatus({ status: 'extracting' });
@@ -244,7 +414,11 @@ function buildUpdateScript(opts: {
 }): string {
   const { installDir, stagingDir, oldBackupDir, exeName, pid, logFile } = opts;
   // PowerShell 側の文字列内に紛れ込まないよう、パスはシングルクォートでリテラル化する。
-  const esc = (s: string) => s.replace(/'/g, "''");
+  // シングルクォート文字列内でのエスケープは ' を '' に倍にするだけでよいが、
+  // 全角引用符の類（' ' ‚ ‛ 等）はシングルクォートとしては解釈されないため本来は
+  // エスケープ不要である。ただし将来 esc() の呼び出し方が変わっても崩れないよう、
+  // PowerShell がクォート文字として扱いうるものはまとめて倍にしておく。
+  const esc = (s: string) => s.replace(/['‘’‚‛]/g, (c) => c + c);
   return `
 $ErrorActionPreference = 'Stop'
 $InstallDir = '${esc(installDir)}'
@@ -253,6 +427,7 @@ $OldBackupDir = '${esc(oldBackupDir)}'
 $ExeName = '${esc(exeName)}'
 $ParentPid = ${pid}
 $LogFile = '${esc(logFile)}'
+$MarkerFileName = '${esc(updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME)}'
 
 function Write-Log($msg) {
   $line = "$(Get-Date -Format o) $msg"
@@ -284,6 +459,16 @@ try {
   Write-Log "moving '$StagingDir' -> '$InstallDir'"
   Move-Item -LiteralPath $StagingDir -Destination $InstallDir -ErrorAction Stop
   $swapped = $true
+
+  # 入れ替えを最後までやり遂げた合図。次回起動時にこのマーカーが無ければ「入れ替えが
+  # 途中で終わった」とみなし、.old を消さずに残す（updateLeftoverPolicy.ts 参照）。
+  try {
+    New-Item -ItemType File -Path (Join-Path $InstallDir $MarkerFileName) -Force | Out-Null
+    Write-Log 'wrote completion marker'
+  } catch {
+    Write-Log "failed to write completion marker: $($_.Exception.Message)"
+  }
+
   Write-Log 'swap succeeded'
 }
 catch {
@@ -363,21 +548,169 @@ export async function carryOverFromOldInstallDir(): Promise<boolean> {
   return ok;
 }
 
-/** 前回の更新で残った .old フォルダがあれば、起動時に片付ける（ベストエフォート） */
+/**
+ * 前回の更新で残った .old フォルダがあれば、起動時に片付ける（ベストエフォート）。
+ *
+ * 入れ替え（PowerShell スクリプト）が完了する前に電源断・強制終了が起きると、.old だけが
+ * 残った状態になりうる。完了マーカー（updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME）の
+ * 有無・経過時間から、消してよいかを updateLeftoverPolicy.decide に判断させる
+ * （2.7.x 以前は PowerShell スクリプトを自分で書き出すがマーカーは書かないため、
+ * マーカーが無くても消してよいケースがある。同モジュールのコメント参照）。
+ */
 export async function cleanupOldInstallDir(): Promise<void> {
   if (!isSelfUpdateSupported()) return;
   const oldDir = getOldBackupDir();
+  let oldInstallDirExists = true;
   try {
     await fs.access(oldDir);
   } catch {
-    return; // 何も残っていない
+    oldInstallDirExists = false;
   }
+  if (!oldInstallDirExists) return;
+
   // 手で置いた whisper.cpp を引き継げていないうちは消さない（消すと取り戻せない）
   if (!(await carryOverFromOldInstallDir())) {
     logInfo('selfupdate', `keep ${oldDir}: some user-placed files could not be carried over (will retry next launch)`);
     return;
   }
+
+  const markerPath = path.join(getInstallDir(), updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME);
+  const markerExists = await fs.access(markerPath).then(() => true).catch(() => false);
+  let backupAgeMs: number | null = null;
+  let currentExeIsNewerThanBackup = false;
+  try {
+    const [backupStat, exeStat] = await Promise.all([fs.stat(oldDir), fs.stat(process.execPath)]);
+    backupAgeMs = Date.now() - backupStat.mtimeMs;
+    currentExeIsNewerThanBackup = exeStat.mtimeMs >= backupStat.mtimeMs;
+  } catch { /* 読めなければ null のまま（KeepBackups 側に倒れる） */ }
+
+  const action = updateLeftoverPolicy.decide({ oldInstallDirExists, markerExists, backupAgeMs, currentExeIsNewerThanBackup });
+  if (action === 'KeepBackups') {
+    logInfo('selfupdate', `keep ${oldDir}: 入れ替えが完了したか確認できないため残す（次回また確認する）`);
+    return;
+  }
+  if (action === 'None') return;
+
+  await fs.unlink(markerPath).catch(() => {});
   await fs.rm(oldDir, { recursive: true, force: true })
-    .then(() => logInfo('selfupdate', `cleaned up leftover ${oldDir}`))
+    .then(() => logInfo('selfupdate', `cleaned up leftover ${oldDir} (${action})`))
     .catch((err) => logInfo('selfupdate', `cleanup of ${oldDir} failed (will retry next launch): ${(err as Error).message}`));
+}
+
+/** 「通信を確かめる」で受け取ってみるバイト数。繋がるかどうかを見るのが目的なので、
+ *  配布物すべてを落とす必要は無い。 */
+const CONNECTION_PROBE_BYTES = 256 * 1024;
+/** 「通信を確かめる」の待ち時間の上限。 */
+const CONNECTION_CHECK_TIMEOUT_MS = 30_000;
+
+export interface ConnectionCheckResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * 配布物の置き場へ実際に接続して、何が返ってくるかをログに残す（Pane U-08 相当）。
+ *
+ * 【なぜ「更新の確認」と別に要るか】
+ * 会社のネットワークで、更新の確認は通るのにダウンロードだけが失敗する、という報告が
+ * ありうる。原因を調べるにはそのときのログが要るが、最新版のままでは checkForUpdate が
+ * ダウンロード URL の詳細を取りに行かないため、ダウンロードを試す手段そのものが無い。
+ * 最新版のままでも通信だけを試せる入口を用意する。
+ *
+ * 受け取るのは先頭の一部だけで、ファイルは保存しない（更新はしない）。
+ */
+export async function checkConnection(): Promise<ConnectionCheckResult> {
+  logInfo('selfupdate', '更新の通信確認: 開始');
+
+  let downloadUrl: string | undefined;
+  try {
+    const info = await checkForUpdate();
+    downloadUrl = info.assetUrl;
+    if (!downloadUrl) {
+      // 最新版のとき（または API から詳細を取れなかったとき）はダウンロード URL が無い。
+      // 確かめたいのは「配布物の置き場まで通信が届くか」であって更新の要否ではないので、
+      // 分かっているタグ（無ければ現在の版）から API を使わずに組み立てる。
+      const tag = info.latest ? `v${info.latest}` : `v${app.getVersion()}`;
+      downloadUrl = buildDownloadUrl('Yu5rin', 'CallStack', tag);
+      logInfo('selfupdate', `更新の通信確認: 配布物のURLを組み立てた(最新版等のため詳細は取っていない): ${downloadUrl}`);
+    }
+  } catch (err) {
+    logInfo('selfupdate', `更新の通信確認: 配布元への問い合わせに失敗: ${(err as Error).message}`);
+    return { ok: false, message: `配布元へ問い合わせられませんでした。${describeNetError(err)}` };
+  }
+
+  if (!downloadUrl || !isAllowedUpdateUrl(downloadUrl, { requireDownloadPrefix: true })) {
+    logInfo('selfupdate', '更新の通信確認: 配布物のURLが分からなかった');
+    return { ok: false, message: '配布物の場所が分かりませんでした。問い合わせの段階で止まっています。詳しくはログを確認してください。' };
+  }
+
+  logInfo('selfupdate', `更新の通信確認: 配布物へ接続する: ${downloadUrl}`);
+  await logNetworkEnvironmentOnce(downloadUrl);
+
+  return new Promise((resolve) => {
+    const currentVersion = app.getVersion();
+    const req = net.request({ url: downloadUrl!, method: 'GET', redirect: 'follow' });
+    req.setHeader('Accept', 'application/octet-stream');
+    req.setHeader('User-Agent', `CallStack-Updater/${currentVersion}`);
+    let settled = false;
+    let received = 0;
+    const finish = (result: ConnectionCheckResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { req.abort(); } catch { /* noop */ }
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      logInfo('selfupdate', `更新の通信確認: ${CONNECTION_CHECK_TIMEOUT_MS / 1000}秒以内に応答がなかった`);
+      finish({ ok: false, message: '時間内に応答がありませんでした。' });
+    }, CONNECTION_CHECK_TIMEOUT_MS);
+
+    req.on('redirect', (_status, _method, redirectUrl) => {
+      logInfo('selfupdate', `更新の通信確認: 転送先=${redirectUrl}`);
+      req.followRedirect();
+    });
+    req.on('response', (res) => {
+      const status = res.statusCode;
+      const contentType = String(res.headers['content-type'] ?? '(なし)');
+      const contentLength = res.headers['content-length'];
+      const via = res.headers['via'] ? String(res.headers['via']) : '(なし)';
+      logInfo('selfupdate', `更新の通信確認: 応答 ${status}, Content-Type=${contentType}, Content-Length=${contentLength ?? '(なし)'}, Via=${via}`);
+
+      if (status === 403 || status === 407) {
+        res.on('data', () => {});
+        finish({ ok: false, message: `配布物の置き場から ${status} が返りました。ネットワークの経路で止められている可能性があります。` });
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.on('data', () => {});
+        finish({ ok: false, message: `配布物の置き場から ${status} が返りました。ネットワークの経路で止められている可能性があります。` });
+        return;
+      }
+      if (/text\/html/i.test(contentType)) {
+        res.on('data', (chunk: Buffer) => { received += chunk.length; });
+        res.on('end', () => finish({ ok: false, message: '配布物ではなくWebページが返りました。ネットワークの経路で差し替えられている可能性があります。' }));
+        return;
+      }
+      res.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (received >= CONNECTION_PROBE_BYTES) {
+          logInfo('selfupdate', `更新の通信確認: ${received}バイトを受け取れた(先頭のみ。ファイルは保存していない)`);
+          finish({ ok: true, message: `配布物の置き場まで届きました（${Math.round(received / 1024)}KBを受け取って確認を終えました）。` });
+        }
+      });
+      res.on('end', () => {
+        logInfo('selfupdate', `更新の通信確認: ${received}バイトを受け取れた(先頭のみ。ファイルは保存していない)`);
+        if (received <= 0) {
+          finish({ ok: false, message: '接続はできましたが、中身を受け取れませんでした。' });
+        } else {
+          finish({ ok: true, message: `配布物の置き場まで届きました（${Math.round(received / 1024)}KBを受け取って確認を終えました）。` });
+        }
+      });
+      res.on('aborted', () => finish({ ok: false, message: 'ダウンロードが途中で途切れました。' }));
+      res.on('error', (err: Error) => finish({ ok: false, message: `配布物の置き場へ接続できませんでした。${describeNetError(err)}` }));
+    });
+    req.on('error', (err) => finish({ ok: false, message: `配布物の置き場へ接続できませんでした。${describeNetError(err)}` }));
+    req.end();
+  });
 }

@@ -59,10 +59,11 @@ import {
   startLive as voskStartLive, stopLive as voskStopLive, feedPcm as voskFeedPcm,
   unloadModel as voskUnloadModel, shutdownVosk,
 } from './vosk';
-import { checkForUpdate, checkOnStartup, UpdateCheckResult } from './updates';
+import { checkForUpdate, checkOnStartup, getLastCheckAt, UpdateCheckResult } from './updates';
+import { isAllowedUpdateUrl, buildLatestReleasePageUrl } from './updateCheckLogic';
 import {
   isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir, carryOverFromOldInstallDir,
-  getSelfUpdateStatus,
+  getSelfUpdateStatus, checkConnection,
 } from './selfUpdate';
 
 registerAppProtocolPrivilege();
@@ -838,7 +839,9 @@ function setupIpc(): void {
 
   ipcMain.handle('update:check', () => checkForUpdate());
   ipcMain.handle('update:open-releases', async (_e, url?: string) => {
-    await shell.openExternal(url ?? 'https://github.com/Yu5rin/CallStack/releases/latest');
+    // 配布元の応答（html_url）由来の値をそのまま開かず、https の github.com 配下のみ許可する。
+    const target = url && isAllowedUpdateUrl(url) ? url : buildLatestReleasePageUrl('Yu5rin', 'CallStack');
+    await shell.openExternal(target);
     return true;
   });
 
@@ -856,6 +859,7 @@ function setupIpc(): void {
 
   ipcMain.handle('update:applyNow', () => applyUpdateNow());
   ipcMain.handle('update:selfStatus', () => getSelfUpdateStatus());
+  ipcMain.handle('update:checkConnection', () => checkConnection());
 
   ipcMain.handle('csv:export', async (_e, opts: CsvExportOptions) => {
     const filePath = await showSaveDialogRemembered(
@@ -1825,10 +1829,13 @@ function buildWeeklyReport(calls: CallRecord[]): string {
 }
 
 /**
- * 更新のダウンロード→検証→展開までを行い、準備ができたら通知する。
+ * 更新のダウンロード→検証→展開までを行い、準備ができたら知らせる。
  * 失敗しても記録・録音には一切影響しない（ログに残すのみ）。
+ *
+ * @param silent true のとき通知は出さない（autoUpdateEnabled でバックグラウンド準備する場合。
+ *   準備ができたことは呼び出し元が改めて通知する）。
  */
-async function prepareUpdateFlow(result: UpdateCheckResult): Promise<void> {
+async function prepareUpdateFlow(result: UpdateCheckResult, silent = false): Promise<void> {
   broadcast('app-event', { type: 'selfupdate:status', status: 'downloading', version: result.latest });
   const ok = await prepareUpdate(result, (s) => {
     broadcast('app-event', {
@@ -1840,13 +1847,97 @@ async function prepareUpdateFlow(result: UpdateCheckResult): Promise<void> {
       error: s.error,
     });
   });
-  if (ok) {
+  if (ok && !silent) {
     notify(
-      `アップデート v${result.latest} の準備ができました`,
-      'クリックで今すぐ再起動して適用します',
-      () => { void applyUpdateNow(); },
+      `v${result.latest} への更新の準備ができました`,
+      'クリックで再起動して適用します',
+      () => { void offerApplyUpdate(result.latest ?? ''); },
     );
   }
+}
+
+/**
+ * 準備ができた更新を、いま適用してよいか確認するダイアログを出す（U-06/U-06b）。
+ * 記録中・録音の保存待ち中は適用できないため、その旨を伝えるだけに倒す
+ * （録音を危険に晒さないという、このアプリの一貫した方針）。
+ */
+async function offerApplyUpdate(version: string): Promise<void> {
+  if (getActive() || lastRecordingState.recording || finalizingCount > 0) {
+    notify(
+      `v${version} への更新の準備ができています`,
+      '記録・録音の保存が終わったら、設定のボタンから適用できます',
+    );
+    return;
+  }
+  const choice = dialog.showMessageBoxSync({
+    type: 'info',
+    title: 'CallStack',
+    message: `v${version} に更新しますか？`,
+    detail: '再起動してアプリを入れ替えます。',
+    buttons: ['再起動して適用', 'あとで'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (choice === 0) void applyUpdateNow();
+}
+
+/** この起動中に、いちど通知した版をまた通知しない（常駐中の再チェックが同じ版を何度も知らせないため）。 */
+let lastNotifiedUpdateVersion: string | null = null;
+
+/**
+ * 更新の確認結果（新しい版がある場合）を受けて、通知〜適用までの導線を出す（U-01/U-05/U-06）。
+ * 起動時のチェックと、常駐中の定期的な再チェック（24時間おき）の両方から呼ぶ。
+ */
+async function handleUpdateAvailable(result: UpdateCheckResult): Promise<void> {
+  if (!result.latest || result.latest === lastNotifiedUpdateVersion) return;
+  lastNotifiedUpdateVersion = result.latest;
+
+  // リリースページの URL は配布元の応答（html_url）から来るため、使う前に検証する。
+  // 応答が差し替えられていても、平文や別ホストへ誘導されないようにする。
+  const releaseUrl = result.url && isAllowedUpdateUrl(result.url) ? result.url : buildLatestReleasePageUrl('Yu5rin', 'CallStack');
+
+  if (!isSelfUpdateSupported()) {
+    // 開発モード・非 Windows では従来どおり通知のみ（リリースページへ誘導するだけ）。
+    notify(
+      `新しいバージョン v${result.latest} があります`,
+      `現在 v${result.current} — クリックでダウンロードページを開く`,
+      () => { void shell.openExternal(releaseUrl); },
+    );
+    return;
+  }
+
+  if (store.getSettings().autoUpdateEnabled) {
+    // ON の場合は先にバックグラウンドでダウンロード・検証・展開まで済ませ、
+    // 準備ができたら「クリックで再起動して適用」だけを知らせる。
+    void prepareUpdateFlow(result, true).then(() => {
+      if (getSelfUpdateStatus().status === 'ready') {
+        notify(
+          `更新の準備ができました（v${result.latest}）`,
+          'クリックで再起動して適用します',
+          () => { void offerApplyUpdate(result.latest ?? ''); },
+        );
+      }
+    });
+    return;
+  }
+
+  notify(
+    `新しいバージョン v${result.latest} があります`,
+    'クリックで更新',
+    () => {
+      const choice = dialog.showMessageBoxSync({
+        type: 'info',
+        title: 'CallStack',
+        message: `v${result.latest} に更新しますか？`,
+        detail: 'ダウンロードと確認が済んだらアプリを再起動します。',
+        buttons: ['今すぐ更新', 'リリースページを開く', 'あとで'],
+        defaultId: 0,
+        cancelId: 2,
+      });
+      if (choice === 0) void prepareUpdateFlow(result);
+      else if (choice === 1) void shell.openExternal(releaseUrl);
+    },
+  );
 }
 
 /**
@@ -2190,20 +2281,21 @@ async function main() {
   // ダウンロード・検証・展開まで済ませ、適用（再起動）だけユーザー操作にする）
   if (store.getSettings().checkUpdatesOnStartup) {
     setTimeout(() => {
-      void checkOnStartup().then((r) => {
-        if (!r?.hasUpdate) return;
-        if (store.getSettings().autoUpdateEnabled && isSelfUpdateSupported()) {
-          void prepareUpdateFlow(r);
-        } else {
-          notify(
-            `新しいバージョン v${r.latest} があります`,
-            `現在 v${r.current} — クリックでダウンロードページを開く`,
-            () => { void shell.openExternal(r.url!); },
-          );
-        }
-      });
+      void checkOnStartup().then((r) => { if (r) void handleUpdateAvailable(r); });
     }, 5000);
   }
+
+  // 常駐中の再チェック（前回の確認から24時間以上経っていたら）。checkUpdatesOnStartup が
+  // ON のときだけ動かす。同じ版を何度も通知しないのは handleUpdateAvailable 側で担保する。
+  setInterval(() => {
+    if (!store.getSettings().checkUpdatesOnStartup) return;
+    void getLastCheckAt().then(async (lastCheckAt) => {
+      const last = lastCheckAt ? new Date(lastCheckAt).getTime() : 0;
+      if (Date.now() - last < 24 * 60 * 60 * 1000) return;
+      const r = await checkOnStartup();
+      if (r) void handleUpdateAvailable(r);
+    });
+  }, 60 * 60 * 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

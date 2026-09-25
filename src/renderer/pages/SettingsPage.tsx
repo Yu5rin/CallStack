@@ -1151,9 +1151,14 @@ function AboutSection({
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [updateUrl, setUpdateUrl] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [latestCheck, setLatestCheck] = useState<{ latest?: string; hasUpdate?: boolean } | null>(null);
+  const [sha256Missing, setSha256Missing] = useState(false);
   // 自己更新（ダウンロード→検証→展開→適用）の進行状況
   const [selfStatus, setSelfStatus] = useState<{ status: string; version?: string; pct?: number | null; error?: string }>({ status: 'idle' });
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [connChecking, setConnChecking] = useState(false);
+  const [connResult, setConnResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     window.api.app.info().then(setInfo).catch(() => {});
@@ -1171,14 +1176,20 @@ function AboutSection({
     setChecking(true);
     setResult(null);
     setUpdateUrl(null);
+    setCheckFailed(false);
+    setLatestCheck(null);
+    setSha256Missing(false);
     try {
       const r = await window.api.update.check();
       if (!r.ok) {
-        setResult(`更新を確認できませんでした（${toUserMessage(r.error, '不明なエラー')}）。リリースページで直接確認してください。`);
+        setResult(`更新を確認できませんでした（${toUserMessage(r.error, '不明なエラー')}）`);
         setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
+        setCheckFailed(true);
       } else if (r.hasUpdate) {
         setResult(`新しいバージョン v${r.latest} が利用できます（現在 v${r.current}）`);
         setUpdateUrl(r.url ?? null);
+        setLatestCheck({ latest: r.latest, hasUpdate: true });
+        setSha256Missing(!!r.sha256Missing);
       } else {
         setResult(`最新です（v${r.current}）`);
       }
@@ -1187,20 +1198,42 @@ function AboutSection({
     }
   };
 
-  const prepareNow = async () => {
+  const updateNow = async () => {
     setApplyError(null);
+    setCheckFailed(false);
     setSelfStatus({ status: 'downloading' });
     const r = await window.api.update.prepareNow();
-    if (!r.ok) setSelfStatus({ status: 'error', error: toUserMessage(r.error, '更新の準備に失敗しました') });
-    else if (!r.hasUpdate) setSelfStatus({ status: 'idle' });
+    if (!r.ok) {
+      setSelfStatus({ status: 'error', error: toUserMessage(r.error, '更新の準備に失敗しました') });
+      setCheckFailed(true);
+      setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
+    } else if (!r.hasUpdate) {
+      setSelfStatus({ status: 'idle' });
+    }
     // hasUpdate=true の場合、以降の進行状況は selfupdate:status イベントで更新される
   };
 
   const applyNow = async () => {
     setApplyError(null);
     const r = await window.api.update.applyNow();
-    if (!r.ok) setApplyError(toUserMessage(r.error, '適用に失敗しました'));
+    if (!r.ok) {
+      setApplyError(toUserMessage(r.error, '適用に失敗しました'));
+      setUpdateUrl('https://github.com/Yu5rin/CallStack/releases/latest');
+    }
     // 成功時はアプリが終了するため、ここには戻ってこない
+  };
+
+  const checkConnection = async () => {
+    setConnChecking(true);
+    setConnResult(null);
+    try {
+      const r = await window.api.update.checkConnection();
+      setConnResult(r);
+    } catch (err) {
+      setConnResult({ ok: false, message: toUserMessage(err, '通信の確認に失敗しました') });
+    } finally {
+      setConnChecking(false);
+    }
   };
 
   const selfStatusLabel: Record<string, string> = {
@@ -1211,11 +1244,13 @@ function AboutSection({
     ready: '適用の準備ができました',
     error: 'エラー',
   };
+  const preparing = selfStatus.status === 'downloading' || selfStatus.status === 'verifying' || selfStatus.status === 'extracting';
+  const anyFailed = checkFailed || selfStatus.status === 'error' || !!applyError;
 
   return (
     <div className="space-y-3">
       <Row label="バージョン">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="font-mono text-sm text-slate-800 dark:text-slate-200">
             CallStack v{info?.version ?? '…'}
           </span>
@@ -1226,16 +1261,48 @@ function AboutSection({
           >
             {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
           </button>
-          {updateUrl && (
+          {latestCheck?.hasUpdate && selfStatus.status !== 'ready' && (
             <button
-              onClick={() => void window.api.update.openReleases(updateUrl)}
+              onClick={updateNow}
+              disabled={preparing}
+              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              今すぐ更新
+            </button>
+          )}
+          {selfStatus.status === 'ready' && (
+            <button
+              onClick={applyNow}
               className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
             >
-              ダウンロードページを開く
+              v{selfStatus.version} を適用して再起動
+            </button>
+          )}
+          {preparing && (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {selfStatusLabel[selfStatus.status]}
+              {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
+            </span>
+          )}
+          {anyFailed && updateUrl && (
+            <button
+              onClick={() => void window.api.update.openReleases(updateUrl)}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              リリースページを開く
             </button>
           )}
         </div>
         {result && <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{result}</div>}
+        {sha256Missing && (
+          <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            配布元が混み合っていたため、ダウンロード内容の照合（SHA256）は省いて更新します（HTTPS通信のため転送中の破損は防げます）。
+          </div>
+        )}
+        {selfStatus.status === 'error' && selfStatus.error && (
+          <div className="mt-1 text-xs text-red-600 dark:text-red-400">{selfStatus.error}</div>
+        )}
+        {applyError && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{applyError}</div>}
       </Row>
       <Row label="更新の自動確認">
         <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
@@ -1247,7 +1314,7 @@ function AboutSection({
           起動時に新しいバージョンを確認して通知する
         </label>
       </Row>
-      <Row label="自動更新（実験的・Windows限定）">
+      <Row label="自動更新（Windows限定）">
         <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
@@ -1255,39 +1322,36 @@ function AboutSection({
             disabled={!checkOnStartup}
             onChange={(e) => onToggleAutoUpdate(e.target.checked)}
           />
-          新しいバージョンを自動でダウンロード・検証・展開まで済ませる
+          新しい版を見つけたら、ダウンロードまで自動で済ませておく
         </label>
         <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-          OFF の場合は従来どおり通知のみです。ON でも実際にアプリを再起動して適用するのは、
-          下のボタンを押すか通知をクリックしたときだけです（記録中は適用されません）。
+          OFF でも「今すぐ更新」自体は変わらず使えます。ON にすると、通知をクリックしたときに
+          待たされないよう、ダウンロード・検証・展開までを先に済ませておきます。
+          実際にアプリを再起動して適用するのは、通知をクリックするか上のボタンを押したときだけです
+          （記録中は適用されません）。
         </span>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+      </Row>
+      <Row label="うまく更新できないとき">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={prepareNow}
-            disabled={selfStatus.status === 'downloading' || selfStatus.status === 'verifying' || selfStatus.status === 'extracting'}
+            onClick={checkConnection}
+            disabled={connChecking}
             className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            今すぐ更新を確認して準備
+            {connChecking ? '確認中…' : '通信を確かめる'}
           </button>
-          {selfStatus.status === 'ready' && (
-            <button
-              onClick={applyNow}
-              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
-            >
-              v{selfStatus.version} を適用して再起動
-            </button>
-          )}
-          {selfStatus.status !== 'idle' && (
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              {selfStatusLabel[selfStatus.status] ?? selfStatus.status}
-              {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
-            </span>
-          )}
         </div>
-        {selfStatus.status === 'error' && selfStatus.error && (
-          <div className="mt-1 text-xs text-red-600 dark:text-red-400">{selfStatus.error}</div>
+        {connResult && (
+          <div className={`mt-1 text-xs ${connResult.ok ? 'text-slate-600 dark:text-slate-400' : 'text-red-600 dark:text-red-400'}`}>
+            {connResult.message}
+          </div>
         )}
-        {applyError && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{applyError}</div>}
+        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          配布物の置き場まで実際に通信が届くかだけを確かめます（更新はしません）。
+          詳しい内訳は下のログフォルダの app.log に残ります。会社のネットワークなど、
+          同じ回線を多くの人が使う環境では、GitHub への問い合わせが回数の上限に達して
+          自動更新が失敗し続けることがあります（README の「自動更新について」参照）。
+        </span>
       </Row>
       <Row label="フォルダ">
         <div className="flex flex-wrap gap-2">
