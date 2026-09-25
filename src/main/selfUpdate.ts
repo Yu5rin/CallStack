@@ -7,6 +7,7 @@ import extract from 'extract-zip';
 import { downloadTo } from './whisperBinary';
 import { logInfo } from './log';
 import type { UpdateCheckResult } from './updates';
+import { planCarryOver, USER_PLACED_RESOURCE_DIRS } from './updateCarryOver';
 
 /**
  * Windows 向けの自己更新（ダウンロード → SHA256検証 → 展開 → 次回起動時に
@@ -21,7 +22,9 @@ import type { UpdateCheckResult } from './updates';
  *      旧フォルダ → .old にリネーム → 新フォルダ → 元の名前にリネーム
  *      → 新 exe を起動、という順で入れ替える
  *   3. 失敗したら .old を元に戻すロールバックを行う
- *   4. 次回起動時に残っている .old を掃除する
+ *   4. 次回起動時に残っている .old を掃除する。その前に、利用者が resources\whisper に
+ *      手で置いた whisper.cpp を新しいフォルダへ引き継ぐ（carryOverFromOldInstallDir）。
+ *      配布 zip には README.txt しか入っていないので、これをしないと更新のたびに消える
  *
  * 「書き込み権限が無い（例: Program Files 配下）」場合は事前チェックで
  * 検知し、自己更新を諦めて手動更新（リリースページを開く）に倒す。
@@ -283,6 +286,51 @@ if (Test-Path -LiteralPath (Join-Path $InstallDir $ExeName)) {
 `.trimStart();
 }
 
+/**
+ * 更新で入れ替えた旧フォルダ(.old)から、利用者が resources\whisper に手で置いた
+ * whisper.cpp（exe・DLL）などを新しいフォルダへ移す。理由は updateCarryOver.ts を参照。
+ *
+ * 入れ替えスクリプト（PowerShell）ではなく新しい版の起動時に行うのは、スクリプトは
+ * 更新「前」の版が書き出すため、そちらを直しても次の更新からしか効かないから。
+ * 起動時に行えば、この修正が入る前の版（v2.7.0）からの更新でも引き継げる。
+ *
+ * 戻り値: 引き継ぐべきものを取りこぼしていなければ true（.old を消してよい）。
+ */
+export async function carryOverFromOldInstallDir(): Promise<boolean> {
+  if (!isSelfUpdateSupported()) return true;
+  const oldDir = getOldBackupDir();
+  // resources の位置はインストール先からの相対で求める（通常は "resources"）
+  const resourcesRel = path.relative(getInstallDir(), process.resourcesPath);
+  let ok = true;
+  for (const sub of USER_PLACED_RESOURCE_DIRS) {
+    const from = path.join(oldDir, resourcesRel, sub);
+    const to = path.join(process.resourcesPath, sub);
+    let oldEntries: string[];
+    try {
+      oldEntries = await fs.readdir(from);
+    } catch {
+      continue; // .old が無い、または該当フォルダが無い（大多数）
+    }
+    const newEntries = await fs.readdir(to).catch(() => [] as string[]);
+    const moves = planCarryOver(oldEntries, newEntries, true);
+    if (moves.length === 0) continue;
+    await fs.mkdir(to, { recursive: true }).catch(() => {});
+    let moved = 0;
+    for (const name of moves) {
+      try {
+        // .old はインストール先の隣（同じドライブ）なので rename で足りる
+        await fs.rename(path.join(from, name), path.join(to, name));
+        moved += 1;
+      } catch (err) {
+        ok = false;
+        logInfo('selfupdate', `carry-over of resources\\${sub}\\${name} failed: ${(err as Error).message}`);
+      }
+    }
+    logInfo('selfupdate', `carried over ${moved}/${moves.length} item(s) in resources\\${sub} from ${oldDir}`);
+  }
+  return ok;
+}
+
 /** 前回の更新で残った .old フォルダがあれば、起動時に片付ける（ベストエフォート） */
 export async function cleanupOldInstallDir(): Promise<void> {
   if (!isSelfUpdateSupported()) return;
@@ -291,6 +339,11 @@ export async function cleanupOldInstallDir(): Promise<void> {
     await fs.access(oldDir);
   } catch {
     return; // 何も残っていない
+  }
+  // 手で置いた whisper.cpp を引き継げていないうちは消さない（消すと取り戻せない）
+  if (!(await carryOverFromOldInstallDir())) {
+    logInfo('selfupdate', `keep ${oldDir}: some user-placed files could not be carried over (will retry next launch)`);
+    return;
   }
   await fs.rm(oldDir, { recursive: true, force: true })
     .then(() => logInfo('selfupdate', `cleaned up leftover ${oldDir}`))

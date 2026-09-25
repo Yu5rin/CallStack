@@ -52,6 +52,7 @@ import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels'
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
 import { getLogPath, logInfo } from './log';
+import { migrateLegacyUserData } from './legacyDataMigrationRunner';
 import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
 import {
   isVoskEngineInstalled, isVoskModelInstalled, downloadVosk,
@@ -60,7 +61,7 @@ import {
 } from './vosk';
 import { checkForUpdate, checkOnStartup, UpdateCheckResult } from './updates';
 import {
-  isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir,
+  isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir, carryOverFromOldInstallDir,
   getSelfUpdateStatus,
 } from './selfUpdate';
 
@@ -1963,8 +1964,17 @@ async function main() {
     showMainWindow();
   });
 
+  // v1.3.0 の製品名変更（TelTimeStack → CallStack）で保存先が %APPDATA%\TelTimeStack から
+  // %APPDATA%\CallStack に変わったまま引き継がれていなかったため、旧フォルダに記録が
+  // 残っていれば移す。store.init() が既定値の data.json を書き出す前に行う。
+  await migrateLegacyUserData();
+
   await app.whenReady();
   await ensureAppDirs();
+  // 自動更新で入れ替えた旧フォルダ(.old)から、利用者が resources\whisper に手で置いた
+  // whisper.cpp を引き継ぐ。.old の削除（下の cleanupOldInstallDir）より前、かつ
+  // 文字起こしの自動再開より前に済ませる。
+  await carryOverFromOldInstallDir();
   await store.init();
   setupIpc();
   setupTranscriptionHandlers();
