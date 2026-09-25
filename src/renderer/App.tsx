@@ -6,17 +6,19 @@ import { useTheme } from './hooks/useTheme';
 import { CallListPage } from './pages/CallListPage';
 import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { formatHMS } from './utils/format';
 import { AppEvent, RecordKind, RecordingSourceConfig, Settings } from '../shared/types';
-import { LevelMeter } from './recorder/LevelMeter';
-import { SummaryFooter } from './components/SummaryFooter';
-import { Phone, Users, Bookmark, Play, Pause, Square, Circle, MoreVertical, FileAudio, Plus, Upload, Download, Settings as SettingsIcon, AlertTriangle } from 'lucide-react';
+import { LiveStrip } from './components/LiveStrip';
+import { formatHMS } from './utils/format';
+import {
+  Phone, Users, ChevronDown, MoreVertical, FileAudio, Plus, Upload, Download,
+  Settings as SettingsIcon, AlertTriangle, Circle,
+} from 'lucide-react';
 import { ToastProvider, useToast } from './components/Toast';
 import { StartRecordDialog, StartMeta } from './components/StartRecordDialog';
 import { OnboardingDialog } from './components/OnboardingDialog';
 import { toUserMessage } from './utils/errorMessage';
 
-type Page = 'list' | 'trash' | 'stats' | 'settings';
+type Page = 'list' | 'stats' | 'settings';
 
 const LAST_KIND_KEY = 'callstack.lastStartKind';
 
@@ -37,16 +39,17 @@ function AppContent() {
   const [initialContactFilter, setInitialContactFilter] = useState<string | null>(null);
   const [initialEditId, setInitialEditId] = useState<string | null>(null);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [startMenuOpen, setStartMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const { calls, loading, error: callsError, reload: reloadCalls } = useCalls();
   const { settings, save, error: settingsError, reload: reloadSettings } = useSettings();
-  const { active, elapsedSec } = useActiveCall();
+  const { active, elapsedSec, holding, holdSec } = useActiveCall();
   const toast = useToast();
   useTheme(settings?.theme);
 
-  // Windows では titleBarStyle:'hidden' + titleBarOverlay でヘッダーが
-  // タイトルバーを兼ねる（main/window.ts 参照）。最小化/最大化/閉じるボタンは
-  // OS が右端に描画するため、ヘッダー右側の内容と重ならないよう余白を空ける。
+  // Windows では titleBarStyle:'hidden' + titleBarOverlay でタイトルバーを兼ねる
+  // （main/window.ts 参照）。最小化/最大化/閉じるボタンは OS が右端に描画するため、
+  // タイトルバー右側の内容と重ならないよう余白を空ける。
   const isWinTitleBarOverlay = useMemo(() => navigator.userAgent.includes('Windows'), []);
 
   // 録音は専用の不可視ウィンドウで実行される。ここでは状態表示のみを行う。
@@ -55,9 +58,8 @@ function AppContent() {
   const [recError, setRecError] = useState<string | null>(null);
   const recErrorTimer = useRef<number | null>(null);
 
-  // ゴミ箱の記録は集計から除外する。フッターは通話＋会議の両方を対象にする。
+  // ゴミ箱の記録は集計から除外する。統計画面はこの一覧を対象にする。
   const callsAlive = useMemo(() => calls.filter((c) => !c.deletedAt), [calls]);
-  const isMeeting = active?.kind === 'meeting';
 
   const navigateToContact = (name: string) => {
     setInitialContactFilter(name);
@@ -100,13 +102,11 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleStartClick = () => {
-    if (settings && !settings.recording.askSourceOnStart) {
-      // ダイアログを使わない設定なら前回の種別・既定ソースで即開始
-      void window.api.calls.startNow(loadLastKind());
-      return;
-    }
-    setStartDialogOpen(true);
+  /** 直近に使った種別で、既定の録音ソース設定のまま即座に記録を開始する（ショートカットと同じ挙動）。 */
+  const startImmediately = (kind: RecordKind) => {
+    localStorage.setItem(LAST_KIND_KEY, kind);
+    setStartMenuOpen(false);
+    void window.api.calls.startNow(kind);
   };
 
   const handleDialogStart = async (
@@ -142,13 +142,13 @@ function AppContent() {
     if (active) void window.api.calls.addMarker(active.id);
   };
 
-  // ︙ メニューは外側クリックで閉じる
+  // ︙ メニュー・記録メニューは外側クリックで閉じる
   useEffect(() => {
-    if (!moreMenuOpen) return;
-    const close = () => setMoreMenuOpen(false);
+    if (!moreMenuOpen && !startMenuOpen) return;
+    const close = () => { setMoreMenuOpen(false); setStartMenuOpen(false); };
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
-  }, [moreMenuOpen]);
+  }, [moreMenuOpen, startMenuOpen]);
 
   /** ︙ メニューの項目: 記録一覧ページ側にアクションを依頼する */
   const dispatchListAction = (action: string) => {
@@ -192,102 +192,101 @@ function AppContent() {
     );
   }
 
+  const captionReserve = isWinTitleBarOverlay ? 'pr-[150px]' : 'pr-2';
+
   return (
     <div className="flex h-full flex-col bg-paper">
+      {/* タイトルバー（40px。Windows では titleBarOverlay と重なるため右側に余白を確保する） */}
       <header
-        className={`app-titlebar flex h-[52px] flex-none items-center justify-between gap-2 border-b border-rule bg-chrome pl-6 ${
-          isWinTitleBarOverlay ? 'pr-[150px]' : 'pr-6'
-        }`}
+        className={`app-titlebar flex h-10 flex-none items-center gap-3 border-b border-rule bg-chrome pl-3 ${captionReserve}`}
       >
-        <nav className="app-titlebar-no-drag flex shrink-0 gap-1">
-          <TabButton active={page === 'list'} onClick={() => setPage('list')}>記録</TabButton>
-          <TabButton active={page === 'stats'} onClick={() => setPage('stats')}>統計</TabButton>
-          <TabButton active={page === 'trash'} onClick={() => setPage('trash')}>ゴミ箱</TabButton>
+        <span className="app-titlebar-no-drag flex shrink-0 items-center gap-2">
+          <span className="flex h-[18px] w-[18px] shrink-0 flex-col items-center justify-center gap-[2.5px] rounded-[5px] bg-accent">
+            <span className="block h-[1.5px] w-2.5 rounded-full bg-on-accent" />
+            <span className="block h-[1.5px] w-2.5 rounded-full bg-on-accent" />
+          </span>
+          <span className="text-[13px] font-medium text-ink">CallStack</span>
+        </span>
+
+        <nav className="app-titlebar-no-drag ml-1 flex h-full items-stretch" aria-label="画面切り替え">
+          <TitleTab active={page === 'list'} onClick={() => setPage('list')}>記録</TitleTab>
+          <TitleTab active={page === 'stats'} onClick={() => setPage('stats')}>統計</TitleTab>
         </nav>
-        <div className="app-titlebar-no-drag flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1 sm:gap-1.5 md:gap-2">
-          {active ? (
-            <span
-              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-sm font-medium sm:px-3 ${
-                isMeeting ? 'bg-meeting/10 text-meeting' : 'bg-accent-soft text-accent-ink'
-              }`}
-            >
-              <span className={`inline-block h-2 w-2 animate-pulse rounded-full ${isMeeting ? 'bg-meeting' : 'bg-accent'}`} />
-              {isMeeting ? <Users size={14} /> : <Phone size={14} />}
-              <span className="hidden md:inline">{isMeeting ? '会議中' : '通話中'}</span>
-              <span className="font-mono tabular-nums">{formatHMS(elapsedSec)}</span>
-            </span>
-          ) : (
-            <span className="hidden shrink-0 rounded-full bg-ink/5 px-3 py-1 text-sm text-ink-mute sm:inline-block">
-              待機中
-            </span>
-          )}
-          {recState.recording && (
-            <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-medium sm:px-3 ${
-              recState.paused ? 'bg-pending/10 text-pending' : 'bg-danger-soft text-danger'
-            }`}>
-              <span className={`inline-block h-2 w-2 rounded-full ${recState.paused ? 'bg-pending' : 'animate-pulse bg-danger'}`} />
-              <span className="hidden md:inline">{recState.paused ? '一時停止中' : 'REC'}</span>
-              {!recState.paused && <span className="hidden md:inline-flex"><LevelMeter level={recLevel} /></span>}
+
+        <div className="flex-1" />
+
+        <div className="app-titlebar-no-drag flex shrink-0 items-center gap-1.5">
+          {!active && (
+            <div className="relative flex items-center">
               <button
-                onClick={() => window.api.recording.togglePause()}
-                className="rounded px-1 hover:bg-ink/10"
-                title={recState.paused ? `録音を再開 (${settings.shortcuts.togglePauseRecording})` : `録音を一時停止 (${settings.shortcuts.togglePauseRecording})`}
+                onClick={() => startImmediately(loadLastKind())}
+                className="flex h-7 items-center gap-1.5 whitespace-nowrap rounded-l-md bg-accent px-3 text-[13px] font-medium text-on-accent hover:brightness-105"
+                title={`記録を開始（前回: ${loadLastKind() === 'meeting' ? '会議' : '通話'} / 既定の録音ソースで即開始）`}
               >
-                {recState.paused ? <Play size={12} /> : <Pause size={12} />}
-              </button>
-            </span>
-          )}
-          {recError && (
-            <button
-              onClick={() => setRecError(null)}
-              className="max-w-[6rem] shrink truncate rounded-full bg-pending/10 px-2 py-1 text-xs text-pending hover:bg-pending/20 sm:max-w-[9rem] sm:px-3 lg:max-w-[14rem]"
-              title={`${toUserMessage(recError)}\n(クリックで閉じる)`}
-            >
-              <span className="hidden lg:inline">録音エラー: </span>{toUserMessage(recError)}
-            </button>
-          )}
-          {active ? (
-            <>
-              <button
-                onClick={handleAddMarker}
-                className="shrink-0 rounded-md border border-rule bg-surface px-2 py-1.5 text-sm font-medium text-ink hover:bg-paper sm:px-3"
-                title="現在時刻にマーカーを打つ（あとで該当箇所へジャンプできます）"
-              >
-                <Bookmark size={14} className="inline align-[-2px] lg:mr-1" /><span className="hidden lg:inline">マーカー</span>
+                <Circle size={9} fill="currentColor" stroke="none" />
+                記録を開始
               </button>
               <button
-                onClick={() => window.api.calls.endNow()}
-                className="shrink-0 whitespace-nowrap rounded-md bg-danger px-2 py-1.5 text-sm font-medium text-on-accent hover:bg-danger/90 sm:px-3"
+                onClick={(e) => { e.stopPropagation(); setStartMenuOpen((v) => !v); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="flex h-7 items-center rounded-r-md border-l border-on-accent/30 bg-accent px-1.5 text-on-accent hover:brightness-105"
+                aria-haspopup="true"
+                aria-expanded={startMenuOpen}
+                aria-label="記録の開始方法を選ぶ"
               >
-                <Square size={12} fill="currentColor" className="mr-1 inline align-[-1px]" />終了<span className="hidden lg:inline"> ({settings.shortcuts.endCall})</span>
+                <ChevronDown size={13} />
               </button>
-            </>
-          ) : (
-            <button
-              onClick={handleStartClick}
-              className="shrink-0 whitespace-nowrap rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:bg-accent/90 sm:px-4"
-              title={`記録・録音を開始（ダイアログで通話/会議を選択）\nショートカット即開始: 通話 ${settings.shortcuts.startCall} / 会議 ${settings.shortcuts.startMeeting}`}
-            >
-              <Circle size={11} fill="currentColor" stroke="none" className="mr-1.5 inline align-[-1px]" />録音
-            </button>
+              {startMenuOpen && (
+                <div
+                  className="absolute right-0 top-full z-[80] mt-1.5 w-64 overflow-hidden rounded-lg border border-rule bg-surface p-1.5 shadow-lg"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  role="menu"
+                >
+                  <button
+                    onClick={() => startImmediately('call')}
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft"
+                    role="menuitem"
+                  >
+                    <span className="inline-flex items-center gap-2"><Phone size={15} className="text-ink-mute" />通話を開始</span>
+                    <span className="font-mono text-[11px] text-ink-mute">{settings.shortcuts.startCall}</span>
+                  </button>
+                  <button
+                    onClick={() => startImmediately('meeting')}
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft"
+                    role="menuitem"
+                  >
+                    <span className="inline-flex items-center gap-2"><Users size={15} className="text-ink-mute" />会議を開始</span>
+                    <span className="font-mono text-[11px] text-ink-mute">{settings.shortcuts.startMeeting}</span>
+                  </button>
+                  <div className="my-1 h-px bg-rule" />
+                  <button
+                    onClick={() => { setStartMenuOpen(false); setStartDialogOpen(true); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink hover:bg-accent-soft"
+                    role="menuitem"
+                  >
+                    録音ソースを選んで開始…
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           <div className="relative shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setMoreMenuOpen((v) => !v); }}
               onMouseDown={(e) => e.stopPropagation()}
-              className="rounded-md border border-rule bg-surface p-1.5 text-ink-mute hover:bg-paper"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-ink-mute hover:bg-accent-soft hover:text-ink"
               title="その他の操作"
             >
               <MoreVertical size={16} />
             </button>
             {moreMenuOpen && (
               <div
-                className="absolute right-0 top-full z-[80] mt-1 w-52 overflow-hidden rounded-lg border border-rule bg-surface py-1 shadow-lg"
+                className="absolute right-0 top-full z-[80] mt-1.5 w-52 overflow-hidden rounded-lg border border-rule bg-surface py-1 shadow-lg"
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {([
-                  { action: 'audio-import', icon: <FileAudio size={16} />, label: '音声を取り込み…' },
-                  { action: 'manual-add', icon: <Plus size={16} />, label: '手動追加' },
+                  { action: 'audio-import', icon: <FileAudio size={16} />, label: '音声の取り込み…' },
+                  { action: 'manual-add', icon: <Plus size={16} />, label: '手動で追加' },
                   { action: 'csv-import', icon: <Upload size={16} />, label: 'CSV インポート…' },
                   { action: 'csv-export', icon: <Download size={16} />, label: 'CSV エクスポート…' },
                 ] as const).map((item) => (
@@ -305,10 +304,8 @@ function AppContent() {
           </div>
           <button
             onClick={() => setPage('settings')}
-            className={`shrink-0 rounded-md border p-1.5 transition ${
-              page === 'settings'
-                ? 'border-accent bg-accent-soft text-accent-ink'
-                : 'border-rule bg-surface text-ink-mute hover:bg-paper'
+            className={`flex h-7 w-7 items-center justify-center rounded-md ${
+              page === 'settings' ? 'bg-accent-soft text-accent-ink' : 'text-ink-mute hover:bg-accent-soft hover:text-ink'
             }`}
             title="設定"
           >
@@ -317,26 +314,42 @@ function AppContent() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto">
+      {active && (
+        <LiveStrip
+          active={active}
+          elapsedSec={elapsedSec}
+          holding={holding}
+          holdSec={holdSec}
+          recording={recState.recording}
+          paused={recState.paused}
+          level={recLevel}
+          error={recError}
+          onDismissError={() => setRecError(null)}
+          onAddMarker={handleAddMarker}
+          onTogglePauseRecording={() => window.api.recording.togglePause()}
+          onToggleHold={() => window.api.calls.toggleHold()}
+          onEnd={() => window.api.calls.endNow()}
+          shortcuts={settings.shortcuts}
+        />
+      )}
+
+      <main className={`flex-1 ${page === 'list' ? 'overflow-hidden' : 'overflow-auto'}`}>
         {page === 'list' && (
           <CallListPage
             calls={calls}
             settings={settings}
+            onSaveSettings={save}
             initialContactFilter={initialContactFilter}
             onConsumeInitialFilter={() => setInitialContactFilter(null)}
             initialEditId={initialEditId}
             onConsumeInitialEditId={() => setInitialEditId(null)}
           />
         )}
-        {page === 'trash' && (
-          <CallListPage calls={calls} settings={settings} mode="trash" />
-        )}
         {page === 'stats' && (
           <StatsPage calls={callsAlive} settings={settings} onSelectContact={navigateToContact} />
         )}
         {page === 'settings' && <SettingsPage settings={settings} onSave={save} />}
       </main>
-      <SummaryFooter calls={callsAlive} />
 
       {startDialogOpen && settings && (
         <StartRecordDialog
@@ -373,7 +386,7 @@ function LoadErrorScreen({ error, onRetry }: { error: unknown; onRetry: () => vo
   );
 }
 
-function TabButton({
+function TitleTab({
   active,
   onClick,
   children,
@@ -385,8 +398,8 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-        active ? 'bg-accent-soft text-accent-ink' : 'text-ink-mute hover:bg-paper'
+      className={`flex items-center border-b-2 px-3 text-[13px] font-medium transition ${
+        active ? 'border-accent text-ink' : 'border-transparent text-ink-mute hover:text-ink'
       }`}
     >
       {children}

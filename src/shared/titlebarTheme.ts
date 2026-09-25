@@ -37,8 +37,8 @@ export const PAPER_COLORS: Record<EffectiveTheme, string> = {
   black: '#000000',
 };
 
-/** タイトルバーの高さ(px)。App.tsx のヘッダー（h-[52px]）と揃えること。 */
-export const TITLEBAR_HEIGHT = 52;
+/** タイトルバーの高さ(px)。App.tsx のタイトルバー（h-10 / 40px）と揃えること。 */
+export const TITLEBAR_HEIGHT = 40;
 
 /** ThemePref（'system' を含む）から実効テーマを解決する */
 export function resolveEffectiveTheme(pref: ThemePref, systemPrefersDark: boolean): EffectiveTheme {

@@ -10,8 +10,8 @@ function formatEta(sec: number): string {
   return `約${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ''}`;
 }
 
-/** フッター右側の文字起こし状況（進捗 %・推定残り時間・待機数） */
-function TranscriptionStatusBar() {
+/** 文字起こし状況（進捗 %・推定残り時間・待機数）。記録一覧のフッターから再利用する。 */
+export function TranscriptionStatusBar() {
   const [summary, setSummary] = useState<{
     running: { callId: string; percent: number; etaSec: number | null } | null;
     waiting: number;

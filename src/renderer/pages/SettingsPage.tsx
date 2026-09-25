@@ -1,25 +1,67 @@
-import { useEffect, useRef, useState } from 'react';
+import { ComponentType, ReactNode, useEffect, useRef, useState } from 'react';
 import {
   AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel,
   VoskLiveModel, VOSK_MODELS, TranscriptionSettings, TermReplacement,
 } from '../../shared/types';
 import {
-  Palette, AppWindow, Keyboard, Tag, Mic, FileText, Bell, Database, Info,
-  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines, Plus, X, Video,
-  ChevronUp, ChevronDown,
+  SlidersHorizontal, Mic, FileText, Video, Keyboard, Tag, Database, Info,
+  Download, RefreshCw, FolderOpen, CircleCheck, AlertTriangle, Volume2, AudioLines,
+  Plus, X, ChevronUp, ChevronDown, Search,
 } from 'lucide-react';
 import { ShortcutInput } from '../components/ShortcutInput';
 import { AudioDeviceSelect } from '../components/AudioDeviceSelect';
 import { ModelManager } from '../components/ModelManager';
 import { useToast } from '../components/Toast';
 import { toUserMessage } from '../utils/errorMessage';
+import { Switch } from '../components/settings/Switch';
+import { Segmented } from '../components/settings/Segmented';
+import { SettingsRow } from '../components/settings/SettingsRow';
+import { rowMatches, RowMeta } from '../components/settings/searchUtils';
 
-const sectionClass =
-  'rounded-lg border border-rule bg-surface p-5';
 const inputClass =
   'rounded-md border border-rule bg-surface px-3 py-2 text-sm text-ink';
 const ghostBtn =
   'rounded-md border border-rule bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-paper';
+const groupClass = 'overflow-hidden rounded-lg border border-rule bg-surface';
+const subheadingClass = 'mb-2 mt-6 text-[11px] font-medium uppercase tracking-wide text-ink-mute first:mt-0';
+
+type IconComp = ComponentType<{ size?: number | string; className?: string }>;
+
+interface RowDef extends RowMeta {
+  id: string;
+  /** 単一のネイティブ input/select/textarea に付けた id（ラベルと htmlFor で結びつける） */
+  controlId?: string;
+  /** true でコントロールをラベルの下に全幅表示（複雑な UI 向け） */
+  full?: boolean;
+  render: () => ReactNode;
+}
+interface GroupDef {
+  heading?: string;
+  rows: RowDef[];
+}
+interface CategoryDef {
+  id: string;
+  title: string;
+  icon: IconComp;
+  intro?: string;
+  groups: GroupDef[];
+}
+
+// ============================================================================
+// 設定画面をまだマウントしていないタイミング（例: 初回起動オンボーディング直後）でも
+// 「文字起こしセットアップへ誘導」の deep link を取りこぼさないよう、モジュール読み込み時点
+// （App 起動時、この画面のマウント有無に関係なく）からグローバルにイベントを監視しておく。
+// ============================================================================
+let pendingDeepLinkCategory: string | null = null;
+let activeDeepLinkHandler: ((category: string) => void) | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('callstack:navigate-settings', () => {
+    // 現状の発火元はオンボーディングのみ（文字起こしセットアップへ誘導）
+    const category = 'transcription';
+    if (activeDeepLinkHandler) activeDeepLinkHandler(category);
+    else pendingDeepLinkCategory = category;
+  });
+}
 
 /** whisper.cpp のセットアップ状態 + 実行ファイルのアプリ内ダウンロード */
 function WhisperSetup({
@@ -78,7 +120,7 @@ function WhisperSetup({
   const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
 
   return (
-    <div className="mt-3 rounded-md border border-rule bg-paper p-3">
+    <div className="rounded-md border border-rule bg-paper p-3">
       <div className="mb-1 flex items-center justify-between">
         <div className="text-xs font-medium text-ink">セットアップ状態</div>
         <button
@@ -128,18 +170,13 @@ function WhisperSetup({
         )}
       </div>
       {gpuUnlocked && (
-        <label className="mt-2 flex items-center gap-2 text-xs text-ink">
-          <input
-            type="checkbox"
-            checked={useGpu}
-            onChange={(e) => onToggleGpu(e.target.checked)}
-            disabled={!gpuInstalled}
-          />
-          GPU (CUDA) 版を使用する
+        <div className="mt-2 flex items-center gap-2 text-xs text-ink">
+          <Switch id="swWhisperGpu" checked={useGpu} disabled={!gpuInstalled} onChange={onToggleGpu} />
+          <label htmlFor="swWhisperGpu" className="cursor-pointer">GPU (CUDA) 版を使用する</label>
           <span className="text-ink-mute">
             {gpuInstalled ? '— 文字起こしが数倍高速になります（NVIDIA GPU 必須）' : '— 先に GPU 版をダウンロードしてください'}
           </span>
-        </label>
+        </div>
       )}
       {progress && pct !== null && progress.step === 'download' && (
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-rule">
@@ -205,7 +242,7 @@ function LiveTranscribeSetup({
   const ready = engineOk && modelOk;
 
   return (
-    <div className="mt-4 rounded-md border border-rule bg-paper p-3">
+    <div className="rounded-md border border-rule bg-paper p-3">
       <div className="mb-1 flex items-center justify-between">
         <div className="inline-flex items-center gap-1.5 text-xs font-medium text-ink">
           <AudioLines size={13} className="text-accent-ink" />
@@ -222,17 +259,17 @@ function LiveTranscribeSetup({
         録音中の音声をその場で認識し、HUD と編集画面に暫定テキストを表示します（オフライン動作）。
         録音終了後は従来どおり whisper が高精度の確定版を生成します。
       </p>
-      <label className="flex items-center gap-2 text-sm text-ink">
-        <input
-          type="checkbox"
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink">
+        <Switch
+          id="swLiveEnabled"
           checked={enabled}
           disabled={!recordingEnabled || (!ready && !enabled)}
-          onChange={(e) => onChange({ liveEnabled: e.target.checked })}
+          onChange={(v) => onChange({ liveEnabled: v })}
         />
-        録音中にライブ文字起こしを表示する
+        <label htmlFor="swLiveEnabled" className="cursor-pointer">録音中にライブ文字起こしを表示する</label>
         {!recordingEnabled && <span className="text-xs text-ink-mute">— 先に録音を有効にしてください</span>}
         {recordingEnabled && !ready && <span className="text-xs text-ink-mute">— 下のエンジンとモデルの配置が必要です</span>}
-      </label>
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className={`inline-flex items-center gap-1 text-xs ${engineOk ? 'text-ok' : 'text-ink-mute'}`}>
           {engineOk ? <CircleCheck size={13} /> : <AlertTriangle size={13} />}
@@ -260,6 +297,7 @@ function LiveTranscribeSetup({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
+          id="selLiveModel"
           value={model}
           onChange={(e) => onChange({ liveModel: e.target.value as VoskLiveModel })}
           className={`w-64 ${inputClass}`}
@@ -397,746 +435,164 @@ function TeamsWindowProbe() {
   );
 }
 
-const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
-const GPU_UNLOCK_KEY = 'callstack.gpuUnlocked';
-
-export function SettingsPage({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => Promise<void> }) {
-  const toast = useToast();
-  const [draft, setDraft] = useState<Settings>(settings);
-  const [showRecordingWarning, setShowRecordingWarning] = useState(false);
-  // 隠しコマンド (↑↑↓↓←→←→BA) で GPU 版のオプションを解放
-  const [gpuUnlocked, setGpuUnlocked] = useState(
-    () => localStorage.getItem(GPU_UNLOCK_KEY) === '1' || !!settings.transcription.useGpu,
+/** データ・録音・ログの各フォルダを開くボタン列 */
+function AppFoldersRow() {
+  return (
+    <div className="w-full">
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => void window.api.app.openPath('data')}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
+        >
+          <FolderOpen size={12} className="mr-1 inline align-[-1px]" />データフォルダを開く
+        </button>
+        <button
+          onClick={() => void window.api.app.openPath('recordings')}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
+        >
+          <Mic size={12} className="mr-1 inline align-[-1px]" />録音フォルダを開く
+        </button>
+        <button
+          onClick={() => void window.api.app.openPath('logs')}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
+        >
+          <FileText size={12} className="mr-1 inline align-[-1px]" />ログフォルダを開く
+        </button>
+      </div>
+      <span className="mt-1 block text-xs text-ink-mute">
+        不具合報告の際はログフォルダの app.log を添えていただくと調査がスムーズです
+      </span>
+    </div>
   );
-  const konamiPos = useRef(0);
-  useEffect(() => {
-    if (gpuUnlocked) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      if (key === KONAMI[konamiPos.current]) {
-        konamiPos.current += 1;
-        if (konamiPos.current === KONAMI.length) {
-          konamiPos.current = 0;
-          setGpuUnlocked(true);
-          localStorage.setItem(GPU_UNLOCK_KEY, '1');
-          toast.success('隠しオプションを解放しました: GPU (CUDA) 版 whisper が利用できます');
-        }
-      } else {
-        konamiPos.current = key === KONAMI[0] ? 1 : 0;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gpuUnlocked]);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const lastIncoming = useRef<Settings>(settings);
+}
 
-  // Adopt remote updates only when they actually differ from what we just
-  // saved — avoids fighting the user mid-edit while still reflecting changes
-  // from other surfaces (tray, HUD, etc.).
-  useEffect(() => {
-    if (settings !== lastIncoming.current) {
-      lastIncoming.current = settings;
-      setDraft(settings);
+function BackupRestoreRow() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const backup = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const path = await window.api.backup.create();
+      setMessage(`バックアップを保存しました: ${path}`);
+    } catch (err) {
+      setError(toUserMessage(err));
+    } finally {
+      setBusy(false);
     }
-  }, [settings]);
-
-  // Persist the draft as soon as it differs from the latest incoming settings.
-  // 200ms debounce keeps text fields (tag names, numbers) from spamming IPC.
-  const saveTimer = useRef<number | null>(null);
-  const commit = (next: Settings) => {
-    setDraft(next);
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null;
-      lastIncoming.current = next;
-      void onSave(next);
-    }, 200);
   };
-
-  const update = (patch: Partial<Settings>) => commit({ ...draftRef.current, ...patch });
-  const updateShortcut = (key: keyof Settings['shortcuts'], v: string) =>
-    commit({ ...draftRef.current, shortcuts: { ...draftRef.current.shortcuts, [key]: v } });
-  const updateRecording = (patch: Partial<Settings['recording']>) =>
-    commit({ ...draftRef.current, recording: { ...draftRef.current.recording, ...patch } });
-  const updateTranscription = (patch: Partial<Settings['transcription']>) =>
-    commit({ ...draftRef.current, transcription: { ...draftRef.current.transcription, ...patch } });
-  const updateTag = (idx: number, patch: Partial<TagDef>) => {
-    const tags = draftRef.current.tags.slice();
-    tags[idx] = { ...tags[idx], ...patch };
-    commit({ ...draftRef.current, tags });
-  };
-  const removeTag = (idx: number) =>
-    commit({ ...draftRef.current, tags: draftRef.current.tags.filter((_, i) => i !== idx) });
-  const addTag = () =>
-    commit({ ...draftRef.current, tags: [...draftRef.current.tags, { name: '新規タグ', color: '#8A9296' }] });
-  const moveTag = (idx: number, dir: -1 | 1) => {
-    const tags = draftRef.current.tags.slice();
-    const j = idx + dir;
-    if (j < 0 || j >= tags.length) return;
-    [tags[idx], tags[j]] = [tags[j], tags[idx]];
-    commit({ ...draftRef.current, tags });
-  };
-
-  const handleToggleRecording = (checked: boolean) => {
-    if (checked) {
-      if (draft.confirmRecordingEnable) {
-        setShowRecordingWarning(true);
+  const restore = async () => {
+    if (!window.confirm('JSON ファイルから復元します。現在のデータは復元前に自動バックアップされます。続行しますか？')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await window.api.backup.restore();
+      if (r.canceled) {
+        setMessage(null);
       } else {
-        updateRecording({ enabled: true });
+        setMessage(`復元しました (${r.calls} 件)。直前のデータは ${r.backupPath} にあります。`);
       }
-    } else {
-      updateRecording({ enabled: false });
+    } catch (err) {
+      setError(toUserMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
-      {/* ============ 外観 ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Palette size={16} className="text-ink-mute" />外観</h3>
-        <Row label="テーマ">
-          <div className="flex gap-3 text-sm">
-            {(['system', 'light', 'dark', 'black'] as ThemePref[]).map((t) => (
-              <label key={t} className="inline-flex items-center gap-1 text-ink">
-                <input
-                  type="radio"
-                  name="theme"
-                  checked={draft.theme === t}
-                  onChange={() => update({ theme: t })}
-                />
-                {t === 'system' ? 'システムに合わせる' : t === 'light' ? 'ライト' : t === 'dark' ? 'ダーク' : '黒'}
-              </label>
-            ))}
-          </div>
-        </Row>
-      </section>
-
-      {/* ============ ウィンドウと HUD ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><AppWindow size={16} className="text-ink-mute" />ウィンドウと HUD</h3>
-        <Row label="自動起動">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.launchAtLogin}
-              onChange={(e) => update({ launchAtLogin: e.target.checked })}
-            />
-            Windows ログイン時に CallStack を自動起動する
-          </label>
-        </Row>
-        <Row label="最小化の動作">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.minimizeToTray}
-              onChange={(e) => update({ minimizeToTray: e.target.checked })}
-            />
-            最小化時にタスクトレイに格納する
-          </label>
-          <span className="ml-2 text-xs text-ink-mute">
-            オフなら通常通りタスクバーに最小化されます (×ボタンは常にアプリ終了)
-          </span>
-        </Row>
-        <Row label="HUD のサイズ">
-          <div className="flex gap-3 text-sm text-ink">
-            {(['mini', 'compact', 'full'] as const).map((s) => (
-              <label key={s} className="inline-flex items-center gap-1">
-                <input
-                  type="radio"
-                  checked={draft.hudSize === s}
-                  onChange={() => update({ hudSize: s })}
-                />
-                {s === 'mini' ? 'ミニ (240×34)' : s === 'compact' ? 'コンパクト (400×70)' : 'フル (470×122)'}
-              </label>
-            ))}
-          </div>
-          <span className="ml-2 block text-xs text-ink-mute">
-            HUD 右上のアイコンでもサイズを循環できます
-          </span>
-        </Row>
-        <Row label="HUD の透明度">
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={30}
-              max={100}
-              step={5}
-              value={Math.round((draft.hudOpacity ?? 1) * 100)}
-              onChange={(e) => update({ hudOpacity: Number(e.target.value) / 100 })}
-              className="w-56 accent-accent"
-            />
-            <span className="w-12 text-right font-mono text-sm tabular-nums text-ink">
-              {Math.round((draft.hudOpacity ?? 1) * 100)}%
-            </span>
-          </div>
-          <span className="mt-1 block text-xs text-ink-mute">
-            カーソルを HUD に乗せている間は自動的に不透明になります
-          </span>
-        </Row>
-        <Row label="HUD のライブ字幕">
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="inline-flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={draft.hudLiveVisible ?? true}
-                onChange={(e) => update({ hudLiveVisible: e.target.checked })}
-              />
-              ライブ字幕ウィンドウを表示する
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm text-ink-mute">
-              文字サイズ
-              <select
-                value={draft.liveFontSize ?? 'sm'}
-                onChange={(e) => update({ liveFontSize: e.target.value as 'sm' | 'md' | 'lg' })}
-                className={`w-24 ${inputClass}`}
-              >
-                <option value="sm">小</option>
-                <option value="md">中</option>
-                <option value="lg">大</option>
-              </select>
-            </label>
-          </div>
-          <span className="mt-1 block text-xs text-ink-mute">
-            録音中のライブ文字起こしを独立したウィンドウに表示します。ウィンドウは自由に移動・リサイズでき、
-            文字サイズ（小/中/大）はウィンドウ上でも切り替えられます。表示 ON/OFF は HUD の「字幕」ボタンや
-            ウィンドウの × でも操作できます
-          </span>
-        </Row>
-      </section>
-
-      {/* ============ ショートカット ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Keyboard size={16} className="text-ink-mute" />グローバルショートカット</h3>
-        <p className="mb-4 text-xs text-ink-mute">
-          システム全体で有効。フォーカス中の入力欄にキーを押すと記録できます。
-        </p>
-        <div className="space-y-3">
-          <Row label="通話を開始">
-            <ShortcutInput value={draft.shortcuts.startCall} onChange={(v) => updateShortcut('startCall', v)} />
-          </Row>
-          <Row label="会議を開始">
-            <ShortcutInput value={draft.shortcuts.startMeeting} onChange={(v) => updateShortcut('startMeeting', v)} />
-          </Row>
-          <Row label="通話/会議を終了">
-            <ShortcutInput value={draft.shortcuts.endCall} onChange={(v) => updateShortcut('endCall', v)} />
-          </Row>
-          <Row label="保留トグル">
-            <ShortcutInput value={draft.shortcuts.toggleHold} onChange={(v) => updateShortcut('toggleHold', v)} />
-          </Row>
-          <Row label="録音の一時停止/再開">
-            <ShortcutInput value={draft.shortcuts.togglePauseRecording} onChange={(v) => updateShortcut('togglePauseRecording', v)} />
-          </Row>
-          <Row label="マーカーを打つ">
-            <ShortcutInput value={draft.shortcuts.addMarker} onChange={(v) => updateShortcut('addMarker', v)} />
-          </Row>
-          <Row label="メイン窓を表示/隠す">
-            <ShortcutInput value={draft.shortcuts.toggleWindow} onChange={(v) => updateShortcut('toggleWindow', v)} />
-          </Row>
-          <Row label="設定画面を開く">
-            <ShortcutInput value={draft.shortcuts.openSettings} onChange={(v) => updateShortcut('openSettings', v)} />
-          </Row>
-          {([1, 2, 3, 4] as const).map((n) => {
-            const key = `assignTag${n}` as const;
-            const tagName = draft.tags[n - 1]?.name ?? '(未設定)';
-            return (
-              <Row key={key} label={`クイックタグ ${n} (${tagName})`}>
-                <ShortcutInput
-                  value={draft.shortcuts[key]}
-                  onChange={(v) => updateShortcut(key, v)}
-                />
-              </Row>
-            );
-          })}
+    <div className="w-full space-y-2">
+      <div className="flex gap-2">
+        <button
+          onClick={backup}
+          disabled={busy}
+          className="rounded-md border border-rule bg-surface px-3 py-1.5 text-sm hover:bg-paper disabled:opacity-50"
+        >
+          今すぐバックアップ
+        </button>
+        <button
+          onClick={restore}
+          disabled={busy}
+          className="rounded-md border border-danger/40 bg-surface px-3 py-1.5 text-sm text-danger hover:bg-danger-soft disabled:opacity-50"
+        >
+          JSON から復元…
+        </button>
+      </div>
+      {message && (
+        <div className="break-all rounded border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok">
+          {message}
         </div>
-      </section>
-
-      {/* ============ タグ ============ */}
-      <section className={sectionClass}>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="inline-flex items-center gap-2 text-base font-medium text-ink"><Tag size={16} className="text-ink-mute" />タグ</h3>
-          <button onClick={addTag} className={ghostBtn}>＋ タグを追加</button>
-        </div>
-        <div className="space-y-2">
-          {draft.tags.map((t, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <input
-                type="color"
-                value={t.color}
-                onChange={(e) => updateTag(i, { color: e.target.value })}
-                className="h-9 w-9 cursor-pointer rounded border border-rule"
-              />
-              <input
-                value={t.name}
-                onChange={(e) => updateTag(i, { name: e.target.value })}
-                className={`flex-1 ${inputClass}`}
-              />
-              <div className="flex items-center">
-                <button
-                  onClick={() => moveTag(i, -1)}
-                  disabled={i === 0}
-                  className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
-                  title="上へ"
-                >
-                  <ChevronUp size={16} />
-                </button>
-                <button
-                  onClick={() => moveTag(i, 1)}
-                  disabled={i === draft.tags.length - 1}
-                  className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
-                  title="下へ"
-                >
-                  <ChevronDown size={16} />
-                </button>
-              </div>
-              <button
-                onClick={() => removeTag(i)}
-                className="rounded-md border border-danger/40 bg-surface px-2 py-1.5 text-xs text-danger hover:bg-danger-soft"
-              >
-                削除
-              </button>
-            </div>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-ink-mute">
-          ▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・HUD の「情報」から選択）。
-          上位4つはクイックタグ（{'Ctrl+Shift+1〜4'}）に割り当てられます。
-        </p>
-      </section>
-
-      {/* ============ 録音 ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Mic size={16} className="text-ink-mute" />録音</h3>
-        <Row label="通話と同時に録音">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.recording.enabled}
-              onChange={(e) => handleToggleRecording(e.target.checked)}
-            />
-            録音を有効にする
-          </label>
-        </Row>
-        <SourceConfigRow
-          label="通話の録音ソース"
-          value={draft.recording.callSource}
-          disabled={!draft.recording.enabled}
-          onChange={(v) => updateRecording({ callSource: v })}
-        />
-        <SourceConfigRow
-          label="会議の録音ソース"
-          value={draft.recording.meetingSource}
-          disabled={!draft.recording.enabled}
-          onChange={(v) => updateRecording({ meetingSource: v })}
-        />
-        <Row label="開始ダイアログ">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.recording.askSourceOnStart}
-              onChange={(e) => updateRecording({ askSourceOnStart: e.target.checked })}
-            />
-            「▶ 開始」ボタンで通話/会議・録音ソースの選択ダイアログを表示する
-          </label>
-          <span className="ml-2 block text-xs text-ink-mute">
-            オフにするとボタンは前回の種別で即開始します。ショートカット・トレイからは常に既定ソースで即開始です
-          </span>
-        </Row>
-        <Row label="マイクデバイス">
-          <AudioDeviceSelect
-            value={draft.recording.micDeviceId}
-            onChange={(id) => updateRecording({ micDeviceId: id })}
-          />
-        </Row>
-        <Row label="MP3 ビットレート">
-          <select
-            value={draft.recording.mp3Bitrate}
-            onChange={(e) => updateRecording({ mp3Bitrate: Number(e.target.value) as 64 | 96 | 128 | 192 })}
-            className={`w-32 ${inputClass}`}
-            disabled={!draft.recording.enabled}
-          >
-            {[64, 96, 128, 192].map((b) => (
-              <option key={b} value={b}>{b} kbps</option>
-            ))}
-          </select>
-          <span className="ml-2 text-xs text-ink-mute">96kbps で約 700KB/分</span>
-        </Row>
-        <Row label="録音の保管期限（日）">
-          <input
-            type="number"
-            min={0}
-            value={draft.recording.retentionDays ?? ''}
-            placeholder="無制限"
-            onChange={(e) => {
-              const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
-              updateRecording({ retentionDays: v });
-            }}
-            className={`w-32 ${inputClass}`}
-            disabled={!draft.recording.enabled}
-          />
-          <span className="ml-2 text-xs text-ink-mute">空欄で無制限。期限切れの音声のみ削除（記録は残ります）</span>
-        </Row>
-        <Row label="有効化時の同意確認">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.confirmRecordingEnable}
-              onChange={(e) => update({ confirmRecordingEnable: e.target.checked })}
-            />
-            録音を有効化する時に確認モーダルを表示する
-          </label>
-        </Row>
-      </section>
-
-      {/* ============ Teams 連携（実験的） ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Video size={16} className="text-ink-mute" />Teams 連携（実験的）</h3>
-        <p className="mb-3 text-xs text-ink-mute">
-          Microsoft Teams の会議/通話ウィンドウを監視して自動で記録・録音を開始します（完全オフライン・サインイン不要）。
-          Teams のバージョンや表示言語によってはウィンドウ名の書式が異なり、検知精度が変わる場合があります。録音を有効にしてご利用ください。
-        </p>
-        <Row label="Teams を検知して自動録音">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.teamsDetectEnabled ?? false}
-              onChange={(e) => update({ teamsDetectEnabled: e.target.checked })}
-              disabled={!draft.recording.enabled}
-            />
-            会議/通話を検知したら記録を開始する
-            {!draft.recording.enabled && <span className="text-xs text-ink-mute">— 先に録音を有効にしてください</span>}
-          </label>
-        </Row>
-        <Row label="検知時の動作">
-          <div className="flex gap-4 text-sm text-ink">
-            {([['confirm', '通知をクリックで開始'], ['auto', '自動で即開始']] as const).map(([v, label]) => (
-              <label key={v} className="inline-flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={(draft.teamsDetectMode ?? 'confirm') === v}
-                  onChange={() => update({ teamsDetectMode: v })}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </Row>
-        <Row label="判別できないときの種別">
-          <div className="flex gap-4 text-sm text-ink">
-            {([['meeting', '会議'], ['call', '通話']] as const).map(([v, label]) => (
-              <label key={v} className="inline-flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={(draft.teamsDefaultKind ?? 'meeting') === v}
-                  onChange={() => update({ teamsDefaultKind: v })}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-          <span className="ml-2 text-xs text-ink-mute">種別は記録の編集で後から変更できます</span>
-        </Row>
-        <Row label="会議と判定する語">
-          <input
-            value={draft.teamsMeetingKeywords ?? '会議,ミーティング,meeting'}
-            onChange={(e) => update({ teamsMeetingKeywords: e.target.value })}
-            className={`w-full ${inputClass}`}
-            placeholder="会議,ミーティング,meeting"
-          />
-          <span className="mt-1 block text-xs text-ink-mute">
-            Teams のウィンドウ名にこれらの語が含まれれば「会議」、なければ上の既定の種別として開始します（読点・カンマ区切り）
-          </span>
-        </Row>
-        <Row label="Teams ウィンドウ判定語">
-          <input
-            value={draft.teamsWindowMatch ?? 'Microsoft Teams'}
-            onChange={(e) => update({ teamsWindowMatch: e.target.value })}
-            className={`w-full ${inputClass}`}
-            placeholder="Microsoft Teams"
-          />
-          <span className="mt-1 block text-xs text-ink-mute">
-            この文字を含むウィンドウを Teams とみなします（部分一致）。検知されない場合は、下の一覧で実際の
-            Teams ウィンドウ名を確認し、共通する語（例: 「Teams」）に変更してください
-          </span>
-        </Row>
-        <Row label="ウィンドウ名を確認">
-          <TeamsWindowProbe />
-        </Row>
-      </section>
-
-      {/* ============ 文字起こし ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><FileText size={16} className="text-ink-mute" />文字起こし (whisper.cpp ローカル)</h3>
-        <p className="mb-3 text-xs text-ink-mute">
-          すべてオフラインで動作します。初回のみ whisper.cpp 本体とモデルのダウンロードが必要です（下のボタンで完結します）。
-        </p>
-        <WhisperSetup
-          gpuUnlocked={gpuUnlocked}
-          useGpu={draft.transcription.useGpu ?? false}
-          onToggleGpu={(v) => updateTranscription({ useGpu: v })}
-        />
-        <LiveTranscribeSetup
-          recordingEnabled={draft.recording.enabled}
-          transcription={draft.transcription}
-          onChange={(patch) => updateTranscription(patch)}
-        />
-        <div className="mt-4 space-y-3">
-          <Row label="自動文字起こし">
-            <label className="inline-flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={draft.recording.autoTranscribe}
-                onChange={(e) => updateRecording({ autoTranscribe: e.target.checked })}
-              />
-              録音完了後に自動で文字起こし
-            </label>
-          </Row>
-          <Row label="無音の自動カット">
-            <label className="inline-flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={draft.recording.trimSilence ?? true}
-                onChange={(e) => updateRecording({ trimSilence: e.target.checked })}
-              />
-              録音の前後の無音を自動でカットする
-            </label>
-            <span className="ml-2 text-xs text-ink-mute">
-              録音終了時に先頭・末尾の無音を削除します（マーカー位置も自動で補正）
-            </span>
-          </Row>
-          <Row label="言語">
-            <select
-              value={draft.transcription.language}
-              onChange={(e) => updateTranscription({ language: e.target.value as 'auto' | 'ja' | 'en' })}
-              className={`w-40 ${inputClass}`}
-            >
-              <option value="auto">自動判定</option>
-              <option value="ja">日本語</option>
-              <option value="en">英語</option>
-            </select>
-          </Row>
-          <Row label="用語ヒント">
-            <textarea
-              value={draft.transcription.prompt}
-              onChange={(e) => updateTranscription({ prompt: e.target.value })}
-              rows={2}
-              className={`w-full ${inputClass}`}
-              placeholder="例: CallStack、山田太郎、御見積、リスケ"
-            />
-            <span className="mt-1 block text-xs text-ink-mute">
-              社名・人名・専門用語を読点区切りで書くと、whisper（確定版）の固有名詞の認識精度が上がります。
-              ※ ライブ文字起こし（Vosk）にはこのヒントは効きません。下の「単語登録」をお使いください
-            </span>
-          </Row>
-          <Row label="単語登録（置換辞書）">
-            <TermReplacementEditor
-              list={draft.transcription.termReplacements ?? []}
-              onChange={(termReplacements) => updateTranscription({ termReplacements })}
-            />
-            <span className="mt-1 block text-xs text-ink-mute">
-              認識結果の誤変換を「誤り → 正しい語」で自動置換します。<b>ライブ（Vosk）にも whisper の確定版にも適用</b>されます。
-              ライブで専門用語が別の語に誤認識されるときは、その誤認識語を左に、正しい語を右に登録してください
-              （例: 「コールスタック → CallStack」）
-            </span>
-          </Row>
-        </div>
-        <div className="mt-3">
-          <div className="mb-2 text-xs font-medium text-ink-mute">モデル</div>
-          <ModelManager
-            selected={draft.transcription.model}
-            onSelect={(m: WhisperModel) => updateTranscription({ model: m })}
-            downloaded={draft.transcription.modelDownloaded}
-            onDownloaded={(m) => updateTranscription({
-              modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: true },
-            })}
-            onDeleted={(m) => updateTranscription({
-              modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: false },
-            })}
-          />
-        </div>
-      </section>
-
-      {/* ============ 通知と確認 ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Bell size={16} className="text-ink-mute" />通知と確認</h3>
-        <Row label="長電話アラート（分）">
-          <input
-            type="number"
-            min={0}
-            value={draft.longCallAlertMin ?? ''}
-            placeholder="無効"
-            onChange={(e) => {
-              const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
-              update({ longCallAlertMin: v });
-            }}
-            className={`w-32 ${inputClass}`}
-          />
-          <span className="ml-2 text-xs text-ink-mute">空欄で無効化。会議は対象外です</span>
-        </Row>
-        <Row label="音声フィードバック">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.soundFeedback}
-              onChange={(e) => update({ soundFeedback: e.target.checked })}
-            />
-            開始/終了時にビープ音
-          </label>
-        </Row>
-        <Row label="記録削除時の確認">
-          <label className="inline-flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              checked={draft.confirmCallDelete}
-              onChange={(e) => update({ confirmCallDelete: e.target.checked })}
-            />
-            削除前に確認モーダルを表示する
-          </label>
-          <span className="ml-2 text-xs text-ink-mute">
-            オフにすると Delete キーや削除ボタンで即削除されます
-          </span>
-        </Row>
-        <Row label="文字起こしクリック巻き戻し">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              max={10}
-              step={0.1}
-              value={draft.transcriptSeekOffsetSec}
-              onChange={(e) => update({ transcriptSeekOffsetSec: Math.round(Number(e.target.value) * 10) / 10 })}
-              className="w-20 rounded-md border border-rule bg-surface px-2 py-1 text-sm"
-            />
-            <span className="text-sm text-ink-mute">秒前から再生（0 = クリック位置から）</span>
-          </div>
-        </Row>
-      </section>
-
-      {/* ============ データ ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Database size={16} className="text-ink-mute" />データのバックアップ</h3>
-        <p className="mb-3 text-xs text-ink-mute">
-          全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。
-        </p>
-        <Row label="ファイルの保存先">
-          <div className="space-y-2 text-sm text-ink">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={(draft.saveDirMode ?? 'auto') === 'auto'}
-                onChange={() => update({ saveDirMode: 'auto' })}
-              />
-              自動（前回の保存先を記憶して既定にする）
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={draft.saveDirMode === 'fixed'}
-                onChange={() => update({ saveDirMode: 'fixed' })}
-              />
-              自分で決める（常に指定フォルダを既定にする）
-            </label>
-            {draft.saveDirMode === 'fixed' && (
-              <div className="ml-6 flex flex-wrap items-center gap-2">
-                <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
-                  {draft.fixedSaveDir ?? '（未設定 — ドキュメントフォルダを使用）'}
-                </span>
-                <button
-                  onClick={async () => {
-                    const r = await window.api.app.chooseDir('保存先フォルダを選択');
-                    if (!r.canceled) update({ fixedSaveDir: r.dir });
-                  }}
-                  className={ghostBtn}
-                >
-                  <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
-                </button>
-              </div>
-            )}
-            <span className="block text-xs text-ink-mute">
-              CSV・録音・文字起こし・議事録などの保存ダイアログの既定フォルダに使われます
-            </span>
-          </div>
-        </Row>
-        <Row label="バックアップの複製先">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
-              {draft.autoBackupDir ?? '（未設定）'}
-            </span>
-            <button
-              onClick={async () => {
-                const r = await window.api.backup.chooseDir();
-                if (!r.canceled) update({ autoBackupDir: r.dir });
-              }}
-              className={ghostBtn}
-            >
-              <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
-            </button>
-            {draft.autoBackupDir && (
-              <button
-                onClick={() => update({ autoBackupDir: null })}
-                className="text-xs text-ink-mute underline hover:text-ink"
-              >
-                解除
-              </button>
-            )}
-          </div>
-          <span className="mt-1 block text-xs text-ink-mute">
-            日次・手動バックアップをこのフォルダにも複製します。OneDrive / Google Drive のフォルダを指定すれば実質クラウドバックアップになります
-          </span>
-        </Row>
-        <BackupRestoreRow />
-      </section>
-
-      {/* ============ バージョン情報 ============ */}
-      <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Info size={16} className="text-ink-mute" />バージョン情報</h3>
-        <AboutSection
-          checkOnStartup={draft.checkUpdatesOnStartup}
-          onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
-          autoUpdateEnabled={draft.autoUpdateEnabled ?? false}
-          onToggleAutoUpdate={(v) => update({ autoUpdateEnabled: v })}
-        />
-      </section>
-
-      {showRecordingWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-          <div className="w-[min(94vw,32rem)] rounded-lg bg-surface p-6 shadow-lg">
-            <h3 className="mb-2 inline-flex items-center gap-2 text-lg font-medium text-ink"><AlertTriangle size={18} className="text-pending" />録音に関する重要な注意</h3>
-            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-ink">
-              <li>通話の録音には<strong>相手の同意が必要</strong>な場合があります（地域・業務上のルールを確認してください）</li>
-              <li>録音ファイルはこの PC 内にのみ保存され、外部に送信されません</li>
-              <li>機密情報を扱う際は適切なアクセス制御を行ってください</li>
-              <li>不要になった録音は速やかに削除するか、保管期限を設定してください</li>
-            </ul>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowRecordingWarning(false)}
-                className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => {
-                  updateRecording({ enabled: true });
-                  setShowRecordingWarning(false);
-                }}
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent/90"
-              >
-                同意して有効化
-              </button>
-            </div>
-          </div>
+      )}
+      {error && (
+        <div className="break-all rounded border border-danger/30 bg-danger-soft px-2 py-1 text-xs text-danger">
+          {error}
         </div>
       )}
     </div>
   );
 }
 
-function AboutSection({
+function SourceConfigRow({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: RecordingSourceConfig;
+  disabled: boolean;
+  onChange: (v: RecordingSourceConfig) => void;
+}) {
+  return (
+    <div className={`flex w-full flex-wrap items-center gap-4 text-sm text-ink ${disabled ? 'opacity-50' : ''}`}>
+      <label className="inline-flex items-center gap-1.5">
+        <input
+          type="checkbox"
+          checked={value.mic}
+          onChange={(e) => onChange({ ...value, mic: e.target.checked })}
+          disabled={disabled}
+        />
+        <Mic size={14} className="text-ink-mute" /> マイク
+      </label>
+      <label className="inline-flex items-center gap-1.5">
+        <input
+          type="checkbox"
+          checked={value.system}
+          onChange={(e) => onChange({ ...value, system: e.target.checked })}
+          disabled={disabled}
+        />
+        <Volume2 size={14} className="text-ink-mute" /> システム音声
+      </label>
+      {value.system && (
+        <span className="inline-flex items-center gap-3 rounded-md bg-ink/5 px-2 py-1 text-xs">
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="radio"
+              checked={value.systemScope === 'screen'}
+              onChange={() => onChange({ ...value, systemScope: 'screen' })}
+              disabled={disabled}
+            />
+            画面全体
+          </label>
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="radio"
+              checked={value.systemScope === 'window'}
+              onChange={() => onChange({ ...value, systemScope: 'window' })}
+              disabled={disabled}
+            />
+            ウィンドウ選択（開始時に選ぶ）
+          </label>
+        </span>
+      )}
+      {!value.mic && !value.system && (
+        <span className="text-xs text-pending">両方 OFF のため録音されません</span>
+      )}
+    </div>
+  );
+}
+
+/** バージョン確認・自動更新・通信診断 */
+function UpdateVersionSection({
   checkOnStartup,
   onToggleCheckOnStartup,
   autoUpdateEnabled,
@@ -1248,274 +704,1271 @@ function AboutSection({
   const anyFailed = checkFailed || selfStatus.status === 'error' || !!applyError;
 
   return (
-    <div className="space-y-3">
-      <Row label="バージョン">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="font-mono text-sm text-ink">
-            CallStack v{info?.version ?? '…'}
-          </span>
+    <div className="w-full space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-mono text-sm text-ink">
+          CallStack v{info?.version ?? '…'}
+        </span>
+        <button
+          onClick={check}
+          disabled={checking}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
+        >
+          {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
+        </button>
+        {latestCheck?.hasUpdate && selfStatus.status !== 'ready' && (
           <button
-            onClick={check}
-            disabled={checking}
-            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
+            onClick={updateNow}
+            disabled={preparing}
+            className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
-            {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
+            今すぐ更新
           </button>
-          {latestCheck?.hasUpdate && selfStatus.status !== 'ready' && (
-            <button
-              onClick={updateNow}
-              disabled={preparing}
-              className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
-            >
-              今すぐ更新
-            </button>
-          )}
-          {selfStatus.status === 'ready' && (
-            <button
-              onClick={applyNow}
-              className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90"
-            >
-              v{selfStatus.version} を適用して再起動
-            </button>
-          )}
-          {preparing && (
-            <span className="text-xs text-ink-mute">
-              {selfStatusLabel[selfStatus.status]}
-              {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
-            </span>
-          )}
-          {anyFailed && updateUrl && (
-            <button
-              onClick={() => void window.api.update.openReleases(updateUrl)}
-              className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
-            >
-              リリースページを開く
-            </button>
-          )}
+        )}
+        {selfStatus.status === 'ready' && (
+          <button
+            onClick={applyNow}
+            className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90"
+          >
+            v{selfStatus.version} を適用して再起動
+          </button>
+        )}
+        {preparing && (
+          <span className="text-xs text-ink-mute">
+            {selfStatusLabel[selfStatus.status]}
+            {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
+          </span>
+        )}
+        {anyFailed && updateUrl && (
+          <button
+            onClick={() => void window.api.update.openReleases(updateUrl)}
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
+          >
+            リリースページを開く
+          </button>
+        )}
+      </div>
+      {result && <div className="text-xs text-ink-mute">{result}</div>}
+      {sha256Missing && (
+        <div className="text-xs text-pending">
+          配布元が混み合っていたため、ダウンロード内容の照合（SHA256）は省いて更新します（HTTPS通信のため転送中の破損は防げます）。
         </div>
-        {result && <div className="mt-1 text-xs text-ink-mute">{result}</div>}
-        {sha256Missing && (
-          <div className="mt-1 text-xs text-pending">
-            配布元が混み合っていたため、ダウンロード内容の照合（SHA256）は省いて更新します（HTTPS通信のため転送中の破損は防げます）。
-          </div>
-        )}
-        {selfStatus.status === 'error' && selfStatus.error && (
-          <div className="mt-1 text-xs text-danger">{selfStatus.error}</div>
-        )}
-        {applyError && <div className="mt-1 text-xs text-danger">{applyError}</div>}
-      </Row>
-      <Row label="更新の自動確認">
-        <label className="inline-flex items-center gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={checkOnStartup}
-            onChange={(e) => onToggleCheckOnStartup(e.target.checked)}
-          />
-          起動時に新しいバージョンを確認して通知する
-        </label>
-      </Row>
-      <Row label="自動更新（Windows限定）">
-        <label className="inline-flex items-center gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={autoUpdateEnabled}
-            disabled={!checkOnStartup}
-            onChange={(e) => onToggleAutoUpdate(e.target.checked)}
-          />
-          新しい版を見つけたら、ダウンロードまで自動で済ませておく
-        </label>
-        <span className="mt-1 block text-xs text-ink-mute">
+      )}
+      {selfStatus.status === 'error' && selfStatus.error && (
+        <div className="text-xs text-danger">{selfStatus.error}</div>
+      )}
+      {applyError && <div className="text-xs text-danger">{applyError}</div>}
+
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <button
+          onClick={checkConnection}
+          disabled={connChecking}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
+        >
+          {connChecking ? '確認中…' : '通信を確かめる'}
+        </button>
+      </div>
+      {connResult && (
+        <div className={`text-xs ${connResult.ok ? 'text-ink-mute' : 'text-danger'}`}>
+          {connResult.message}
+        </div>
+      )}
+      <p className="text-xs text-ink-mute">
+        配布物の置き場まで実際に通信が届くかだけを確かめます（更新はしません）。
+        詳しい内訳は「フォルダを開く」のログフォルダの app.log に残ります。会社のネットワークなど、
+        同じ回線を多くの人が使う環境では、GitHub への問い合わせが回数の上限に達して
+        自動更新が失敗し続けることがあります（README の「自動更新について」参照）。
+      </p>
+
+      <div className="flex items-center gap-2 pt-1 text-sm text-ink">
+        <Switch id="swCheckOnStartup" checked={checkOnStartup} onChange={onToggleCheckOnStartup} />
+        <label htmlFor="swCheckOnStartup" className="cursor-pointer">起動時に新しいバージョンを確認して通知する</label>
+      </div>
+      <div>
+        <div className="flex items-center gap-2 text-sm text-ink">
+          <Switch id="swAutoUpdate" checked={autoUpdateEnabled} disabled={!checkOnStartup} onChange={onToggleAutoUpdate} />
+          <label htmlFor="swAutoUpdate" className="cursor-pointer">新しい版を見つけたら、ダウンロードまで自動で済ませておく</label>
+        </div>
+        <p className="mt-1 text-xs text-ink-mute">
           OFF でも「今すぐ更新」自体は変わらず使えます。ON にすると、通知をクリックしたときに
           待たされないよう、ダウンロード・検証・展開までを先に済ませておきます。
           実際にアプリを再起動して適用するのは、通知をクリックするか上のボタンを押したときだけです
           （記録中は適用されません）。
-        </span>
-      </Row>
-      <Row label="うまく更新できないとき">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={checkConnection}
-            disabled={connChecking}
-            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
-          >
-            {connChecking ? '確認中…' : '通信を確かめる'}
-          </button>
-        </div>
-        {connResult && (
-          <div className={`mt-1 text-xs ${connResult.ok ? 'text-ink-mute' : 'text-danger'}`}>
-            {connResult.message}
-          </div>
-        )}
-        <span className="mt-1 block text-xs text-ink-mute">
-          配布物の置き場まで実際に通信が届くかだけを確かめます（更新はしません）。
-          詳しい内訳は下のログフォルダの app.log に残ります。会社のネットワークなど、
-          同じ回線を多くの人が使う環境では、GitHub への問い合わせが回数の上限に達して
-          自動更新が失敗し続けることがあります（README の「自動更新について」参照）。
-        </span>
-      </Row>
-      <Row label="フォルダ">
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => void window.api.app.openPath('data')}
-            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
-          >
-            <FolderOpen size={12} className="mr-1 inline align-[-1px]" />データフォルダを開く
-          </button>
-          <button
-            onClick={() => void window.api.app.openPath('recordings')}
-            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
-          >
-            <Mic size={12} className="mr-1 inline align-[-1px]" />録音フォルダを開く
-          </button>
-          <button
-            onClick={() => void window.api.app.openPath('logs')}
-            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
-          >
-            <FileText size={12} className="mr-1 inline align-[-1px]" />ログフォルダを開く
-          </button>
-        </div>
-        <span className="mt-1 block text-xs text-ink-mute">
-          不具合報告の際はログフォルダの app.log を添えていただくと調査がスムーズです
-        </span>
-      </Row>
+        </p>
+      </div>
     </div>
   );
 }
 
-function BackupRestoreRow() {
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+const GPU_UNLOCK_KEY = 'callstack.gpuUnlocked';
+const LAST_CATEGORY_KEY = 'callstack.settingsLastCategory';
 
-  const backup = async () => {
-    setBusy(true);
-    setError(null);
+export function SettingsPage({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => Promise<void> }) {
+  const toast = useToast();
+  const [draft, setDraft] = useState<Settings>(settings);
+  const [showRecordingWarning, setShowRecordingWarning] = useState(false);
+  const [query, setQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
     try {
-      const path = await window.api.backup.create();
-      setMessage(`バックアップを保存しました: ${path}`);
-    } catch (err) {
-      setError(toUserMessage(err));
-    } finally {
-      setBusy(false);
+      return localStorage.getItem(LAST_CATEGORY_KEY) || 'general';
+    } catch {
+      return 'general';
     }
-  };
-  const restore = async () => {
-    if (!window.confirm('JSON ファイルから復元します。現在のデータは復元前に自動バックアップされます。続行しますか？')) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await window.api.backup.restore();
-      if (r.canceled) {
-        setMessage(null);
+  });
+  // 保存状態: 「自動で保存されます」⇄「保存しました」⇄ エラー表示
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const savedTimer = useRef<number | null>(null);
+
+  // 隠しコマンド (↑↑↓↓←→←→BA) で GPU 版のオプションを解放
+  const [gpuUnlocked, setGpuUnlocked] = useState(
+    () => localStorage.getItem(GPU_UNLOCK_KEY) === '1' || !!settings.transcription.useGpu,
+  );
+  const konamiPos = useRef(0);
+  useEffect(() => {
+    if (gpuUnlocked) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (key === KONAMI[konamiPos.current]) {
+        konamiPos.current += 1;
+        if (konamiPos.current === KONAMI.length) {
+          konamiPos.current = 0;
+          setGpuUnlocked(true);
+          localStorage.setItem(GPU_UNLOCK_KEY, '1');
+          toast.success('隠しオプションを解放しました: GPU (CUDA) 版 whisper が利用できます');
+        }
       } else {
-        setMessage(`復元しました (${r.calls} 件)。直前のデータは ${r.backupPath} にあります。`);
+        konamiPos.current = key === KONAMI[0] ? 1 : 0;
       }
-    } catch (err) {
-      setError(toUserMessage(err));
-    } finally {
-      setBusy(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpuUnlocked]);
+
+  // カテゴリ選択を localStorage に記憶（次回開いたとき同じカテゴリを表示）
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_CATEGORY_KEY, selectedCategory);
+    } catch {
+      // プライベートブラウジング等で書き込めない場合は無視
+    }
+  }, [selectedCategory]);
+
+  // オンボーディング等からの deep link（文字起こしセットアップへ誘導）を受け取る
+  useEffect(() => {
+    activeDeepLinkHandler = (category) => {
+      setSelectedCategory(category);
+      setQuery('');
+    };
+    if (pendingDeepLinkCategory) {
+      const c = pendingDeepLinkCategory;
+      pendingDeepLinkCategory = null;
+      setSelectedCategory(c);
+      setQuery('');
+    }
+    return () => {
+      activeDeepLinkHandler = null;
+    };
+  }, []);
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const lastIncoming = useRef<Settings>(settings);
+
+  // Adopt remote updates only when they actually differ from what we just
+  // saved — avoids fighting the user mid-edit while still reflecting changes
+  // from other surfaces (tray, HUD, etc.).
+  useEffect(() => {
+    if (settings !== lastIncoming.current) {
+      lastIncoming.current = settings;
+      setDraft(settings);
+    }
+  }, [settings]);
+
+  useEffect(() => () => {
+    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+  }, []);
+
+  // Persist the draft as soon as it differs from the latest incoming settings.
+  // 200ms debounce keeps text fields (tag names, numbers) from spamming IPC.
+  const saveTimer = useRef<number | null>(null);
+  const commit = (next: Settings) => {
+    setDraft(next);
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      lastIncoming.current = next;
+      onSave(next)
+        .then(() => {
+          setSaveError(null);
+          setSaveStatus('saved');
+          if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+          savedTimer.current = window.setTimeout(() => setSaveStatus('idle'), 2200);
+        })
+        .catch((err) => {
+          setSaveStatus('error');
+          setSaveError(toUserMessage(err, '保存に失敗しました'));
+        });
+    }, 200);
+  };
+
+  const update = (patch: Partial<Settings>) => commit({ ...draftRef.current, ...patch });
+  const updateShortcut = (key: keyof Settings['shortcuts'], v: string) =>
+    commit({ ...draftRef.current, shortcuts: { ...draftRef.current.shortcuts, [key]: v } });
+  const updateRecording = (patch: Partial<Settings['recording']>) =>
+    commit({ ...draftRef.current, recording: { ...draftRef.current.recording, ...patch } });
+  const updateTranscription = (patch: Partial<Settings['transcription']>) =>
+    commit({ ...draftRef.current, transcription: { ...draftRef.current.transcription, ...patch } });
+
+  // タグ名の妥当性（空文字・重複は禁止）。無効な間はディスクへの保存を見送り、表示だけ更新する。
+  const tagsValid = (tags: TagDef[]) => {
+    const seen = new Set<string>();
+    for (const t of tags) {
+      const n = t.name.trim().toLowerCase();
+      if (!n || seen.has(n)) return false;
+      seen.add(n);
+    }
+    return true;
+  };
+  const commitTags = (tags: TagDef[]) => {
+    const next = { ...draftRef.current, tags };
+    if (tagsValid(tags)) commit(next);
+    else setDraft(next);
+  };
+  const updateTag = (idx: number, patch: Partial<TagDef>) => {
+    const tags = draftRef.current.tags.slice();
+    tags[idx] = { ...tags[idx], ...patch };
+    commitTags(tags);
+  };
+  const removeTag = (idx: number) =>
+    commitTags(draftRef.current.tags.filter((_, i) => i !== idx));
+  const addTag = () => {
+    const base = '新規タグ';
+    const existing = new Set(draftRef.current.tags.map((t) => t.name.trim().toLowerCase()));
+    let name = base;
+    let n = 2;
+    while (existing.has(name.toLowerCase())) name = `${base} ${n++}`;
+    commitTags([...draftRef.current.tags, { name, color: '#8A9296' }]);
+  };
+  const moveTag = (idx: number, dir: -1 | 1) => {
+    const tags = draftRef.current.tags.slice();
+    const j = idx + dir;
+    if (j < 0 || j >= tags.length) return;
+    [tags[idx], tags[j]] = [tags[j], tags[idx]];
+    commitTags(tags);
+  };
+
+  const handleToggleRecording = (checked: boolean) => {
+    if (checked) {
+      if (draft.confirmRecordingEnable) {
+        setShowRecordingWarning(true);
+      } else {
+        updateRecording({ enabled: true });
+      }
+    } else {
+      updateRecording({ enabled: false });
     }
   };
 
+  // ---- テーマ: セグメント（システム/ライト/ダーク）+ ダーク系のときだけ出す標準/黒スウォッチ ----
+  const themeSegment: 'system' | 'light' | 'dark' = draft.theme === 'black' ? 'dark' : draft.theme;
+  const onThemeSegment = (v: 'system' | 'light' | 'dark') => {
+    if (v === 'dark' && (draft.theme === 'dark' || draft.theme === 'black')) return; // 黒を選んでいれば維持
+    update({ theme: v });
+  };
+
+  // タグ名の重複判定用（各行のインライン警告に使う）
+  const tagNameCounts = new Map<string, number>();
+  draft.tags.forEach((t) => {
+    const key = t.name.trim().toLowerCase();
+    tagNameCounts.set(key, (tagNameCounts.get(key) ?? 0) + 1);
+  });
+
+  // ==========================================================================
+  // カテゴリ定義（すべての設定行をここにマッピングする）
+  // ==========================================================================
+  const categories: CategoryDef[] = [
+    {
+      id: 'general',
+      title: '一般',
+      icon: SlidersHorizontal,
+      groups: [
+        {
+          heading: '外観 / テーマ',
+          rows: [
+            {
+              id: 'theme',
+              label: 'テーマ',
+              description: 'アプリの配色を選びます',
+              keywords: ['外観', 'ダークモード', 'カラー', '黒', 'ハイコントラスト'],
+              render: () => (
+                <div className="flex flex-col gap-2">
+                  <Segmented
+                    ariaLabel="テーマ"
+                    value={themeSegment}
+                    onChange={onThemeSegment}
+                    options={[
+                      { value: 'system', label: 'システム' },
+                      { value: 'light', label: 'ライト' },
+                      { value: 'dark', label: 'ダーク' },
+                    ]}
+                  />
+                  {themeSegment === 'dark' && (
+                    <div className="flex gap-3">
+                      {([['dark', '標準'], ['black', '黒']] as const).map(([v, label]) => (
+                        <button
+                          key={v}
+                          type="button"
+                          aria-pressed={draft.theme === v}
+                          onClick={() => update({ theme: v as ThemePref })}
+                          className={`flex flex-col items-center gap-1 text-[11px] ${draft.theme === v ? 'text-ink' : 'text-ink-mute'}`}
+                        >
+                          <span
+                            className={`h-5 w-5 rounded-full border border-rule ${v === 'black' ? 'bg-black' : 'bg-ink/70'} ${
+                              draft.theme === v ? 'ring-2 ring-accent ring-offset-2 ring-offset-paper' : ''
+                            }`}
+                          />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+          ],
+        },
+        {
+          heading: '起動',
+          rows: [
+            {
+              id: 'launchAtLogin',
+              label: 'Windows ログイン時に起動',
+              description: 'サインイン後、自動的にバックグラウンドで起動します',
+              keywords: ['起動', 'スタートアップ', '自動起動', 'ログイン'],
+              controlId: 'swLaunchAtLogin',
+              render: () => (
+                <Switch id="swLaunchAtLogin" checked={draft.launchAtLogin} onChange={(v) => update({ launchAtLogin: v })} />
+              ),
+            },
+          ],
+        },
+        {
+          heading: 'ウィンドウと小窓（HUD）の設定',
+          rows: [
+            {
+              id: 'minimizeToTray',
+              label: '閉じるボタンで最小化してトレイに常駐',
+              description: 'ウィンドウを閉じても記録・文字起こしはバックグラウンドで継続します',
+              keywords: ['トレイ', '常駐', '最小化', 'タスクバー'],
+              render: () => (
+                <Segmented
+                  ariaLabel="最小化の動作"
+                  value={draft.minimizeToTray ? 'tray' : 'taskbar'}
+                  onChange={(v) => update({ minimizeToTray: v === 'tray' })}
+                  options={[
+                    { value: 'taskbar', label: 'タスクバー' },
+                    { value: 'tray', label: 'トレイに格納' },
+                  ]}
+                />
+              ),
+            },
+            {
+              id: 'hudSize',
+              label: '小窓（HUD）のサイズ',
+              description: 'HUD 右上のアイコンでもサイズを循環できます',
+              keywords: ['HUD', '小窓', 'サイズ'],
+              render: () => (
+                <Segmented
+                  ariaLabel="HUD のサイズ"
+                  value={draft.hudSize}
+                  onChange={(v) => update({ hudSize: v })}
+                  options={[
+                    { value: 'mini', label: 'ミニ (240×34)' },
+                    { value: 'compact', label: 'コンパクト (400×70)' },
+                    { value: 'full', label: 'フル (470×122)' },
+                  ]}
+                />
+              ),
+            },
+            {
+              id: 'hudOpacity',
+              label: '小窓（HUD）の透明度',
+              description: 'カーソルを HUD に乗せている間は自動的に不透明になります',
+              keywords: ['HUD', '透明度', '不透明度'],
+              controlId: 'rangeHudOpacity',
+              render: () => (
+                <div className="flex items-center gap-3">
+                  <input
+                    id="rangeHudOpacity"
+                    type="range"
+                    min={30}
+                    max={100}
+                    step={5}
+                    value={Math.round((draft.hudOpacity ?? 1) * 100)}
+                    onChange={(e) => update({ hudOpacity: Number(e.target.value) / 100 })}
+                    className="w-40 accent-accent"
+                  />
+                  <span className="w-12 text-right font-mono text-sm tabular-nums text-ink">
+                    {Math.round((draft.hudOpacity ?? 1) * 100)}%
+                  </span>
+                </div>
+              ),
+            },
+            {
+              id: 'hudLiveVisible',
+              label: 'ライブ字幕ウィンドウを表示する',
+              description: '録音中のライブ文字起こしを独立したウィンドウに表示します。自由に移動・リサイズでき、HUD の「字幕」ボタンやウィンドウの × でも表示 ON/OFF できます',
+              keywords: ['字幕', 'ライブ文字起こし', 'HUD'],
+              controlId: 'swHudLiveVisible',
+              render: () => (
+                <Switch id="swHudLiveVisible" checked={draft.hudLiveVisible ?? true} onChange={(v) => update({ hudLiveVisible: v })} />
+              ),
+            },
+            {
+              id: 'liveFontSize',
+              label: 'ライブ字幕の文字サイズ',
+              description: 'ライブ字幕ウィンドウ上でも切り替えられます',
+              keywords: ['字幕', '文字サイズ', 'フォント'],
+              render: () => (
+                <Segmented
+                  ariaLabel="ライブ字幕の文字サイズ"
+                  value={draft.liveFontSize ?? 'sm'}
+                  onChange={(v) => update({ liveFontSize: v })}
+                  options={[
+                    { value: 'sm', label: '小' },
+                    { value: 'md', label: '中' },
+                    { value: 'lg', label: '大' },
+                  ]}
+                />
+              ),
+            },
+          ],
+        },
+        {
+          heading: '通知と確認',
+          rows: [
+            {
+              id: 'longCallAlertMin',
+              label: '長電話アラート（分）',
+              description: '空欄で無効化。会議は対象外です',
+              keywords: ['通知', 'アラート', '長電話'],
+              controlId: 'numLongCallAlert',
+              render: () => (
+                <input
+                  id="numLongCallAlert"
+                  type="number"
+                  min={0}
+                  value={draft.longCallAlertMin ?? ''}
+                  placeholder="無効"
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
+                    update({ longCallAlertMin: v });
+                  }}
+                  className={`w-28 ${inputClass}`}
+                />
+              ),
+            },
+            {
+              id: 'soundFeedback',
+              label: '音声フィードバック',
+              description: '開始/終了時にビープ音',
+              keywords: ['通知', 'サウンド', 'ビープ'],
+              controlId: 'swSoundFeedback',
+              render: () => <Switch id="swSoundFeedback" checked={draft.soundFeedback} onChange={(v) => update({ soundFeedback: v })} />,
+            },
+            {
+              id: 'confirmCallDelete',
+              label: '記録削除時の確認',
+              description: 'オフにすると Delete キーや削除ボタンで即削除されます',
+              keywords: ['確認', '削除', 'ダイアログ'],
+              controlId: 'swConfirmCallDelete',
+              render: () => <Switch id="swConfirmCallDelete" checked={draft.confirmCallDelete} onChange={(v) => update({ confirmCallDelete: v })} />,
+            },
+            {
+              id: 'transcriptSeekOffsetSec',
+              label: '文字起こしクリック巻き戻し',
+              description: '秒前から再生（0 = クリック位置から）',
+              keywords: ['文字起こし', '再生', '巻き戻し'],
+              controlId: 'numSeekOffset',
+              render: () => (
+                <input
+                  id="numSeekOffset"
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  value={draft.transcriptSeekOffsetSec}
+                  onChange={(e) => update({ transcriptSeekOffsetSec: Math.round(Number(e.target.value) * 10) / 10 })}
+                  className={`w-20 ${inputClass}`}
+                />
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'recording',
+      title: '記録と録音',
+      icon: Mic,
+      groups: [
+        {
+          rows: [
+            {
+              id: 'recordingEnabled',
+              label: '通話と同時に録音',
+              description: '録音を有効にする',
+              keywords: ['録音', '同意'],
+              controlId: 'swRecordingEnabled',
+              render: () => <Switch id="swRecordingEnabled" checked={draft.recording.enabled} onChange={handleToggleRecording} />,
+            },
+            {
+              id: 'callSource',
+              label: '通話の録音ソース',
+              keywords: ['録音ソース', 'マイク', 'システム音声'],
+              full: true,
+              render: () => (
+                <SourceConfigRow
+                  value={draft.recording.callSource}
+                  disabled={!draft.recording.enabled}
+                  onChange={(v) => updateRecording({ callSource: v })}
+                />
+              ),
+            },
+            {
+              id: 'meetingSource',
+              label: '会議の録音ソース',
+              keywords: ['録音ソース', 'マイク', 'システム音声', '会議'],
+              full: true,
+              render: () => (
+                <SourceConfigRow
+                  value={draft.recording.meetingSource}
+                  disabled={!draft.recording.enabled}
+                  onChange={(v) => updateRecording({ meetingSource: v })}
+                />
+              ),
+            },
+            {
+              id: 'askSourceOnStart',
+              label: '開始ダイアログ',
+              description: '「▶ 開始」ボタンで通話/会議・録音ソースの選択ダイアログを表示する。オフにするとボタンは前回の種別で即開始します。ショートカット・トレイからは常に既定ソースで即開始です',
+              keywords: ['開始ダイアログ', '録音ソース'],
+              controlId: 'swAskSourceOnStart',
+              render: () => (
+                <Switch id="swAskSourceOnStart" checked={draft.recording.askSourceOnStart} onChange={(v) => updateRecording({ askSourceOnStart: v })} />
+              ),
+            },
+            {
+              id: 'micDeviceId',
+              label: 'マイクデバイス',
+              keywords: ['マイク', 'デバイス', '入力'],
+              render: () => (
+                <AudioDeviceSelect value={draft.recording.micDeviceId} onChange={(id) => updateRecording({ micDeviceId: id })} />
+              ),
+            },
+            {
+              id: 'mp3Bitrate',
+              label: 'MP3 ビットレート',
+              description: '96kbps で約 700KB/分',
+              keywords: ['ビットレート', '音質', 'MP3'],
+              render: () => (
+                <Segmented
+                  ariaLabel="MP3 ビットレート"
+                  value={String(draft.recording.mp3Bitrate)}
+                  onChange={(v) => updateRecording({ mp3Bitrate: Number(v) as 64 | 96 | 128 | 192 })}
+                  disabled={!draft.recording.enabled}
+                  options={[64, 96, 128, 192].map((b) => ({ value: String(b), label: `${b}kbps` }))}
+                />
+              ),
+            },
+            {
+              id: 'retentionDays',
+              label: '録音の保管期限（日）',
+              description: '空欄で無制限。期限切れの音声のみ削除（記録は残ります）',
+              keywords: ['保管期限', '自動削除'],
+              controlId: 'numRetentionDays',
+              render: () => (
+                <input
+                  id="numRetentionDays"
+                  type="number"
+                  min={0}
+                  value={draft.recording.retentionDays ?? ''}
+                  placeholder="無制限"
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Math.max(0, Number(e.target.value));
+                    updateRecording({ retentionDays: v });
+                  }}
+                  className={`w-28 ${inputClass}`}
+                  disabled={!draft.recording.enabled}
+                />
+              ),
+            },
+            {
+              id: 'confirmRecordingEnable',
+              label: '有効化時の同意確認',
+              description: '録音を有効化する時に確認モーダルを表示する',
+              keywords: ['同意', '確認', '録音'],
+              controlId: 'swConfirmRecordingEnable',
+              render: () => (
+                <Switch id="swConfirmRecordingEnable" checked={draft.confirmRecordingEnable} onChange={(v) => update({ confirmRecordingEnable: v })} />
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'transcription',
+      title: '文字起こし',
+      icon: FileText,
+      intro: 'すべてオフラインで動作します。初回のみ whisper.cpp 本体とモデルのダウンロードが必要です。',
+      groups: [
+        {
+          heading: 'whisper.cpp（確定版の文字起こしエンジン）',
+          rows: [
+            {
+              id: 'whisperSetup',
+              label: 'whisper.cpp のセットアップ',
+              description: '実行ファイルのダウンロードと GPU (CUDA) 版の利用可否',
+              keywords: ['whisper', 'エンジン', 'GPU', 'CUDA', 'NVIDIA', 'ダウンロード'],
+              full: true,
+              render: () => (
+                <WhisperSetup
+                  gpuUnlocked={gpuUnlocked}
+                  useGpu={draft.transcription.useGpu ?? false}
+                  onToggleGpu={(v) => updateTranscription({ useGpu: v })}
+                />
+              ),
+            },
+            {
+              id: 'autoTranscribe',
+              label: '自動文字起こし',
+              description: '録音完了後に自動で文字起こし',
+              keywords: ['自動', '文字起こし'],
+              controlId: 'swAutoTranscribe',
+              render: () => (
+                <Switch id="swAutoTranscribe" checked={draft.recording.autoTranscribe} onChange={(v) => updateRecording({ autoTranscribe: v })} />
+              ),
+            },
+            {
+              id: 'trimSilence',
+              label: '無音の自動カット',
+              description: '録音終了時に先頭・末尾の無音を削除します（マーカー位置も自動で補正）',
+              keywords: ['無音', 'カット', 'トリム'],
+              controlId: 'swTrimSilence',
+              render: () => (
+                <Switch id="swTrimSilence" checked={draft.recording.trimSilence ?? true} onChange={(v) => updateRecording({ trimSilence: v })} />
+              ),
+            },
+            {
+              id: 'language',
+              label: '言語',
+              keywords: ['言語', '日本語', '英語'],
+              render: () => (
+                <Segmented
+                  ariaLabel="文字起こしの言語"
+                  value={draft.transcription.language}
+                  onChange={(v) => updateTranscription({ language: v })}
+                  options={[
+                    { value: 'auto', label: '自動判定' },
+                    { value: 'ja', label: '日本語' },
+                    { value: 'en', label: '英語' },
+                  ]}
+                />
+              ),
+            },
+          ],
+        },
+        {
+          heading: 'ライブ文字起こし（実験的 / Vosk）',
+          rows: [
+            {
+              id: 'liveTranscribe',
+              label: 'ライブ文字起こしの設定',
+              description: '録音中に暫定テキストを HUD・編集画面へ表示するための engine/model の準備',
+              keywords: ['ライブ文字起こし', 'vosk', 'モデル'],
+              full: true,
+              render: () => (
+                <LiveTranscribeSetup
+                  recordingEnabled={draft.recording.enabled}
+                  transcription={draft.transcription}
+                  onChange={(patch) => updateTranscription(patch)}
+                />
+              ),
+            },
+          ],
+        },
+        {
+          heading: '用語ヒントと単語登録',
+          rows: [
+            {
+              id: 'transcriptionPrompt',
+              label: '用語ヒント',
+              description: '社名・人名・専門用語を読点区切りで書くと、whisper（確定版）の固有名詞の認識精度が上がります。※ ライブ文字起こし（Vosk）にはこのヒントは効きません。下の「単語登録」をお使いください',
+              keywords: ['用語ヒント', 'プロンプト', '固有名詞'],
+              full: true,
+              controlId: 'taPrompt',
+              render: () => (
+                <textarea
+                  id="taPrompt"
+                  value={draft.transcription.prompt}
+                  onChange={(e) => updateTranscription({ prompt: e.target.value })}
+                  rows={2}
+                  className={`w-full ${inputClass}`}
+                  placeholder="例: CallStack、山田太郎、御見積、リスケ"
+                />
+              ),
+            },
+            {
+              id: 'termReplacements',
+              label: '単語登録（置換辞書）',
+              description: '認識結果の誤変換を「誤り → 正しい語」で自動置換します。ライブ（Vosk）にも whisper の確定版にも適用されます。ライブで専門用語が別の語に誤認識されるときは、その誤認識語を左に、正しい語を右に登録してください（例: 「コールスタック → CallStack」）',
+              keywords: ['単語登録', '置換辞書', '誤変換'],
+              full: true,
+              render: () => (
+                <TermReplacementEditor
+                  list={draft.transcription.termReplacements ?? []}
+                  onChange={(termReplacements) => updateTranscription({ termReplacements })}
+                />
+              ),
+            },
+          ],
+        },
+        {
+          heading: 'モデル',
+          rows: [
+            {
+              id: 'whisperModel',
+              label: 'whisper モデル',
+              description: '精度と速度のバランスをモデルごとに選べます',
+              keywords: ['モデル', 'whisper', 'ダウンロード', '精度'],
+              full: true,
+              render: () => (
+                <ModelManager
+                  selected={draft.transcription.model}
+                  onSelect={(m: WhisperModel) => updateTranscription({ model: m })}
+                  downloaded={draft.transcription.modelDownloaded}
+                  onDownloaded={(m) => updateTranscription({
+                    modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: true },
+                  })}
+                  onDeleted={(m) => updateTranscription({
+                    modelDownloaded: { ...draft.transcription.modelDownloaded, [m]: false },
+                  })}
+                />
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'teams',
+      title: 'Teams 連携',
+      icon: Video,
+      intro: 'Microsoft Teams の会議/通話ウィンドウを監視して自動で記録・録音を開始します（完全オフライン・サインイン不要）。Teams のバージョンや表示言語によってはウィンドウ名の書式が異なり、検知精度が変わる場合があります。録音を有効にしてご利用ください。',
+      groups: [
+        {
+          rows: [
+            {
+              id: 'teamsDetectEnabled',
+              label: 'Teams を検知して自動録音',
+              description: '会議/通話を検知したら記録を開始する',
+              keywords: ['teams', '検知', '自動録音'],
+              controlId: 'swTeamsDetect',
+              render: () => (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="swTeamsDetect"
+                    checked={draft.teamsDetectEnabled ?? false}
+                    disabled={!draft.recording.enabled}
+                    onChange={(v) => update({ teamsDetectEnabled: v })}
+                  />
+                  {!draft.recording.enabled && <span className="text-xs text-ink-mute">先に録音を有効にしてください</span>}
+                </div>
+              ),
+            },
+            {
+              id: 'teamsDetectMode',
+              label: '検知時の動作',
+              keywords: ['teams', '検知', '自動開始'],
+              render: () => (
+                <Segmented
+                  ariaLabel="検知時の動作"
+                  value={draft.teamsDetectMode ?? 'confirm'}
+                  onChange={(v) => update({ teamsDetectMode: v })}
+                  options={[
+                    { value: 'confirm', label: '通知をクリックで開始' },
+                    { value: 'auto', label: '自動で即開始' },
+                  ]}
+                />
+              ),
+            },
+            {
+              id: 'teamsDefaultKind',
+              label: '判別できないときの種別',
+              description: '種別は記録の編集で後から変更できます',
+              keywords: ['teams', '会議', '通話'],
+              render: () => (
+                <Segmented
+                  ariaLabel="判別できないときの種別"
+                  value={draft.teamsDefaultKind ?? 'meeting'}
+                  onChange={(v) => update({ teamsDefaultKind: v })}
+                  options={[
+                    { value: 'meeting', label: '会議' },
+                    { value: 'call', label: '通話' },
+                  ]}
+                />
+              ),
+            },
+            {
+              id: 'teamsMeetingKeywords',
+              label: '会議と判定する語',
+              description: 'Teams のウィンドウ名にこれらの語が含まれれば「会議」、なければ上の既定の種別として開始します（読点・カンマ区切り）',
+              keywords: ['teams', '会議', '判定語'],
+              full: true,
+              controlId: 'inpTeamsMeetingKeywords',
+              render: () => (
+                <input
+                  id="inpTeamsMeetingKeywords"
+                  value={draft.teamsMeetingKeywords ?? '会議,ミーティング,meeting'}
+                  onChange={(e) => update({ teamsMeetingKeywords: e.target.value })}
+                  className={`w-full ${inputClass}`}
+                  placeholder="会議,ミーティング,meeting"
+                />
+              ),
+            },
+            {
+              id: 'teamsWindowMatch',
+              label: 'Teams ウィンドウ判定語',
+              description: 'この文字を含むウィンドウを Teams とみなします（部分一致）。検知されない場合は、下の一覧で実際の Teams ウィンドウ名を確認し、共通する語（例: 「Teams」）に変更してください',
+              keywords: ['teams', 'ウィンドウ', '判定語'],
+              full: true,
+              controlId: 'inpTeamsWindowMatch',
+              render: () => (
+                <input
+                  id="inpTeamsWindowMatch"
+                  value={draft.teamsWindowMatch ?? 'Microsoft Teams'}
+                  onChange={(e) => update({ teamsWindowMatch: e.target.value })}
+                  className={`w-full ${inputClass}`}
+                  placeholder="Microsoft Teams"
+                />
+              ),
+            },
+            {
+              id: 'teamsWindowProbe',
+              label: 'ウィンドウ名を確認',
+              keywords: ['teams', 'ウィンドウ', '診断'],
+              full: true,
+              render: () => <TeamsWindowProbe />,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'shortcuts',
+      title: 'ショートカット',
+      icon: Keyboard,
+      intro: 'システム全体で有効。フォーカス中の入力欄にキーを押すと記録できます。',
+      groups: [
+        {
+          rows: [
+            { id: 'sc-startCall', label: '通話を開始', keywords: ['ショートカット', '開始'], render: () => <ShortcutInput value={draft.shortcuts.startCall} onChange={(v) => updateShortcut('startCall', v)} /> },
+            { id: 'sc-startMeeting', label: '会議を開始', keywords: ['ショートカット', '開始'], render: () => <ShortcutInput value={draft.shortcuts.startMeeting} onChange={(v) => updateShortcut('startMeeting', v)} /> },
+            { id: 'sc-endCall', label: '通話/会議を終了', keywords: ['ショートカット', '終了'], render: () => <ShortcutInput value={draft.shortcuts.endCall} onChange={(v) => updateShortcut('endCall', v)} /> },
+            { id: 'sc-toggleHold', label: '保留トグル', keywords: ['ショートカット', '保留'], render: () => <ShortcutInput value={draft.shortcuts.toggleHold} onChange={(v) => updateShortcut('toggleHold', v)} /> },
+            { id: 'sc-togglePauseRecording', label: '録音の一時停止/再開', keywords: ['ショートカット', '録音', '一時停止'], render: () => <ShortcutInput value={draft.shortcuts.togglePauseRecording} onChange={(v) => updateShortcut('togglePauseRecording', v)} /> },
+            { id: 'sc-addMarker', label: 'マーカーを打つ', keywords: ['ショートカット', 'マーカー'], render: () => <ShortcutInput value={draft.shortcuts.addMarker} onChange={(v) => updateShortcut('addMarker', v)} /> },
+            { id: 'sc-toggleWindow', label: 'メインウィンドウを表示/隠す', keywords: ['ショートカット', 'ウィンドウ'], render: () => <ShortcutInput value={draft.shortcuts.toggleWindow} onChange={(v) => updateShortcut('toggleWindow', v)} /> },
+            { id: 'sc-openSettings', label: '設定画面を開く', keywords: ['ショートカット', '設定'], render: () => <ShortcutInput value={draft.shortcuts.openSettings} onChange={(v) => updateShortcut('openSettings', v)} /> },
+            ...([1, 2, 3, 4] as const).map((n) => {
+              const key = `assignTag${n}` as const;
+              const tagName = draft.tags[n - 1]?.name ?? '(未設定)';
+              const row: RowDef = {
+                id: `sc-${key}`,
+                label: `クイックタグ ${n} (${tagName})`,
+                keywords: ['ショートカット', 'タグ', 'クイックタグ'],
+                render: () => <ShortcutInput value={draft.shortcuts[key]} onChange={(v) => updateShortcut(key, v)} />,
+              };
+              return row;
+            }),
+          ],
+        },
+      ],
+    },
+    {
+      id: 'tags',
+      title: 'タグ',
+      icon: Tag,
+      groups: [
+        {
+          rows: [
+            {
+              id: 'tagEditor',
+              label: 'タグの管理',
+              description: '▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・HUD の「情報」から選択）。上位4つはクイックタグ（Ctrl+Shift+1〜4）に割り当てられます。',
+              keywords: ['タグ', '色分け', 'クイックタグ', 'ラベル'],
+              full: true,
+              render: () => (
+                <div className="w-full">
+                  <div className="mb-2 flex justify-end">
+                    <button onClick={addTag} className={ghostBtn}>＋ タグを追加</button>
+                  </div>
+                  <div className="space-y-2">
+                    {draft.tags.map((t, i) => {
+                      const trimmed = t.name.trim();
+                      const isEmpty = trimmed.length === 0;
+                      const isDup = !isEmpty && (tagNameCounts.get(trimmed.toLowerCase()) ?? 0) > 1;
+                      const err = isEmpty ? 'タグ名を入力してください' : isDup ? '同じ名前のタグが既にあります' : null;
+                      return (
+                        <div key={i} className="flex items-start gap-3">
+                          <input
+                            type="color"
+                            value={t.color}
+                            onChange={(e) => updateTag(i, { color: e.target.value })}
+                            className="mt-0.5 h-9 w-9 flex-none cursor-pointer rounded border border-rule"
+                            aria-label={`タグ${i + 1}の色`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <input
+                              value={t.name}
+                              onChange={(e) => updateTag(i, { name: e.target.value })}
+                              onBlur={() => {
+                                const v = t.name.trim();
+                                if (v !== t.name) updateTag(i, { name: v });
+                              }}
+                              aria-invalid={!!err}
+                              className={`w-full ${inputClass} ${err ? 'border-danger' : ''}`}
+                            />
+                            {err && <div className="mt-1 text-xs text-danger">{err}</div>}
+                          </div>
+                          <div className="flex flex-none items-center">
+                            <button
+                              onClick={() => moveTag(i, -1)}
+                              disabled={i === 0}
+                              className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
+                              title="上へ"
+                            >
+                              <ChevronUp size={16} />
+                            </button>
+                            <button
+                              onClick={() => moveTag(i, 1)}
+                              disabled={i === draft.tags.length - 1}
+                              className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
+                              title="下へ"
+                            >
+                              <ChevronDown size={16} />
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => removeTag(i)}
+                            className="flex-none rounded-md border border-danger/40 bg-surface px-2 py-1.5 text-xs text-danger hover:bg-danger-soft"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'data',
+      title: 'データとバックアップ',
+      icon: Database,
+      intro: '全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。',
+      groups: [
+        {
+          rows: [
+            {
+              id: 'saveDir',
+              label: 'ファイルの保存先',
+              description: 'CSV・録音・文字起こし・議事録などの保存ダイアログの既定フォルダに使われます',
+              keywords: ['保存先', 'フォルダ'],
+              full: true,
+              render: () => (
+                <div className="space-y-2 text-sm text-ink">
+                  <label className="flex items-center gap-2">
+                    <input type="radio" checked={(draft.saveDirMode ?? 'auto') === 'auto'} onChange={() => update({ saveDirMode: 'auto' })} />
+                    自動（前回の保存先を記憶して既定にする）
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" checked={draft.saveDirMode === 'fixed'} onChange={() => update({ saveDirMode: 'fixed' })} />
+                    自分で決める（常に指定フォルダを既定にする）
+                  </label>
+                  {draft.saveDirMode === 'fixed' && (
+                    <div className="ml-6 flex flex-wrap items-center gap-2">
+                      <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
+                        {draft.fixedSaveDir ?? '（未設定 — ドキュメントフォルダを使用）'}
+                      </span>
+                      <button
+                        onClick={async () => {
+                          const r = await window.api.app.chooseDir('保存先フォルダを選択');
+                          if (!r.canceled) update({ fixedSaveDir: r.dir });
+                        }}
+                        className={ghostBtn}
+                      >
+                        <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: 'autoBackupDir',
+              label: 'バックアップの複製先',
+              description: '日次・手動バックアップをこのフォルダにも複製します。OneDrive / Google Drive のフォルダを指定すれば実質クラウドバックアップになります',
+              keywords: ['複製先', 'バックアップ', 'クラウド', 'OneDrive', 'Google Drive'],
+              full: true,
+              render: () => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
+                    {draft.autoBackupDir ?? '（未設定）'}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      const r = await window.api.backup.chooseDir();
+                      if (!r.canceled) update({ autoBackupDir: r.dir });
+                    }}
+                    className={ghostBtn}
+                  >
+                    <FolderOpen size={13} className="mr-1 inline align-[-2px]" />フォルダを選択…
+                  </button>
+                  {draft.autoBackupDir && (
+                    <button onClick={() => update({ autoBackupDir: null })} className="text-xs text-ink-mute underline hover:text-ink">
+                      解除
+                    </button>
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: 'backupRestore',
+              label: 'バックアップと復元',
+              description: '手動でバックアップを作成、または JSON ファイルから復元します',
+              keywords: ['バックアップ', '復元', 'JSON', '書き出す', '取り込む'],
+              full: true,
+              render: () => <BackupRestoreRow />,
+            },
+            {
+              id: 'appFolders',
+              label: 'フォルダを開く',
+              keywords: ['フォルダ', 'ログ', '録音', 'データ'],
+              full: true,
+              render: () => <AppFoldersRow />,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'update',
+      title: '更新とバージョン',
+      icon: Info,
+      groups: [
+        {
+          rows: [
+            {
+              id: 'updateVersion',
+              label: 'バージョン情報と更新',
+              description: '更新の確認・自動更新の設定・通信の診断',
+              keywords: ['更新', 'バージョン', '通信を確かめる', 'アップデート'],
+              full: true,
+              render: () => (
+                <UpdateVersionSection
+                  checkOnStartup={draft.checkUpdatesOnStartup}
+                  onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
+                  autoUpdateEnabled={draft.autoUpdateEnabled ?? false}
+                  onToggleAutoUpdate={(v) => update({ autoUpdateEnabled: v })}
+                />
+              ),
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const trimmedQuery = query.trim();
+  const searching = trimmedQuery.length > 0;
+  const counts: Record<string, number> = {};
+  categories.forEach((c) => {
+    counts[c.id] = c.groups.reduce((sum, g) => sum + g.rows.filter((r) => rowMatches(r, trimmedQuery)).length, 0);
+  });
+  const totalMatches = Object.values(counts).reduce((a, b) => a + b, 0);
+
   return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
-        <button
-          onClick={backup}
-          disabled={busy}
-          className="rounded-md border border-rule bg-surface px-3 py-1.5 text-sm hover:bg-paper disabled:opacity-50"
-        >
-          今すぐバックアップ
-        </button>
-        <button
-          onClick={restore}
-          disabled={busy}
-          className="rounded-md border border-danger/40 bg-surface px-3 py-1.5 text-sm text-danger hover:bg-danger-soft disabled:opacity-50"
-        >
-          JSON から復元…
-        </button>
+    <div className="flex h-full min-h-0">
+      {/* ============ 左ナビ: 検索 + カテゴリ一覧 ============ */}
+      <aside className="flex w-[200px] flex-none flex-col gap-3 overflow-y-auto border-r border-rule bg-surface p-3">
+        <div className="relative">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-mute" />
+          <input
+            id="settingsSearch"
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setQuery('');
+              }
+            }}
+            placeholder="設定を検索"
+            aria-label="設定を検索"
+            className="w-full rounded-md border border-rule bg-paper py-1.5 pl-7 pr-2 text-xs text-ink placeholder:text-ink-mute focus-visible:border-accent focus:outline-none"
+          />
+        </div>
+        <ul className="flex flex-col gap-0.5">
+          {categories.map((c) => {
+            const Icon = c.icon;
+            const count = searching ? counts[c.id] : null;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory(c.id);
+                    setQuery('');
+                  }}
+                  aria-current={!searching && selectedCategory === c.id ? 'page' : undefined}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                    !searching && selectedCategory === c.id
+                      ? 'bg-accent-soft font-medium text-accent-ink'
+                      : 'text-ink-mute hover:bg-paper hover:text-ink'
+                  }`}
+                >
+                  <span className="inline-flex min-w-0 items-center gap-2 truncate">
+                    <Icon size={14} className="shrink-0" />
+                    <span className="truncate">{c.title}</span>
+                  </span>
+                  {count !== null && count > 0 && (
+                    <span className="flex-none rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] leading-none text-on-accent">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </aside>
+
+      {/* ============ 右コンテンツ: 選択中カテゴリ or 検索結果 ============ */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex flex-none flex-wrap items-center justify-between gap-3 border-b border-rule px-6 py-3">
+          <div className="text-sm text-ink-mute">
+            {searching ? `「${trimmedQuery}」の検索結果${totalMatches > 0 ? `（${totalMatches} 件）` : ''}` : ''}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            {saveStatus === 'error' ? (
+              <span className="inline-flex items-center gap-1.5 text-danger" role="status">
+                <AlertTriangle size={13} />{saveError}
+              </span>
+            ) : saveStatus === 'saved' ? (
+              <span className="inline-flex items-center gap-1.5 text-ok" role="status">
+                <CircleCheck size={13} />保存しました
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-ink-mute">
+                <CircleCheck size={13} className="text-accent-ink" />変更は自動で保存されます
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {searching && totalMatches === 0 ? (
+            <div className="py-12 text-center text-sm text-ink-mute">一致する設定はありません</div>
+          ) : (
+            <div className="space-y-8">
+              {categories.map((c) => {
+                const isActive = !searching && selectedCategory === c.id;
+                if (!searching && !isActive) return null;
+                const groups = c.groups
+                  .map((g) => ({ heading: g.heading, rows: g.rows.filter((r) => rowMatches(r, trimmedQuery)) }))
+                  .filter((g) => g.rows.length > 0);
+                if (groups.length === 0) return null;
+                const Icon = c.icon;
+                return (
+                  <section key={c.id}>
+                    <h2 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink">
+                      <Icon size={16} className="text-ink-mute" />{c.title}
+                    </h2>
+                    {!searching && c.intro && (
+                      <p className="mb-4 mt-1 text-xs text-ink-mute">{c.intro}</p>
+                    )}
+                    <div className="mt-3 space-y-4">
+                      {groups.map((g, gi) => (
+                        <div key={g.heading ?? gi}>
+                          {g.heading && <div className={subheadingClass}>{g.heading}</div>}
+                          <div className={groupClass}>
+                            {g.rows.map((r) => (
+                              <SettingsRow
+                                key={r.id}
+                                id={r.id}
+                                label={r.label}
+                                description={r.description}
+                                controlId={r.controlId}
+                                full={r.full}
+                                query={searching ? trimmedQuery : undefined}
+                              >
+                                {r.render()}
+                              </SettingsRow>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-      {message && (
-        <div className="break-all rounded border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok">
-          {message}
+
+      {showRecordingWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
+          <div className="w-[min(94vw,32rem)] rounded-lg bg-surface p-6 shadow-lg">
+            <h3 className="mb-2 inline-flex items-center gap-2 text-lg font-medium text-ink"><AlertTriangle size={18} className="text-pending" />録音に関する重要な注意</h3>
+            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-ink">
+              <li>通話の録音には<strong>相手の同意が必要</strong>な場合があります（地域・業務上のルールを確認してください）</li>
+              <li>録音ファイルはこの PC 内にのみ保存され、外部に送信されません</li>
+              <li>機密情報を扱う際は適切なアクセス制御を行ってください</li>
+              <li>不要になった録音は速やかに削除するか、保管期限を設定してください</li>
+            </ul>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowRecordingWarning(false)}
+                className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  updateRecording({ enabled: true });
+                  setShowRecordingWarning(false);
+                }}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent/90"
+              >
+                同意して有効化
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      {error && (
-        <div className="break-all rounded border border-danger/30 bg-danger-soft px-2 py-1 text-xs text-danger">
-          {error}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SourceConfigRow({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: RecordingSourceConfig;
-  disabled: boolean;
-  onChange: (v: RecordingSourceConfig) => void;
-}) {
-  return (
-    <Row label={label}>
-      <div className={`flex flex-wrap items-center gap-4 text-sm text-ink ${disabled ? 'opacity-50' : ''}`}>
-        <label className="inline-flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={value.mic}
-            onChange={(e) => onChange({ ...value, mic: e.target.checked })}
-            disabled={disabled}
-          />
-          <Mic size={14} className="text-ink-mute" /> マイク
-        </label>
-        <label className="inline-flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={value.system}
-            onChange={(e) => onChange({ ...value, system: e.target.checked })}
-            disabled={disabled}
-          />
-          <Volume2 size={14} className="text-ink-mute" /> システム音声
-        </label>
-        {value.system && (
-          <span className="inline-flex items-center gap-3 rounded-md bg-ink/5 px-2 py-1 text-xs">
-            <label className="inline-flex items-center gap-1">
-              <input
-                type="radio"
-                checked={value.systemScope === 'screen'}
-                onChange={() => onChange({ ...value, systemScope: 'screen' })}
-                disabled={disabled}
-              />
-              画面全体
-            </label>
-            <label className="inline-flex items-center gap-1">
-              <input
-                type="radio"
-                checked={value.systemScope === 'window'}
-                onChange={() => onChange({ ...value, systemScope: 'window' })}
-                disabled={disabled}
-              />
-              ウィンドウ選択（開始時に選ぶ）
-            </label>
-          </span>
-        )}
-        {!value.mic && !value.system && (
-          <span className="text-xs text-pending">両方 OFF のため録音されません</span>
-        )}
-      </div>
-    </Row>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-3 flex items-start gap-4">
-      <div className="w-44 shrink-0 pt-1.5 text-sm text-ink">{label}</div>
-      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
