@@ -60,7 +60,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
   };
 
   if (!transcript) {
-    return <div className={`text-sm text-slate-400 dark:text-slate-500 ${className}`}>文字起こしはまだありません</div>;
+    return <div className={`text-sm text-ink-mute ${className}`}>文字起こしはまだありません</div>;
   }
 
   const startEdit = (i: number, text: string) => {
@@ -77,17 +77,17 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
 
   return (
     <div className={`relative flex min-h-0 flex-col ${className}`}>
-      <div className="flex-none pb-2 text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex-none pb-2 text-xs text-ink-mute">
         モデル: {transcript.model} / 言語: {transcript.language || '自動'} / 生成: {new Date(transcript.createdAt).toLocaleString()}
         {onEditSegment && segments.length > 0 && (
-          <span className="ml-2 text-slate-400 dark:text-slate-500">— 各行の鉛筆アイコンで誤認識を修正できます</span>
+          <span className="ml-2 text-ink-mute">— 各行の鉛筆アイコンで誤認識を修正できます</span>
         )}
       </div>
       {segments.length > 0 ? (
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800"
+          className="min-h-0 flex-1 overflow-y-auto rounded-md border border-rule bg-paper p-3 text-sm"
         >
           {segments.map((s, i) => {
             const isActive = i === activeIdx;
@@ -97,16 +97,16 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
                 ref={isActive ? activeRef : undefined}
                 className={`group flex gap-3 rounded px-1.5 py-1 transition-colors ${
                   isActive
-                    ? 'bg-brand-100 ring-1 ring-brand-300 dark:bg-brand-900/60 dark:ring-brand-700'
-                    : 'hover:bg-brand-50 dark:hover:bg-brand-900/40'
+                    ? 'bg-accent-soft ring-1 ring-accent/40'
+                    : 'hover:bg-accent-soft'
                 }`}
               >
                 <button
                   onClick={() => onSeek?.(s.start)}
                   className={`shrink-0 cursor-pointer font-mono text-xs tabular-nums ${
                     isActive
-                      ? 'font-semibold text-brand-700 dark:text-brand-300'
-                      : 'text-slate-400 hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-300'
+                      ? 'font-medium text-accent-ink'
+                      : 'text-ink-mute hover:text-accent-ink'
                   }`}
                   title="クリックで該当位置を再生"
                 >
@@ -123,18 +123,18 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
                         if (e.key === 'Escape') setEditIdx(null);
                       }}
                       rows={Math.max(1, Math.ceil(draft.length / 60))}
-                      className="min-w-0 flex-1 resize-y rounded border border-brand-300 bg-white px-2 py-0.5 text-sm dark:border-brand-700 dark:bg-slate-900 dark:text-slate-100"
+                      className="min-w-0 flex-1 resize-y rounded border border-accent/40 bg-surface px-2 py-0.5 text-sm"
                     />
                     <button
                       onClick={commitEdit}
-                      className="shrink-0 rounded bg-brand-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-brand-700"
+                      className="shrink-0 rounded bg-accent px-2 py-0.5 text-xs font-medium text-on-accent hover:bg-accent/90"
                       title="保存 (Enter)"
                     >
                       保存
                     </button>
                     <button
                       onClick={() => setEditIdx(null)}
-                      className="shrink-0 rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="shrink-0 rounded px-1.5 py-0.5 text-xs text-ink-mute hover:bg-paper"
                       title="キャンセル (Esc)"
                     >
                       <X size={12} />
@@ -143,7 +143,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
                 ) : (
                   <>
                     <span
-                      className="min-w-0 flex-1 cursor-pointer text-slate-800 dark:text-slate-200"
+                      className="min-w-0 flex-1 cursor-pointer text-ink"
                       onClick={() => onSeek?.(s.start)}
                       title="クリックで該当位置を再生"
                     >
@@ -152,7 +152,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
                     {onEditSegment && (
                       <button
                         onClick={() => startEdit(i, s.text)}
-                        className="invisible shrink-0 rounded px-1 text-xs text-slate-400 hover:text-brand-600 group-hover:visible dark:hover:text-brand-300"
+                        className="invisible shrink-0 rounded px-1 text-xs text-ink-mute hover:text-accent-ink group-hover:visible"
                         title="このセグメントを修正"
                       >
                         <Pencil size={12} />
@@ -165,7 +165,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
           })}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 whitespace-pre-wrap dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-rule bg-paper p-3 text-sm text-ink whitespace-pre-wrap">
           {transcript.text || '（空）'}
         </div>
       )}
@@ -174,7 +174,7 @@ export function TranscriptView({ transcript, onSeek, onEditSegment, currentSec =
       {!autoFollow && currentSec !== null && activeIdx >= 0 && (
         <button
           onClick={returnToPlayhead}
-          className="absolute bottom-3 right-4 inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-brand-700"
+          className="absolute bottom-3 right-4 inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-on-accent shadow-lg hover:bg-accent/90"
           title="自動追従を再開して再生中の行へ戻る"
         >
           <LocateFixed size={13} />

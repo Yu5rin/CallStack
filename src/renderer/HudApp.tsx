@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Bookmark, Pause, Play, Pencil, StickyNote, X, Square, Contact, Hand } from 'lucide-react';
 import { useActiveCall } from './hooks/useActiveCall';
+import { useTheme } from './hooks/useTheme';
 import { formatHMS } from './utils/format';
 import { AppEvent, Settings, CallRecord, getRecordTags } from '../shared/types';
 
@@ -11,11 +12,11 @@ function MiniLevel({ level, segments = 10 }: { level: number; segments?: number 
     <div className="flex items-end gap-px" title="録音レベル">
       {Array.from({ length: segments }).map((_, i) => {
         const active = i < filled;
-        const color = i < segments * 0.6 ? 'bg-emerald-400' : i < segments * 0.85 ? 'bg-amber-400' : 'bg-red-500';
+        const color = i < segments * 0.6 ? 'bg-accent' : i < segments * 0.85 ? 'bg-pending' : 'bg-danger';
         return (
           <div
             key={i}
-            className={`w-0.5 rounded-sm ${active ? color : 'bg-white/15'}`}
+            className={`w-0.5 rounded-sm ${active ? color : 'bg-ink/15'}`}
             style={{ height: `${4 + i * 1.2}px` }}
           />
         );
@@ -27,6 +28,8 @@ function MiniLevel({ level, segments = 10 }: { level: number; segments?: number 
 export function HudApp() {
   const { active, elapsedSec, holding, holdSec } = useActiveCall();
   const [settings, setSettings] = useState<Settings | null>(null);
+  // HUD 自身のウィンドウにもテーマ（トークンの light/dark/black）を適用する
+  useTheme(settings?.theme);
   const [activeRecord, setActiveRecord] = useState<CallRecord | null>(null);
   const [recState, setRecState] = useState({ recording: false, paused: false });
   const [level, setLevel] = useState(0);
@@ -116,14 +119,12 @@ export function HudApp() {
   // カーソルを乗せている間は透明度を解除して操作しやすくする
   const opacity = hovered ? 1.0 : Math.min(1, Math.max(0.3, settings?.hudOpacity ?? 1.0));
 
-  const containerStyle = useMemo(() => {
-    const isBlack = settings?.theme === 'black';
-    const bgRgb = isBlack ? '0, 0, 0' : '15, 23, 42';
-    return {
-      background: `rgba(${bgRgb}, ${opacity * 0.95})`,
-      transition: 'background 0.15s ease',
-    };
-  }, [settings?.theme, opacity]);
+  // surface トークン（テーマに応じて自動的に light/dark/black が切り替わる）を
+  // 半透明で使う。カーソルを乗せている間ほど不透明になる。
+  const containerStyle = useMemo(() => ({
+    background: `rgb(var(--c-surface) / ${opacity * 0.95})`,
+    transition: 'background 0.15s ease',
+  }), [opacity]);
 
   /** 表示名: 会議はタイトル、通話は連絡先（未設定なら空） */
   const displayName = isMeeting
@@ -204,9 +205,9 @@ export function HudApp() {
     void window.api.hud.assignTag(tagName);
   };
 
-  const inputCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-brand-500';
+  const inputCls = 'w-full rounded bg-paper px-2 py-1 text-xs text-ink placeholder-ink-mute ring-1 ring-rule';
   const infoBox = infoOpen ? (
-    <div className="hud-no-drag mt-1 flex-none space-y-1.5 rounded-lg bg-slate-900/95 p-2 shadow-2xl ring-1 ring-white/15">
+    <div className="hud-no-drag mt-1 flex-none space-y-1.5 rounded-lg bg-surface p-2 shadow-lg ring-1 ring-rule">
       {isMeeting ? (
         <>
           <input
@@ -247,8 +248,8 @@ export function HudApp() {
             <button
               key={t.name}
               onClick={() => handleAssignTag(t.name)}
-              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 transition ${
-                on ? 'text-white' : 'text-slate-300 ring-slate-600 hover:bg-white/10'
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition ${
+                on ? 'text-on-accent' : 'text-ink-mute ring-rule hover:bg-ink/10'
               }`}
               style={on ? { backgroundColor: t.color, borderColor: t.color } : undefined}
               title={on ? 'タグを外す' : `タグ「${t.name}」を付ける`}
@@ -262,14 +263,14 @@ export function HudApp() {
   ) : null;
 
   const memoBox = memoOpen ? (
-    <div className="hud-no-drag mt-1 flex-1 min-h-0 rounded-lg bg-slate-900/95 p-2 shadow-2xl ring-1 ring-white/15">
+    <div className="hud-no-drag mt-1 flex-1 min-h-0 rounded-lg bg-surface p-2 shadow-lg ring-1 ring-rule">
       <textarea
         autoFocus
         value={memoDraft}
         onChange={(e) => handleMemoChange(e.target.value)}
         onKeyDown={handleMemoKey}
         placeholder="メモを入力 (自動保存 / Esc で閉じる)"
-        className="h-full w-full resize-none rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-brand-500"
+        className="h-full w-full resize-none rounded bg-paper px-2 py-1 text-xs text-ink placeholder-ink-mute ring-1 ring-rule"
       />
     </div>
   ) : null;
@@ -277,36 +278,36 @@ export function HudApp() {
   if (!active) {
     return (
       <div
-        className="hud-drag h-full w-full rounded-2xl px-4 py-3 text-slate-100 shadow-2xl ring-1 ring-white/10"
+        className="hud-drag h-full w-full rounded-lg px-4 py-3 text-ink shadow-lg ring-1 ring-rule"
         style={containerStyle}
       >
-        <div className="text-xs opacity-70">記録なし</div>
+        <div className="text-xs text-ink-mute">記録なし</div>
       </div>
     );
   }
 
   const statusLabel = holding
-    ? <span className="inline-flex items-center gap-1 font-semibold text-amber-400"><Pause size={10} strokeWidth={2.5} /> 保留 {formatHMS(holdSec)}</span>
+    ? <span className="inline-flex items-center gap-1 font-medium text-pending"><Pause size={10} strokeWidth={2.5} /> 保留 {formatHMS(holdSec)}</span>
     : (
-      <span className={`inline-flex items-center gap-1 font-semibold ${isMeeting ? 'text-violet-300' : 'text-emerald-400'}`}>
-        <span className={`inline-block h-1.5 w-1.5 rounded-full ${isMeeting ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+      <span className={`inline-flex items-center gap-1 font-medium ${isMeeting ? 'text-meeting' : 'text-accent-ink'}`}>
+        <span className={`inline-block h-1.5 w-1.5 rounded-full ${isMeeting ? 'bg-meeting' : 'bg-accent'}`} />
         {isMeeting ? '会議中' : '通話中'}
       </span>
     );
 
   const recBadge = recording && (
     paused
-      ? <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1 py-px font-semibold text-amber-400"><Pause size={9} strokeWidth={2.5} /> PAUSE</span>
-      : <span className="inline-flex items-center gap-1 rounded bg-red-500/20 px-1 py-px font-semibold text-red-400"><span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> REC</span>
+      ? <span className="inline-flex items-center gap-1 rounded bg-pending/20 px-1 py-px font-medium text-pending"><Pause size={9} strokeWidth={2.5} /> PAUSE</span>
+      : <span className="inline-flex items-center gap-1 rounded bg-danger/20 px-1 py-px font-medium text-danger"><span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger" /> REC</span>
   );
 
-  const btnBase = 'hud-no-drag inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold transition';
-  const btnGhost = `${btnBase} bg-slate-700/80 text-slate-100 hover:bg-slate-600`;
+  const btnBase = 'hud-no-drag inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium transition';
+  const btnGhost = `${btnBase} bg-ink/10 text-ink hover:bg-ink/15`;
 
   const markerButton = (compact = false) => (
     <button
       onClick={handleMarker}
-      className={`${btnBase} ${markerFlash ? 'bg-brand-500 text-white' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${markerFlash ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title="マーカーを打つ（あとで該当箇所へジャンプできます）"
     >
       <Bookmark size={11} strokeWidth={2.25} />
@@ -317,7 +318,7 @@ export function HudApp() {
   const pauseButton = recording ? (
     <button
       onClick={handleTogglePause}
-      className={`${btnBase} ${paused ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${paused ? 'bg-pending text-on-accent hover:bg-pending/90' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title={paused ? '録音を再開' : '録音を一時停止'}
     >
       {paused ? <><Play size={11} strokeWidth={2.25} /> 再開</> : <Pause size={11} strokeWidth={2.25} />}
@@ -327,7 +328,7 @@ export function HudApp() {
   const holdButton = !isMeeting ? (
     <button
       onClick={handleToggleHold}
-      className={`${btnBase} ${holding ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${holding ? 'bg-pending text-on-accent hover:bg-pending/90' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title="保留トグル"
     >
       {holding ? '解除' : '保留'}
@@ -348,7 +349,7 @@ export function HudApp() {
   const memoButton = (
     <button
       onClick={handleOpenMemo}
-      className={`${btnBase} ${memoOpen ? 'bg-brand-500 text-white' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${memoOpen ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title="メモを編集（自動保存）"
     >
       <StickyNote size={11} strokeWidth={2.25} />
@@ -359,7 +360,7 @@ export function HudApp() {
   const infoButton = (
     <button
       onClick={handleOpenInfo}
-      className={`${btnBase} ${infoOpen ? 'bg-brand-500 text-white' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${infoOpen ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title={isMeeting ? 'タイトル・参加者・タグを追記' : '連絡先・電話番号・タグを追記'}
     >
       <Contact size={11} strokeWidth={2.25} />
@@ -371,7 +372,7 @@ export function HudApp() {
   const liveToggleButton = liveEnabled ? (
     <button
       onClick={handleToggleLive}
-      className={`${btnBase} ${liveVisible ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-slate-700/80 text-slate-100 hover:bg-slate-600'}`}
+      className={`${btnBase} ${liveVisible ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
       title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
     >
       <AudioLines size={11} strokeWidth={2.25} />
@@ -382,7 +383,7 @@ export function HudApp() {
   const endButton = (
     <button
       onClick={handleEnd}
-      className={`${btnBase} bg-red-500 text-white hover:bg-red-600`}
+      className={`${btnBase} bg-danger text-on-accent hover:bg-danger/90`}
       title="記録を終了"
     >
       <Square size={10} strokeWidth={2.5} fill="currentColor" />
@@ -393,7 +394,7 @@ export function HudApp() {
   const sizeButton = (
     <button
       onClick={handleCycleSize}
-      className="hud-no-drag rounded p-0.5 text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+      className="hud-no-drag rounded p-0.5 text-ink-mute transition hover:bg-ink/10 hover:text-ink"
       title="サイズ切替 (mini / compact / full)"
     >
       <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor"><path d="M3 3h6v2H5v4H3V3zm14 0v6h-2V5h-4V3h6zM3 17v-6h2v4h4v2H3zm14 0h-6v-2h4v-4h2v6z"/></svg>
@@ -403,7 +404,7 @@ export function HudApp() {
   // 密集アイコンボタン（compact 用）
   const dense = (on: boolean) =>
     `hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${
-      on ? 'bg-brand-500 text-white' : 'bg-slate-700/70 text-slate-100 hover:bg-slate-600'
+      on ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'
     }`;
 
   // ============ mini (240×34) ============
@@ -411,31 +412,31 @@ export function HudApp() {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag flex h-[34px] w-full flex-none select-none items-center gap-1 rounded-xl px-2 text-slate-100 shadow-2xl ring-1 ring-white/10"
+          className="hud-drag flex h-[34px] w-full flex-none select-none items-center gap-1 rounded-lg px-2 text-ink shadow-lg ring-1 ring-rule"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
           title={`${isMeeting ? '会議中' : '通話中'}${displayName ? ` — ${displayName}` : ''}\nダブルクリックでメイン窓`}
         >
-          <span className={`inline-block h-2 w-2 rounded-full ${recording && !paused ? 'animate-pulse bg-red-500' : holding || paused ? 'bg-amber-400' : isMeeting ? 'bg-violet-400' : 'bg-emerald-400'}`} />
+          <span className={`inline-block h-2 w-2 rounded-full ${recording && !paused ? 'animate-pulse bg-danger' : holding || paused ? 'bg-pending' : isMeeting ? 'bg-meeting' : 'bg-accent'}`} />
           <div className="font-mono text-sm font-semibold tabular-nums">{formatHMS(elapsedSec)}</div>
-          <div className="min-w-0 flex-1 truncate text-[9px] text-slate-400">{displayName}</div>
+          <div className="min-w-0 flex-1 truncate text-[9px] text-ink-mute">{displayName}</div>
           <button
             onClick={handleMarker}
-            className={`hud-no-drag rounded p-0.5 ${markerFlash ? 'bg-brand-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+            className={`hud-no-drag rounded p-0.5 ${markerFlash ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
             title="マーカーを打つ"
           >
             <Bookmark size={12} strokeWidth={2.25} />
           </button>
           <button
             onClick={handleOpenMemo}
-            className={`hud-no-drag rounded p-0.5 ${memoOpen ? 'bg-brand-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+            className={`hud-no-drag rounded p-0.5 ${memoOpen ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
             title="メモを編集"
           >
             <StickyNote size={12} strokeWidth={2.25} />
           </button>
           <button
             onClick={handleOpenInfo}
-            className={`hud-no-drag rounded p-0.5 ${infoOpen ? 'bg-brand-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+            className={`hud-no-drag rounded p-0.5 ${infoOpen ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
             title={isMeeting ? 'タイトル・参加者・タグを追記' : '連絡先・電話番号・タグを追記'}
           >
             <Contact size={12} strokeWidth={2.25} />
@@ -443,7 +444,7 @@ export function HudApp() {
           {liveEnabled && (
             <button
               onClick={handleToggleLive}
-              className={`hud-no-drag rounded p-0.5 ${liveVisible ? 'bg-sky-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
+              className={`hud-no-drag rounded p-0.5 ${liveVisible ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-ink/10'}`}
               title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
             >
               <AudioLines size={12} strokeWidth={2.25} />
@@ -452,7 +453,7 @@ export function HudApp() {
           {sizeButton}
           <button
             onClick={handleEnd}
-            className="hud-no-drag rounded-md bg-red-500 p-0.5 text-white hover:bg-red-600"
+            className="hud-no-drag rounded-md bg-danger p-0.5 text-on-accent hover:bg-danger/90"
             title="記録を終了"
           >
             <X size={12} strokeWidth={2.5} />
@@ -469,25 +470,25 @@ export function HudApp() {
     return (
       <div className="flex h-full w-full flex-col">
         <div
-          className="hud-drag h-[70px] w-full flex-none select-none rounded-xl px-3 py-1.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
+          className="hud-drag h-[70px] w-full flex-none select-none rounded-lg px-3 py-1.5 text-ink shadow-lg ring-1 ring-rule"
           style={containerStyle}
           onDoubleClick={handleOpenMain}
           title="ダブルクリックでメイン窓を開く"
         >
           <div className="flex items-center gap-2 text-[10px]">
             {statusLabel}
-            <span className="min-w-0 flex-1 truncate text-slate-300">{displayName}</span>
+            <span className="min-w-0 flex-1 truncate text-ink-mute">{displayName}</span>
             {recBadge}
             {recording && !paused && <MiniLevel level={level} />}
             {sizeButton}
           </div>
           <div className="mt-1 flex items-center gap-1.5">
-            <div className="font-mono text-lg font-bold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
+            <div className="font-mono text-lg font-semibold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
             {/* アイコンのみで省スペース化し、終了ボタンまで必ず表示されるようにする */}
             <div className="hud-no-drag ml-auto flex flex-none items-center gap-0.5">
               <button onClick={handleMarker} className={dense(markerFlash)} title="マーカーを打つ">
                 <Bookmark size={13} strokeWidth={2.25} />
-                {markerCount > 0 && <span className="ml-0.5 text-[9px] font-semibold">{markerCount}</span>}
+                {markerCount > 0 && <span className="ml-0.5 text-[9px] font-medium">{markerCount}</span>}
               </button>
               {recording && (
                 <button onClick={handleTogglePause} className={dense(paused)} title={paused ? '録音を再開' : '録音を一時停止'}>
@@ -505,7 +506,7 @@ export function HudApp() {
               {liveEnabled && (
                 <button
                   onClick={handleToggleLive}
-                  className={`hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${liveVisible ? 'bg-sky-500 text-white' : 'bg-slate-700/70 text-slate-100 hover:bg-slate-600'}`}
+                  className={`hud-no-drag inline-flex flex-none items-center rounded-md p-1 transition ${liveVisible ? 'bg-accent text-on-accent' : 'bg-ink/10 text-ink hover:bg-ink/15'}`}
                   title={liveVisible ? 'ライブ字幕を隠す' : 'ライブ字幕を表示'}
                 >
                   <AudioLines size={13} strokeWidth={2.25} />
@@ -517,7 +518,7 @@ export function HudApp() {
               <button onClick={handleOpenMemo} className={dense(memoOpen)} title="メモを編集">
                 <StickyNote size={13} strokeWidth={2.25} />
               </button>
-              <button onClick={handleEnd} className="hud-no-drag inline-flex flex-none items-center rounded-md bg-red-500 p-1 text-white hover:bg-red-600" title="記録を終了">
+              <button onClick={handleEnd} className="hud-no-drag inline-flex flex-none items-center rounded-md bg-danger p-1 text-on-accent hover:bg-danger/90" title="記録を終了">
                 <Square size={12} strokeWidth={2.5} fill="currentColor" />
               </button>
             </div>
@@ -533,22 +534,22 @@ export function HudApp() {
   return (
     <div className="flex h-full w-full flex-col">
       <div
-        className="hud-drag w-full flex-none select-none rounded-2xl px-4 py-2.5 text-slate-100 shadow-2xl ring-1 ring-white/10"
+        className="hud-drag w-full flex-none select-none rounded-lg px-4 py-2.5 text-ink shadow-lg ring-1 ring-rule"
         style={{ ...containerStyle, height: 122 }}
         onDoubleClick={handleOpenMain}
         title="ダブルクリックでメイン窓を開く"
       >
         <div className="flex items-center gap-2 text-[11px]">
           {statusLabel}
-          <span className="min-w-0 flex-1 truncate text-slate-300">{displayName}</span>
+          <span className="min-w-0 flex-1 truncate text-ink-mute">{displayName}</span>
           {recBadge}
           {recording && !paused && <MiniLevel level={level} segments={14} />}
           {sizeButton}
         </div>
         <div className="mt-1 flex items-center gap-2">
-          <div className="font-mono text-3xl font-bold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
+          <div className="font-mono text-3xl font-semibold leading-none tabular-nums">{formatHMS(elapsedSec)}</div>
           {holding && (
-            <span className="text-[10px] text-amber-400">保留 {formatHMS(holdSec)}</span>
+            <span className="text-[10px] text-pending">保留 {formatHMS(holdSec)}</span>
           )}
         </div>
         <div className="hud-no-drag mt-1.5 flex items-center gap-1.5">

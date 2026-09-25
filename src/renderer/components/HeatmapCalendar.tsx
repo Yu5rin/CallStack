@@ -15,10 +15,10 @@ function dateKey(d: Date): string {
 }
 
 function intensityClass(count: number): string {
-  if (count === 0) return 'bg-slate-200 dark:bg-slate-800';
-  if (count <= 2) return 'bg-emerald-200 dark:bg-emerald-900';
-  if (count <= 5) return 'bg-emerald-400 dark:bg-emerald-700';
-  return 'bg-emerald-600 dark:bg-emerald-500';
+  if (count === 0) return 'bg-rule';
+  if (count <= 2) return 'bg-accent/30';
+  if (count <= 5) return 'bg-accent/60';
+  return 'bg-accent';
 }
 
 export function HeatmapCalendar({ calls, days = 91 }: { calls: CallRecord[]; days?: number }) {
@@ -58,7 +58,7 @@ export function HeatmapCalendar({ calls, days = 91 }: { calls: CallRecord[]; day
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+      <div className="mb-2 flex items-center justify-between text-xs text-ink-mute">
         <span>{cells[0]?.date.toLocaleDateString()} 〜 {cells[cells.length - 1]?.date.toLocaleDateString()}</span>
         <div className="flex items-center gap-1">
           <span>少</span>

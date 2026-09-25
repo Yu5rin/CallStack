@@ -46,7 +46,7 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onD
         return (
           <div
             key={m.id}
-            className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+            className="flex items-center gap-3 rounded-md border border-rule bg-surface px-3 py-2"
           >
             <input
               type="radio"
@@ -56,22 +56,22 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onD
               disabled={!isDl}
             />
             <div className="flex-1">
-              <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{m.label}</div>
+              <div className="text-sm font-medium text-ink">{m.label}</div>
               {p && !p.done && pct !== null && (
-                <div className="mt-1 h-1 w-full overflow-hidden rounded bg-slate-100 dark:bg-slate-700">
-                  <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+                <div className="mt-1 h-1 w-full overflow-hidden rounded bg-rule">
+                  <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
                 </div>
               )}
-              {p?.error && <div className="text-xs text-red-600 dark:text-red-400">{p.error}</div>}
+              {p?.error && <div className="text-xs text-danger">{p.error}</div>}
             </div>
             {isDl ? (
               <span className="inline-flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-1 text-xs text-ok">
                   <CircleCheck size={13} />ダウンロード済
                 </span>
                 <button
                   onClick={() => remove(m.id)}
-                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                  className="rounded p-1 text-ink-mute hover:bg-danger-soft hover:text-danger"
                   title="モデルファイルを削除してディスクを空ける"
                 >
                   <Trash2 size={13} />
@@ -81,7 +81,7 @@ export function ModelManager({ selected, onSelect, downloaded, onDownloaded, onD
               <button
                 onClick={() => download(m.id)}
                 disabled={!!p && !p.done}
-                className="rounded-md border border-brand-300 bg-white px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-brand-700 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
+                className="rounded-md border border-accent/40 bg-surface px-2 py-1 text-xs text-accent-ink hover:bg-accent-soft disabled:opacity-50"
               >
                 {p && !p.done ? '取得中…' : 'ダウンロード'}
               </button>

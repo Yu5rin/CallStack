@@ -15,6 +15,17 @@ interface Props {
   onSelectContact?: (name: string) => void;
 }
 
+// recharts のツールチップはインラインスタイルで渡す必要があるため、
+// トークン（CSS 変数）をそのまま文字列として使う（テーマ切り替えに自動追従する）
+const TOOLTIP_STYLE: React.CSSProperties = {
+  background: 'rgb(var(--c-surface))',
+  border: '1px solid rgb(var(--c-rule))',
+  borderRadius: 8,
+  fontSize: 12,
+  color: 'rgb(var(--c-ink))',
+};
+const TOOLTIP_LABEL_STYLE: React.CSSProperties = { color: 'rgb(var(--c-ink-mute))' };
+
 export function StatsPage({ calls, settings, onSelectContact }: Props) {
   // 通話と会議は性質が違うためタブで分けて集計する
   const [kindTab, setKindTab] = useState<RecordKind>('call');
@@ -55,20 +66,16 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
       <div className="flex items-center gap-1">
         <button
           onClick={() => setKindTab('call')}
-          className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${
-            !isMeetingTab
-              ? 'bg-brand-600 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+          className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
+            !isMeetingTab ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-paper'
           }`}
         >
           <Phone size={14} className="mr-1.5 inline align-[-2px]" />通話
         </button>
         <button
           onClick={() => setKindTab('meeting')}
-          className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${
-            isMeetingTab
-              ? 'bg-violet-600 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+          className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
+            isMeetingTab ? 'bg-accent text-on-accent' : 'text-ink-mute hover:bg-paper'
           }`}
         >
           <Users size={14} className="mr-1.5 inline align-[-2px]" />会議 ({meetingCount})
@@ -85,26 +92,26 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">過去30日の{noun}時間（分）</h3>
+        <div className="lg:col-span-2 rounded-lg border border-rule bg-surface p-4">
+          <h3 className="mb-3 text-sm font-medium text-ink">過去30日の{noun}時間（分）</h3>
           <div className="h-64">
             <ResponsiveContainer>
               <BarChart data={dailyChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} />
-                <Bar dataKey="minutes" fill="#367aff" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                <Bar dataKey="minutes" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">タグ別構成（時間）</h3>
+        <div className="rounded-lg border border-rule bg-surface p-4">
+          <h3 className="mb-3 text-sm font-medium text-ink">タグ別構成（時間）</h3>
           <div className="h-64">
             {tagPie.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">データなし</div>
+              <div className="flex h-full items-center justify-center text-sm text-ink-mute">データなし</div>
             ) : (
               <ResponsiveContainer>
                 <PieChart>
@@ -113,8 +120,8 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
                       <Cell key={idx} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v: number | string) => formatHMS(Number(v))} />
-                  <Legend />
+                  <Tooltip formatter={(v: number | string) => formatHMS(Number(v))} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                  <Legend wrapperStyle={{ color: 'rgb(var(--c-ink-mute))', fontSize: 12 }} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -122,30 +129,30 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">過去90日のアクティビティ</h3>
+      <div className="rounded-lg border border-rule bg-surface p-4">
+        <h3 className="mb-3 text-sm font-medium text-ink">過去90日のアクティビティ</h3>
         <HeatmapCalendar calls={target} />
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">時間帯別の発生件数</h3>
+      <div className="rounded-lg border border-rule bg-surface p-4">
+        <h3 className="mb-3 text-sm font-medium text-ink">時間帯別の発生件数</h3>
         <div className="h-56">
           <ResponsiveContainer>
             <BarChart data={hourChart}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
+              <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+              <Bar dataKey="count" fill="rgb(var(--c-accent))" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">タグ別の詳細</h3>
+      <div className="rounded-lg border border-rule bg-surface p-4">
+        <h3 className="mb-3 text-sm font-medium text-ink">タグ別の詳細</h3>
         <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <thead className="text-left text-xs uppercase tracking-wide text-ink-mute">
             <tr>
               <th className="py-2">タグ</th>
               <th className="py-2 text-right">件数</th>
@@ -155,10 +162,10 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </thead>
           <tbody>
             {byTag.length === 0 && (
-              <tr><td colSpan={4} className="py-4 text-center text-slate-400">データなし</td></tr>
+              <tr><td colSpan={4} className="py-4 text-center text-ink-mute">データなし</td></tr>
             )}
             {byTag.map((b) => (
-              <tr key={b.tag} className="border-t border-slate-100 dark:border-slate-800">
+              <tr key={b.tag} className="border-t border-rule">
                 <td className="py-2">
                   <span
                     className="inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white"
@@ -176,25 +183,25 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
         </table>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">{isMeetingTab ? '会議名別サマリー（上位 TOP10 時間）' : '連絡先別サマリー（上位 TOP10 通話時間）'}</h3>
+      <div className="rounded-lg border border-rule bg-surface p-4">
+        <h3 className="mb-3 text-sm font-medium text-ink">{isMeetingTab ? '会議名別サマリー（上位 TOP10 時間）' : '連絡先別サマリー（上位 TOP10 通話時間）'}</h3>
         {top10Contacts.length === 0 ? (
-          <div className="flex h-32 items-center justify-center text-sm text-slate-400">{isMeetingTab ? '会議の記録がありません' : '連絡先名が設定された記録がありません'}</div>
+          <div className="flex h-32 items-center justify-center text-sm text-ink-mute">{isMeetingTab ? '会議の記録がありません' : '連絡先名が設定された記録がありません'}</div>
         ) : (
           <div className="h-56">
             <ResponsiveContainer>
               <BarChart data={top10Contacts} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
-                <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} />
-                <Bar dataKey="minutes" fill="#a855f7" radius={[0, 4, 4, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-rule))" />
+                <XAxis type="number" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: 'rgb(var(--c-ink-mute))' }} stroke="rgb(var(--c-rule))" width={140} />
+                <Tooltip formatter={(v: number | string) => [`${v} 分`, `${noun}時間`]} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                <Bar dataKey="minutes" fill="rgb(var(--c-accent))" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         )}
         <table className="mt-4 w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <thead className="text-left text-xs uppercase tracking-wide text-ink-mute">
             <tr>
               <th className="py-2">{isMeetingTab ? '会議名' : '連絡先'}</th>
               <th className="py-2 text-right">件数</th>
@@ -206,20 +213,20 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
           </thead>
           <tbody>
             {byContact.length === 0 && (
-              <tr><td colSpan={6} className="py-4 text-center text-slate-400">データなし</td></tr>
+              <tr><td colSpan={6} className="py-4 text-center text-ink-mute">データなし</td></tr>
             )}
             {byContact.map((b) => (
               <tr
                 key={b.name}
                 onClick={() => { if (!isMeetingTab) onSelectContact?.(b.name); }}
-                className="cursor-pointer border-t border-slate-100 hover:bg-brand-50 dark:border-slate-800 dark:hover:bg-brand-900/40"
+                className="cursor-pointer border-t border-rule hover:bg-accent-soft"
               >
-                <td className="py-2 font-medium text-brand-700 dark:text-brand-300">{b.name}</td>
+                <td className="py-2 font-medium text-accent-ink">{b.name}</td>
                 <td className="py-2 text-right tabular-nums">{b.count}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.totalSec)}</td>
                 <td className="py-2 text-right font-mono tabular-nums">{formatHMS(b.avgSec)}</td>
                 <td className="py-2 text-xs">{b.topTag ?? '—'}</td>
-                <td className="py-2 text-xs text-slate-600 dark:text-slate-400">{formatDateTime(b.lastCallAt)}</td>
+                <td className="py-2 text-xs text-ink-mute">{formatDateTime(b.lastCallAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -231,10 +238,10 @@ export function StatsPage({ calls, settings, onSelectContact }: Props) {
 
 function StatCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
-        {value}{unit && <span className="ml-1 text-sm font-medium text-slate-500 dark:text-slate-400">{unit}</span>}
+    <div className="rounded-lg border border-rule bg-surface p-4">
+      <div className="text-xs text-ink-mute">{label}</div>
+      <div className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">
+        {value}{unit && <span className="ml-1 font-sans text-sm font-medium text-ink-mute">{unit}</span>}
       </div>
     </div>
   );

@@ -72,22 +72,22 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, Props>(function AudioPl
         className="w-full"
       />
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-slate-500 dark:text-slate-400">再生速度:</span>
+        <span className="text-ink-mute">再生速度:</span>
         {SPEEDS.map((s) => (
           <button
             key={s}
             onClick={() => setSpeed(s)}
             className={`rounded px-2 py-0.5 ${
               speed === s
-                ? 'bg-brand-600 text-white'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                ? 'bg-accent text-on-accent'
+                : 'bg-ink/5 text-ink hover:bg-ink/10'
             }`}
           >
             {s}x
           </button>
         ))}
       </div>
-      {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
+      {error && <div className="text-xs text-danger">{error}</div>}
     </div>
   );
 });

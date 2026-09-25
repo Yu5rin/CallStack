@@ -1,7 +1,7 @@
 import { BrowserWindow, screen, app, Menu, MenuItemConstructorOptions, dialog, BrowserWindowConstructorOptions } from 'electron';
 import path from 'node:path';
 import type { HudSize } from '../shared/types';
-import { TITLEBAR_COLORS, TITLEBAR_HEIGHT, EffectiveTheme } from '../shared/titlebarTheme';
+import { TITLEBAR_COLORS, TITLEBAR_HEIGHT, PAPER_COLORS, EffectiveTheme } from '../shared/titlebarTheme';
 import { logInfo } from './log';
 
 /**
@@ -117,6 +117,8 @@ export function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     title: 'CallStack',
     icon: path.join(__dirname, '..', '..', 'resources', 'app-icon-512.png'),
+    // 読み込み完了前の白フラッシュを防ぐため、現在の実効テーマの paper 色で初期化する
+    backgroundColor: PAPER_COLORS[themeProvider ? themeProvider() : 'light'],
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
@@ -490,7 +492,7 @@ export function showLiveWindow(bounds?: LiveBounds | null): BrowserWindow {
     skipTaskbar: true,
     show: false,
     focusable: true,
-    backgroundColor: '#0f172a',
+    backgroundColor: PAPER_COLORS[themeProvider ? themeProvider() : 'light'],
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,

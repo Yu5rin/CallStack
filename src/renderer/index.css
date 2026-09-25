@@ -2,6 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   デザイントークン（"Pane" のデザインシステムを移植 / 仕様書 10章準拠）
+   ライトを基準に、ダーク・ブラック（ダークの濃色プリセット）を差分で再定義する。
+   Tailwind の透過修飾子（bg-accent/90 等）が使えるよう、
+   各チャンネルはスペース区切りの RGB 値として保持する。
+   ========================================================================== */
+:root {
+  --c-paper: 251 251 250;
+  --c-surface: 255 255 255;
+  --c-chrome: 239 241 240;
+  --c-ink: 31 36 40;
+  --c-ink-mute: 95 103 108;
+  --c-rule: 228 231 230;
+  --c-accent: 47 111 104;
+  --c-accent-ink: 47 111 104;
+  --c-accent-soft: 225 239 237;
+  --c-on-accent: 255 255 255;
+  --c-danger: 176 58 46;
+  --c-danger-soft: 249 236 234;
+  --c-pending: 143 98 16;
+  --c-meeting: 91 91 168;
+  --c-ok: 39 107 68;
+  --c-ok-soft: 228 241 233;
+}
+
+html.dark {
+  color-scheme: dark;
+  --c-paper: 20 23 26;
+  --c-surface: 28 34 38;
+  --c-chrome: 14 16 18;
+  --c-ink: 228 231 229;
+  --c-ink-mute: 138 146 150;
+  --c-rule: 38 45 49;
+  --c-accent: 111 179 168;
+  --c-accent-ink: 111 179 168;
+  --c-accent-soft: 30 44 43;
+  --c-on-accent: 14 21 19;
+  --c-danger: 224 123 110;
+  --c-danger-soft: 58 35 32;
+  --c-pending: 217 162 74;
+  --c-meeting: 156 156 224;
+  --c-ok: 107 192 138;
+  --c-ok-soft: 22 38 28;
+}
+
+/* 'black' テーマはダークをベースにした、より暗い配色プリセット。
+   html 要素には dark と black の両方のクラスが付与される（useTheme 参照）。 */
+html.dark.black {
+  --c-paper: 0 0 0;
+  --c-surface: 10 10 10;
+  --c-chrome: 0 0 0;
+  --c-rule: 31 31 31;
+}
+
 html, body, #root, #hud-root {
   height: 100%;
 }
@@ -10,10 +64,10 @@ html, body, #root, #hud-root {
   overflow: hidden;
 }
 
-/* スクロールバーを OS 標準の見た目からアプリ調の細身に整える */
+/* スクロールバーをアプリ調の細身に整える（トークン準拠） */
 * {
   scrollbar-width: thin;                       /* Firefox */
-  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+  scrollbar-color: rgb(var(--c-ink-mute) / 0.4) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -23,28 +77,38 @@ html, body, #root, #hud-root {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.45);  /* slate-400 半透明 */
+  background-color: rgb(var(--c-ink-mute) / 0.35);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(100, 116, 139, 0.75);  /* slate-500 */
+  background-color: rgb(var(--c-ink-mute) / 0.55);
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-.dark ::-webkit-scrollbar-thumb {
-  background-color: rgba(71, 85, 105, 0.7);     /* slate-600 */
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(100, 116, 139, 0.9);
-}
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', system-ui, sans-serif;
+  background-color: rgb(var(--c-paper));
+  color: rgb(var(--c-ink));
+  font-family: 'Inter', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* フォーカスリング（共通）。個別のコンポーネントで衝突する ad-hoc な
+   フォーカス装飾は使わず、これに統一する。 */
+:focus-visible {
+  outline: 2px solid rgb(var(--c-accent));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* lucide-react のアイコンは stroke-width 属性を持つが、Pane のデザインシステムに
+   合わせて 1.75 に統一する。 */
+.lucide {
+  stroke-width: 1.75 !important;
 }
 
 .hud-drag {
@@ -65,12 +129,3 @@ body {
 .app-titlebar-no-drag {
   -webkit-app-region: no-drag;
 }
-
-html.black body { background-color: #000; }
-html.black .dark\:bg-slate-950 { background-color: #000; }
-html.black .dark\:bg-slate-900 { background-color: #000; }
-html.black .dark\:bg-slate-800 { background-color: #0a0a0a; }
-html.black .dark\:bg-slate-700 { background-color: #141414; }
-html.black .dark\:border-slate-800 { border-color: #1a1a1a; }
-html.black .dark\:border-slate-700 { border-color: #2a2a2a; }
-

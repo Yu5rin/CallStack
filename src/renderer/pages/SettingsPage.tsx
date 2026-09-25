@@ -15,11 +15,11 @@ import { useToast } from '../components/Toast';
 import { toUserMessage } from '../utils/errorMessage';
 
 const sectionClass =
-  'rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900';
+  'rounded-lg border border-rule bg-surface p-5';
 const inputClass =
-  'rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
+  'rounded-md border border-rule bg-surface px-3 py-2 text-sm text-ink';
 const ghostBtn =
-  'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700';
+  'rounded-md border border-rule bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-paper';
 
 /** whisper.cpp のセットアップ状態 + 実行ファイルのアプリ内ダウンロード */
 function WhisperSetup({
@@ -78,31 +78,31 @@ function WhisperSetup({
   const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
 
   return (
-    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+    <div className="mt-3 rounded-md border border-rule bg-paper p-3">
       <div className="mb-1 flex items-center justify-between">
-        <div className="text-xs font-medium text-slate-700 dark:text-slate-300">セットアップ状態</div>
+        <div className="text-xs font-medium text-ink">セットアップ状態</div>
         <button
           onClick={run}
           disabled={checking}
-          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-rule bg-surface px-2 py-0.5 text-xs hover:bg-paper disabled:opacity-50"
         >
           再チェック
         </button>
       </div>
-      {status === null && <div className="text-xs text-slate-500">確認中…</div>}
+      {status === null && <div className="text-xs text-ink-mute">確認中…</div>}
       {status && status.ok && (
-        <div className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-300"><CircleCheck size={13} />文字起こしの準備が整っています。</div>
+        <div className="inline-flex items-center gap-1 text-xs text-ok"><CircleCheck size={13} />文字起こしの準備が整っています。</div>
       )}
       {status && !status.ok && (
         <div className="space-y-2">
-          <div className="whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{toUserMessage(status.error, '文字起こしの準備を確認できませんでした')}</div>
+          <div className="whitespace-pre-wrap text-xs text-danger">{toUserMessage(status.error, '文字起こしの準備を確認できませんでした')}</div>
         </div>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           onClick={() => download('cpu')}
           disabled={downloading !== null}
-          className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           title="whisper.cpp の Windows ビルドを GitHub から取得して自動配置します"
         >
           {downloading === 'cpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />whisper.cpp をダウンロード</>}
@@ -111,14 +111,14 @@ function WhisperSetup({
           <button
             onClick={() => download('gpu')}
             disabled={downloading !== null}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="rounded-md border border-rule bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
             title="NVIDIA CUDA 対応ビルド（大容量）。NVIDIA GPU が必要です"
           >
             {downloading === 'gpu' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />GPU (CUDA) 版をダウンロード</>}
           </button>
         )}
         {progress && (
-          <span className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="text-xs text-ink-mute">
             {progress.step === 'extract'
               ? '展開中…'
               : pct !== null
@@ -128,7 +128,7 @@ function WhisperSetup({
         )}
       </div>
       {gpuUnlocked && (
-        <label className="mt-2 flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+        <label className="mt-2 flex items-center gap-2 text-xs text-ink">
           <input
             type="checkbox"
             checked={useGpu}
@@ -136,18 +136,18 @@ function WhisperSetup({
             disabled={!gpuInstalled}
           />
           GPU (CUDA) 版を使用する
-          <span className="text-slate-500 dark:text-slate-400">
+          <span className="text-ink-mute">
             {gpuInstalled ? '— 文字起こしが数倍高速になります（NVIDIA GPU 必須）' : '— 先に GPU 版をダウンロードしてください'}
           </span>
         </label>
       )}
       {progress && pct !== null && progress.step === 'download' && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-          <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-rule">
+          <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
       )}
       {dlError && (
-        <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{dlError}</div>
+        <div className="mt-2 whitespace-pre-wrap text-xs text-danger">{dlError}</div>
       )}
     </div>
   );
@@ -205,24 +205,24 @@ function LiveTranscribeSetup({
   const ready = engineOk && modelOk;
 
   return (
-    <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+    <div className="mt-4 rounded-md border border-rule bg-paper p-3">
       <div className="mb-1 flex items-center justify-between">
-        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-          <AudioLines size={13} className="text-sky-500" />
+        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-ink">
+          <AudioLines size={13} className="text-accent-ink" />
           ライブ文字起こし（実験的 / Vosk）
         </div>
         <button
           onClick={refresh}
-          className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-rule bg-surface px-2 py-0.5 text-xs hover:bg-paper"
         >
           再チェック
         </button>
       </div>
-      <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+      <p className="mb-2 text-xs text-ink-mute">
         録音中の音声をその場で認識し、HUD と編集画面に暫定テキストを表示します（オフライン動作）。
         録音終了後は従来どおり whisper が高精度の確定版を生成します。
       </p>
-      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <label className="flex items-center gap-2 text-sm text-ink">
         <input
           type="checkbox"
           checked={enabled}
@@ -230,11 +230,11 @@ function LiveTranscribeSetup({
           onChange={(e) => onChange({ liveEnabled: e.target.checked })}
         />
         録音中にライブ文字起こしを表示する
-        {!recordingEnabled && <span className="text-xs text-slate-500 dark:text-slate-400">— 先に録音を有効にしてください</span>}
-        {recordingEnabled && !ready && <span className="text-xs text-slate-500 dark:text-slate-400">— 下のエンジンとモデルの配置が必要です</span>}
+        {!recordingEnabled && <span className="text-xs text-ink-mute">— 先に録音を有効にしてください</span>}
+        {recordingEnabled && !ready && <span className="text-xs text-ink-mute">— 下のエンジンとモデルの配置が必要です</span>}
       </label>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className={`inline-flex items-center gap-1 text-xs ${engineOk ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
+        <span className={`inline-flex items-center gap-1 text-xs ${engineOk ? 'text-ok' : 'text-ink-mute'}`}>
           {engineOk ? <CircleCheck size={13} /> : <AlertTriangle size={13} />}
           エンジン (libvosk)
         </span>
@@ -242,7 +242,7 @@ function LiveTranscribeSetup({
           <button
             onClick={() => download('engine')}
             disabled={downloading !== null}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
             {downloading === 'engine' ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />エンジンをダウンロード (約7MB)</>}
           </button>
@@ -251,7 +251,7 @@ function LiveTranscribeSetup({
           <button
             onClick={() => download('engine-legacy')}
             disabled={downloading !== null}
-            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-700"
+            className="rounded border border-rule bg-surface px-2 py-1 text-xs text-ink-mute hover:bg-paper disabled:opacity-50"
             title="ライブ文字起こしの開始に失敗する（エンジンがクラッシュする）場合、互換性の高い旧バージョン (0.3.42) に入れ替えて試せます"
           >
             {downloading === 'engine-legacy' ? '取得中…' : '動かない場合: 旧バージョン (0.3.42) に入れ替える'}
@@ -269,21 +269,21 @@ function LiveTranscribeSetup({
             <option key={m.id} value={m.id}>{m.label}</option>
           ))}
         </select>
-        <span className={`inline-flex items-center gap-1 text-xs ${modelOk ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
+        <span className={`inline-flex items-center gap-1 text-xs ${modelOk ? 'text-ok' : 'text-ink-mute'}`}>
           {modelOk ? <><CircleCheck size={13} />配置済み</> : <><AlertTriangle size={13} />未ダウンロード</>}
         </span>
         {!modelOk && (
           <button
             onClick={() => download(model)}
             disabled={downloading !== null}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
             {downloading === model ? '取得中…' : <><Download size={12} className="mr-1 inline align-[-1px]" />モデルをダウンロード</>}
           </button>
         )}
       </div>
       {progress && (
-        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-2 text-xs text-ink-mute">
           {progress.step === 'extract'
             ? '展開中…'
             : pct !== null
@@ -292,12 +292,12 @@ function LiveTranscribeSetup({
         </div>
       )}
       {progress && pct !== null && progress.step === 'download' && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-          <div className="h-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-rule">
+          <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
       )}
       {dlError && (
-        <div className="mt-2 whitespace-pre-wrap text-xs text-red-700 dark:text-red-300">{dlError}</div>
+        <div className="mt-2 whitespace-pre-wrap text-xs text-danger">{dlError}</div>
       )}
     </div>
   );
@@ -329,7 +329,7 @@ function TermReplacementEditor({
                 placeholder="誤り（認識される語）"
                 className={`min-w-0 flex-1 ${inputClass}`}
               />
-              <span className="flex-none text-slate-400">→</span>
+              <span className="flex-none text-ink-mute">→</span>
               <input
                 value={r.to}
                 onChange={(e) => setAt(i, { to: e.target.value })}
@@ -338,7 +338,7 @@ function TermReplacementEditor({
               />
               <button
                 onClick={() => remove(i)}
-                className="flex-none rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                className="flex-none rounded p-1.5 text-ink-mute hover:bg-danger-soft hover:text-danger"
                 title="この行を削除"
               >
                 <X size={14} />
@@ -349,7 +349,7 @@ function TermReplacementEditor({
       )}
       <button
         onClick={add}
-        className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+        className="inline-flex items-center gap-1 rounded-md border border-rule bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-paper"
       >
         <Plus size={12} /> 単語を追加
       </button>
@@ -375,19 +375,19 @@ function TeamsWindowProbe() {
         {loading ? '取得中…' : '現在のウィンドウ名を表示'}
       </button>
       {wins && (
-        <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+        <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-rule bg-paper p-2 text-xs">
           {wins.length === 0 ? (
-            <div className="text-slate-500 dark:text-slate-400">ウィンドウが取得できませんでした</div>
+            <div className="text-ink-mute">ウィンドウが取得できませんでした</div>
           ) : (
             <ul className="space-y-0.5">
               {wins.map((w, i) => (
-                <li key={i} className={`truncate ${/teams/i.test(w) ? 'font-semibold text-brand-600 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300'}`} title={w}>
+                <li key={i} className={`truncate ${/teams/i.test(w) ? 'font-medium text-accent-ink' : 'text-ink-mute'}`} title={w}>
                   {w}
                 </li>
               ))}
             </ul>
           )}
-          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+          <div className="mt-1 text-[11px] text-ink-mute">
             Teams 会議/通話を開いた状態でこのボタンを押すと、その名前が一覧に出ます（青字は「teams」を含む候補）。
             上の「Teams ウィンドウ判定語」を、会議中だけ現れるウィンドウ名に共通する語に合わせてください。
           </div>
@@ -473,7 +473,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
   const removeTag = (idx: number) =>
     commit({ ...draftRef.current, tags: draftRef.current.tags.filter((_, i) => i !== idx) });
   const addTag = () =>
-    commit({ ...draftRef.current, tags: [...draftRef.current.tags, { name: '新規タグ', color: '#94a3b8' }] });
+    commit({ ...draftRef.current, tags: [...draftRef.current.tags, { name: '新規タグ', color: '#8A9296' }] });
   const moveTag = (idx: number, dir: -1 | 1) => {
     const tags = draftRef.current.tags.slice();
     const j = idx + dir;
@@ -498,11 +498,11 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       {/* ============ 外観 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Palette size={16} className="text-slate-400" />外観</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Palette size={16} className="text-ink-mute" />外観</h3>
         <Row label="テーマ">
           <div className="flex gap-3 text-sm">
             {(['system', 'light', 'dark', 'black'] as ThemePref[]).map((t) => (
-              <label key={t} className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-300">
+              <label key={t} className="inline-flex items-center gap-1 text-ink">
                 <input
                   type="radio"
                   name="theme"
@@ -518,9 +518,9 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ ウィンドウと HUD ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><AppWindow size={16} className="text-slate-400" />ウィンドウと HUD</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><AppWindow size={16} className="text-ink-mute" />ウィンドウと HUD</h3>
         <Row label="自動起動">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.launchAtLogin}
@@ -530,7 +530,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </label>
         </Row>
         <Row label="最小化の動作">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.minimizeToTray}
@@ -538,12 +538,12 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             />
             最小化時にタスクトレイに格納する
           </label>
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+          <span className="ml-2 text-xs text-ink-mute">
             オフなら通常通りタスクバーに最小化されます (×ボタンは常にアプリ終了)
           </span>
         </Row>
         <Row label="HUD のサイズ">
-          <div className="flex gap-3 text-sm text-slate-700 dark:text-slate-300">
+          <div className="flex gap-3 text-sm text-ink">
             {(['mini', 'compact', 'full'] as const).map((s) => (
               <label key={s} className="inline-flex items-center gap-1">
                 <input
@@ -555,7 +555,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               </label>
             ))}
           </div>
-          <span className="ml-2 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="ml-2 block text-xs text-ink-mute">
             HUD 右上のアイコンでもサイズを循環できます
           </span>
         </Row>
@@ -568,19 +568,19 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               step={5}
               value={Math.round((draft.hudOpacity ?? 1) * 100)}
               onChange={(e) => update({ hudOpacity: Number(e.target.value) / 100 })}
-              className="w-56 accent-brand-600"
+              className="w-56 accent-accent"
             />
-            <span className="w-12 text-right font-mono text-sm tabular-nums text-slate-700 dark:text-slate-300">
+            <span className="w-12 text-right font-mono text-sm tabular-nums text-ink">
               {Math.round((draft.hudOpacity ?? 1) * 100)}%
             </span>
           </div>
-          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs text-ink-mute">
             カーソルを HUD に乗せている間は自動的に不透明になります
           </span>
         </Row>
         <Row label="HUD のライブ字幕">
           <div className="flex flex-wrap items-center gap-4">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="inline-flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
                 checked={draft.hudLiveVisible ?? true}
@@ -588,7 +588,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               />
               ライブ字幕ウィンドウを表示する
             </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+            <label className="inline-flex items-center gap-2 text-sm text-ink-mute">
               文字サイズ
               <select
                 value={draft.liveFontSize ?? 'sm'}
@@ -601,7 +601,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               </select>
             </label>
           </div>
-          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs text-ink-mute">
             録音中のライブ文字起こしを独立したウィンドウに表示します。ウィンドウは自由に移動・リサイズでき、
             文字サイズ（小/中/大）はウィンドウ上でも切り替えられます。表示 ON/OFF は HUD の「字幕」ボタンや
             ウィンドウの × でも操作できます
@@ -611,8 +611,8 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ ショートカット ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Keyboard size={16} className="text-slate-400" />グローバルショートカット</h3>
-        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Keyboard size={16} className="text-ink-mute" />グローバルショートカット</h3>
+        <p className="mb-4 text-xs text-ink-mute">
           システム全体で有効。フォーカス中の入力欄にキーを押すと記録できます。
         </p>
         <div className="space-y-3">
@@ -658,7 +658,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
       {/* ============ タグ ============ */}
       <section className={sectionClass}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Tag size={16} className="text-slate-400" />タグ</h3>
+          <h3 className="inline-flex items-center gap-2 text-base font-medium text-ink"><Tag size={16} className="text-ink-mute" />タグ</h3>
           <button onClick={addTag} className={ghostBtn}>＋ タグを追加</button>
         </div>
         <div className="space-y-2">
@@ -668,7 +668,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 type="color"
                 value={t.color}
                 onChange={(e) => updateTag(i, { color: e.target.value })}
-                className="h-9 w-9 cursor-pointer rounded border border-slate-300 dark:border-slate-700"
+                className="h-9 w-9 cursor-pointer rounded border border-rule"
               />
               <input
                 value={t.name}
@@ -679,7 +679,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 <button
                   onClick={() => moveTag(i, -1)}
                   disabled={i === 0}
-                  className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-700"
+                  className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
                   title="上へ"
                 >
                   <ChevronUp size={16} />
@@ -687,7 +687,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 <button
                   onClick={() => moveTag(i, 1)}
                   disabled={i === draft.tags.length - 1}
-                  className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-700"
+                  className="rounded p-1 text-ink-mute hover:bg-paper disabled:opacity-30"
                   title="下へ"
                 >
                   <ChevronDown size={16} />
@@ -695,14 +695,14 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               </div>
               <button
                 onClick={() => removeTag(i)}
-                className="rounded-md border border-red-300 bg-white px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+                className="rounded-md border border-danger/40 bg-surface px-2 py-1.5 text-xs text-danger hover:bg-danger-soft"
               >
                 削除
               </button>
             </div>
           ))}
         </div>
-        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-xs text-ink-mute">
           ▲▼ で並び替えできます。記録には複数のタグを付けられます（記録の編集・HUD の「情報」から選択）。
           上位4つはクイックタグ（{'Ctrl+Shift+1〜4'}）に割り当てられます。
         </p>
@@ -710,9 +710,9 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ 録音 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Mic size={16} className="text-slate-400" />録音</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Mic size={16} className="text-ink-mute" />録音</h3>
         <Row label="通話と同時に録音">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.recording.enabled}
@@ -734,7 +734,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           onChange={(v) => updateRecording({ meetingSource: v })}
         />
         <Row label="開始ダイアログ">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.recording.askSourceOnStart}
@@ -742,7 +742,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             />
             「▶ 開始」ボタンで通話/会議・録音ソースの選択ダイアログを表示する
           </label>
-          <span className="ml-2 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="ml-2 block text-xs text-ink-mute">
             オフにするとボタンは前回の種別で即開始します。ショートカット・トレイからは常に既定ソースで即開始です
           </span>
         </Row>
@@ -763,7 +763,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               <option key={b} value={b}>{b} kbps</option>
             ))}
           </select>
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">96kbps で約 700KB/分</span>
+          <span className="ml-2 text-xs text-ink-mute">96kbps で約 700KB/分</span>
         </Row>
         <Row label="録音の保管期限（日）">
           <input
@@ -778,10 +778,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             className={`w-32 ${inputClass}`}
             disabled={!draft.recording.enabled}
           />
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">空欄で無制限。期限切れの音声のみ削除（記録は残ります）</span>
+          <span className="ml-2 text-xs text-ink-mute">空欄で無制限。期限切れの音声のみ削除（記録は残ります）</span>
         </Row>
         <Row label="有効化時の同意確認">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.confirmRecordingEnable}
@@ -794,13 +794,13 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ Teams 連携（実験的） ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Video size={16} className="text-slate-400" />Teams 連携（実験的）</h3>
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Video size={16} className="text-ink-mute" />Teams 連携（実験的）</h3>
+        <p className="mb-3 text-xs text-ink-mute">
           Microsoft Teams の会議/通話ウィンドウを監視して自動で記録・録音を開始します（完全オフライン・サインイン不要）。
           Teams のバージョンや表示言語によってはウィンドウ名の書式が異なり、検知精度が変わる場合があります。録音を有効にしてご利用ください。
         </p>
         <Row label="Teams を検知して自動録音">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.teamsDetectEnabled ?? false}
@@ -808,11 +808,11 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               disabled={!draft.recording.enabled}
             />
             会議/通話を検知したら記録を開始する
-            {!draft.recording.enabled && <span className="text-xs text-slate-500 dark:text-slate-400">— 先に録音を有効にしてください</span>}
+            {!draft.recording.enabled && <span className="text-xs text-ink-mute">— 先に録音を有効にしてください</span>}
           </label>
         </Row>
         <Row label="検知時の動作">
-          <div className="flex gap-4 text-sm text-slate-700 dark:text-slate-300">
+          <div className="flex gap-4 text-sm text-ink">
             {([['confirm', '通知をクリックで開始'], ['auto', '自動で即開始']] as const).map(([v, label]) => (
               <label key={v} className="inline-flex items-center gap-1.5">
                 <input
@@ -826,7 +826,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </div>
         </Row>
         <Row label="判別できないときの種別">
-          <div className="flex gap-4 text-sm text-slate-700 dark:text-slate-300">
+          <div className="flex gap-4 text-sm text-ink">
             {([['meeting', '会議'], ['call', '通話']] as const).map(([v, label]) => (
               <label key={v} className="inline-flex items-center gap-1.5">
                 <input
@@ -838,7 +838,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               </label>
             ))}
           </div>
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">種別は記録の編集で後から変更できます</span>
+          <span className="ml-2 text-xs text-ink-mute">種別は記録の編集で後から変更できます</span>
         </Row>
         <Row label="会議と判定する語">
           <input
@@ -847,7 +847,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             className={`w-full ${inputClass}`}
             placeholder="会議,ミーティング,meeting"
           />
-          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs text-ink-mute">
             Teams のウィンドウ名にこれらの語が含まれれば「会議」、なければ上の既定の種別として開始します（読点・カンマ区切り）
           </span>
         </Row>
@@ -858,7 +858,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             className={`w-full ${inputClass}`}
             placeholder="Microsoft Teams"
           />
-          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs text-ink-mute">
             この文字を含むウィンドウを Teams とみなします（部分一致）。検知されない場合は、下の一覧で実際の
             Teams ウィンドウ名を確認し、共通する語（例: 「Teams」）に変更してください
           </span>
@@ -870,8 +870,8 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ 文字起こし ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><FileText size={16} className="text-slate-400" />文字起こし (whisper.cpp ローカル)</h3>
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><FileText size={16} className="text-ink-mute" />文字起こし (whisper.cpp ローカル)</h3>
+        <p className="mb-3 text-xs text-ink-mute">
           すべてオフラインで動作します。初回のみ whisper.cpp 本体とモデルのダウンロードが必要です（下のボタンで完結します）。
         </p>
         <WhisperSetup
@@ -886,7 +886,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
         />
         <div className="mt-4 space-y-3">
           <Row label="自動文字起こし">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="inline-flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
                 checked={draft.recording.autoTranscribe}
@@ -896,7 +896,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             </label>
           </Row>
           <Row label="無音の自動カット">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="inline-flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
                 checked={draft.recording.trimSilence ?? true}
@@ -904,7 +904,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               />
               録音の前後の無音を自動でカットする
             </label>
-            <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="ml-2 text-xs text-ink-mute">
               録音終了時に先頭・末尾の無音を削除します（マーカー位置も自動で補正）
             </span>
           </Row>
@@ -927,7 +927,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               className={`w-full ${inputClass}`}
               placeholder="例: CallStack、山田太郎、御見積、リスケ"
             />
-            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            <span className="mt-1 block text-xs text-ink-mute">
               社名・人名・専門用語を読点区切りで書くと、whisper（確定版）の固有名詞の認識精度が上がります。
               ※ ライブ文字起こし（Vosk）にはこのヒントは効きません。下の「単語登録」をお使いください
             </span>
@@ -937,7 +937,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               list={draft.transcription.termReplacements ?? []}
               onChange={(termReplacements) => updateTranscription({ termReplacements })}
             />
-            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            <span className="mt-1 block text-xs text-ink-mute">
               認識結果の誤変換を「誤り → 正しい語」で自動置換します。<b>ライブ（Vosk）にも whisper の確定版にも適用</b>されます。
               ライブで専門用語が別の語に誤認識されるときは、その誤認識語を左に、正しい語を右に登録してください
               （例: 「コールスタック → CallStack」）
@@ -945,7 +945,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </Row>
         </div>
         <div className="mt-3">
-          <div className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-300">モデル</div>
+          <div className="mb-2 text-xs font-medium text-ink-mute">モデル</div>
           <ModelManager
             selected={draft.transcription.model}
             onSelect={(m: WhisperModel) => updateTranscription({ model: m })}
@@ -962,7 +962,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ 通知と確認 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Bell size={16} className="text-slate-400" />通知と確認</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Bell size={16} className="text-ink-mute" />通知と確認</h3>
         <Row label="長電話アラート（分）">
           <input
             type="number"
@@ -975,10 +975,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             }}
             className={`w-32 ${inputClass}`}
           />
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">空欄で無効化。会議は対象外です</span>
+          <span className="ml-2 text-xs text-ink-mute">空欄で無効化。会議は対象外です</span>
         </Row>
         <Row label="音声フィードバック">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.soundFeedback}
@@ -988,7 +988,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
           </label>
         </Row>
         <Row label="記録削除時の確認">
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <label className="inline-flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={draft.confirmCallDelete}
@@ -996,7 +996,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             />
             削除前に確認モーダルを表示する
           </label>
-          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+          <span className="ml-2 text-xs text-ink-mute">
             オフにすると Delete キーや削除ボタンで即削除されます
           </span>
         </Row>
@@ -1009,21 +1009,21 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               step={0.1}
               value={draft.transcriptSeekOffsetSec}
               onChange={(e) => update({ transcriptSeekOffsetSec: Math.round(Number(e.target.value) * 10) / 10 })}
-              className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              className="w-20 rounded-md border border-rule bg-surface px-2 py-1 text-sm"
             />
-            <span className="text-sm text-slate-600 dark:text-slate-400">秒前から再生（0 = クリック位置から）</span>
+            <span className="text-sm text-ink-mute">秒前から再生（0 = クリック位置から）</span>
           </div>
         </Row>
       </section>
 
       {/* ============ データ ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Database size={16} className="text-slate-400" />データのバックアップ</h3>
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+        <h3 className="mb-1 inline-flex items-center gap-2 text-base font-medium text-ink"><Database size={16} className="text-ink-mute" />データのバックアップ</h3>
+        <p className="mb-3 text-xs text-ink-mute">
           全データ (記録 + 設定) を JSON でバックアップ・復元します。録音ファイル本体は含まれません。
         </p>
         <Row label="ファイルの保存先">
-          <div className="space-y-2 text-sm text-slate-700 dark:text-slate-300">
+          <div className="space-y-2 text-sm text-ink">
             <label className="flex items-center gap-2">
               <input
                 type="radio"
@@ -1042,7 +1042,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             </label>
             {draft.saveDirMode === 'fixed' && (
               <div className="ml-6 flex flex-wrap items-center gap-2">
-                <span className="max-w-md truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
                   {draft.fixedSaveDir ?? '（未設定 — ドキュメントフォルダを使用）'}
                 </span>
                 <button
@@ -1056,14 +1056,14 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                 </button>
               </div>
             )}
-            <span className="block text-xs text-slate-500 dark:text-slate-400">
+            <span className="block text-xs text-ink-mute">
               CSV・録音・文字起こし・議事録などの保存ダイアログの既定フォルダに使われます
             </span>
           </div>
         </Row>
         <Row label="バックアップの複製先">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="max-w-md truncate rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            <span className="max-w-md truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute">
               {draft.autoBackupDir ?? '（未設定）'}
             </span>
             <button
@@ -1078,13 +1078,13 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             {draft.autoBackupDir && (
               <button
                 onClick={() => update({ autoBackupDir: null })}
-                className="text-xs text-slate-500 underline hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                className="text-xs text-ink-mute underline hover:text-ink"
               >
                 解除
               </button>
             )}
           </div>
-          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs text-ink-mute">
             日次・手動バックアップをこのフォルダにも複製します。OneDrive / Google Drive のフォルダを指定すれば実質クラウドバックアップになります
           </span>
         </Row>
@@ -1093,7 +1093,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
 
       {/* ============ バージョン情報 ============ */}
       <section className={sectionClass}>
-        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100"><Info size={16} className="text-slate-400" />バージョン情報</h3>
+        <h3 className="mb-3 inline-flex items-center gap-2 text-base font-medium text-ink"><Info size={16} className="text-ink-mute" />バージョン情報</h3>
         <AboutSection
           checkOnStartup={draft.checkUpdatesOnStartup}
           onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
@@ -1103,10 +1103,10 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
       </section>
 
       {showRecordingWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-[min(94vw,32rem)] rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
-            <h3 className="mb-2 inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><AlertTriangle size={18} className="text-amber-500" />録音に関する重要な注意</h3>
-            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700 dark:text-slate-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
+          <div className="w-[min(94vw,32rem)] rounded-lg bg-surface p-6 shadow-lg">
+            <h3 className="mb-2 inline-flex items-center gap-2 text-lg font-medium text-ink"><AlertTriangle size={18} className="text-pending" />録音に関する重要な注意</h3>
+            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-ink">
               <li>通話の録音には<strong>相手の同意が必要</strong>な場合があります（地域・業務上のルールを確認してください）</li>
               <li>録音ファイルはこの PC 内にのみ保存され、外部に送信されません</li>
               <li>機密情報を扱う際は適切なアクセス制御を行ってください</li>
@@ -1115,7 +1115,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowRecordingWarning(false)}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
               >
                 キャンセル
               </button>
@@ -1124,7 +1124,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                   updateRecording({ enabled: true });
                   setShowRecordingWarning(false);
                 }}
-                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent/90"
               >
                 同意して有効化
               </button>
@@ -1251,13 +1251,13 @@ function AboutSection({
     <div className="space-y-3">
       <Row label="バージョン">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="font-mono text-sm text-slate-800 dark:text-slate-200">
+          <span className="font-mono text-sm text-ink">
             CallStack v{info?.version ?? '…'}
           </span>
           <button
             onClick={check}
             disabled={checking}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
           >
             {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
           </button>
@@ -1265,7 +1265,7 @@ function AboutSection({
             <button
               onClick={updateNow}
               disabled={preparing}
-              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
             >
               今すぐ更新
             </button>
@@ -1273,13 +1273,13 @@ function AboutSection({
           {selfStatus.status === 'ready' && (
             <button
               onClick={applyNow}
-              className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+              className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90"
             >
               v{selfStatus.version} を適用して再起動
             </button>
           )}
           {preparing && (
-            <span className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="text-xs text-ink-mute">
               {selfStatusLabel[selfStatus.status]}
               {selfStatus.status === 'downloading' && selfStatus.pct != null && ` ${selfStatus.pct}%`}
             </span>
@@ -1287,25 +1287,25 @@ function AboutSection({
           {anyFailed && updateUrl && (
             <button
               onClick={() => void window.api.update.openReleases(updateUrl)}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
             >
               リリースページを開く
             </button>
           )}
         </div>
-        {result && <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{result}</div>}
+        {result && <div className="mt-1 text-xs text-ink-mute">{result}</div>}
         {sha256Missing && (
-          <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          <div className="mt-1 text-xs text-pending">
             配布元が混み合っていたため、ダウンロード内容の照合（SHA256）は省いて更新します（HTTPS通信のため転送中の破損は防げます）。
           </div>
         )}
         {selfStatus.status === 'error' && selfStatus.error && (
-          <div className="mt-1 text-xs text-red-600 dark:text-red-400">{selfStatus.error}</div>
+          <div className="mt-1 text-xs text-danger">{selfStatus.error}</div>
         )}
-        {applyError && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{applyError}</div>}
+        {applyError && <div className="mt-1 text-xs text-danger">{applyError}</div>}
       </Row>
       <Row label="更新の自動確認">
-        <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <label className="inline-flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
             checked={checkOnStartup}
@@ -1315,7 +1315,7 @@ function AboutSection({
         </label>
       </Row>
       <Row label="自動更新（Windows限定）">
-        <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <label className="inline-flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
             checked={autoUpdateEnabled}
@@ -1324,7 +1324,7 @@ function AboutSection({
           />
           新しい版を見つけたら、ダウンロードまで自動で済ませておく
         </label>
-        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs text-ink-mute">
           OFF でも「今すぐ更新」自体は変わらず使えます。ON にすると、通知をクリックしたときに
           待たされないよう、ダウンロード・検証・展開までを先に済ませておきます。
           実際にアプリを再起動して適用するのは、通知をクリックするか上のボタンを押したときだけです
@@ -1336,17 +1336,17 @@ function AboutSection({
           <button
             onClick={checkConnection}
             disabled={connChecking}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs font-medium text-ink hover:bg-paper disabled:opacity-50"
           >
             {connChecking ? '確認中…' : '通信を確かめる'}
           </button>
         </div>
         {connResult && (
-          <div className={`mt-1 text-xs ${connResult.ok ? 'text-slate-600 dark:text-slate-400' : 'text-red-600 dark:text-red-400'}`}>
+          <div className={`mt-1 text-xs ${connResult.ok ? 'text-ink-mute' : 'text-danger'}`}>
             {connResult.message}
           </div>
         )}
-        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs text-ink-mute">
           配布物の置き場まで実際に通信が届くかだけを確かめます（更新はしません）。
           詳しい内訳は下のログフォルダの app.log に残ります。会社のネットワークなど、
           同じ回線を多くの人が使う環境では、GitHub への問い合わせが回数の上限に達して
@@ -1357,24 +1357,24 @@ function AboutSection({
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => void window.api.app.openPath('data')}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
           >
             <FolderOpen size={12} className="mr-1 inline align-[-1px]" />データフォルダを開く
           </button>
           <button
             onClick={() => void window.api.app.openPath('recordings')}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
           >
             <Mic size={12} className="mr-1 inline align-[-1px]" />録音フォルダを開く
           </button>
           <button
             onClick={() => void window.api.app.openPath('logs')}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
           >
             <FileText size={12} className="mr-1 inline align-[-1px]" />ログフォルダを開く
           </button>
         </div>
-        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs text-ink-mute">
           不具合報告の際はログフォルダの app.log を添えていただくと調査がスムーズです
         </span>
       </Row>
@@ -1423,25 +1423,25 @@ function BackupRestoreRow() {
         <button
           onClick={backup}
           disabled={busy}
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+          className="rounded-md border border-rule bg-surface px-3 py-1.5 text-sm hover:bg-paper disabled:opacity-50"
         >
           今すぐバックアップ
         </button>
         <button
           onClick={restore}
           disabled={busy}
-          className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-700 dark:bg-slate-800 dark:hover:bg-red-950 disabled:opacity-50"
+          className="rounded-md border border-danger/40 bg-surface px-3 py-1.5 text-sm text-danger hover:bg-danger-soft disabled:opacity-50"
         >
           JSON から復元…
         </button>
       </div>
       {message && (
-        <div className="break-all rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+        <div className="break-all rounded border border-ok/30 bg-ok-soft px-2 py-1 text-xs text-ok">
           {message}
         </div>
       )}
       {error && (
-        <div className="break-all rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+        <div className="break-all rounded border border-danger/30 bg-danger-soft px-2 py-1 text-xs text-danger">
           {error}
         </div>
       )}
@@ -1462,7 +1462,7 @@ function SourceConfigRow({
 }) {
   return (
     <Row label={label}>
-      <div className={`flex flex-wrap items-center gap-4 text-sm text-slate-700 dark:text-slate-300 ${disabled ? 'opacity-50' : ''}`}>
+      <div className={`flex flex-wrap items-center gap-4 text-sm text-ink ${disabled ? 'opacity-50' : ''}`}>
         <label className="inline-flex items-center gap-1.5">
           <input
             type="checkbox"
@@ -1470,7 +1470,7 @@ function SourceConfigRow({
             onChange={(e) => onChange({ ...value, mic: e.target.checked })}
             disabled={disabled}
           />
-          <Mic size={14} className="text-slate-500" /> マイク
+          <Mic size={14} className="text-ink-mute" /> マイク
         </label>
         <label className="inline-flex items-center gap-1.5">
           <input
@@ -1479,10 +1479,10 @@ function SourceConfigRow({
             onChange={(e) => onChange({ ...value, system: e.target.checked })}
             disabled={disabled}
           />
-          <Volume2 size={14} className="text-slate-500" /> システム音声
+          <Volume2 size={14} className="text-ink-mute" /> システム音声
         </label>
         {value.system && (
-          <span className="inline-flex items-center gap-3 rounded-md bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
+          <span className="inline-flex items-center gap-3 rounded-md bg-ink/5 px-2 py-1 text-xs">
             <label className="inline-flex items-center gap-1">
               <input
                 type="radio"
@@ -1504,7 +1504,7 @@ function SourceConfigRow({
           </span>
         )}
         {!value.mic && !value.system && (
-          <span className="text-xs text-amber-600 dark:text-amber-400">両方 OFF のため録音されません</span>
+          <span className="text-xs text-pending">両方 OFF のため録音されません</span>
         )}
       </div>
     </Row>
@@ -1514,7 +1514,7 @@ function SourceConfigRow({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-start gap-4">
-      <div className="w-44 shrink-0 pt-1.5 text-sm text-slate-700 dark:text-slate-300">{label}</div>
+      <div className="w-44 shrink-0 pt-1.5 text-sm text-ink">{label}</div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );

@@ -29,20 +29,20 @@ function TranscriptionStatusBar() {
   if (!summary.running && summary.waiting === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-      <Loader2 size={13} className="animate-spin text-brand-600 dark:text-brand-300" />
+    <div className="flex items-center gap-2 text-xs text-ink-mute">
+      <Loader2 size={13} className="animate-spin text-accent-ink" />
       {summary.running ? (
         <span>
-          文字起こし中 <span className="font-semibold tabular-nums">{summary.running.percent}%</span>
+          文字起こし中 <span className="font-medium tabular-nums">{summary.running.percent}%</span>
           {summary.running.etaSec !== null && (
-            <span className="text-slate-500 dark:text-slate-400">（残り {formatEta(summary.running.etaSec)}）</span>
+            <span className="text-ink-mute">（残り {formatEta(summary.running.etaSec)}）</span>
           )}
         </span>
       ) : (
         <span>文字起こしを準備中…</span>
       )}
       {summary.waiting > 0 && (
-        <span className="text-slate-400 dark:text-slate-500">/ 待機 {summary.waiting} 件</span>
+        <span className="text-ink-mute">/ 待機 {summary.waiting} 件</span>
       )}
     </div>
   );
@@ -90,18 +90,18 @@ export function SummaryFooter({ calls }: { calls: CallRecord[] }) {
   const stats = useMemo(() => aggregate(calls), [calls]);
 
   const cell = (label: string, b: Bucket) => (
-    <div className="flex items-baseline gap-1.5 text-slate-700 dark:text-slate-300">
-      <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
-      <span className="font-semibold tabular-nums">{b.count}</span>
-      <span className="text-xs text-slate-500 dark:text-slate-400">件</span>
-      <span className="font-mono text-xs tabular-nums text-slate-600 dark:text-slate-400">
+    <div className="flex items-baseline gap-1.5 text-ink">
+      <span className="text-xs text-ink-mute">{label}</span>
+      <span className="font-medium tabular-nums">{b.count}</span>
+      <span className="text-xs text-ink-mute">件</span>
+      <span className="font-mono text-xs tabular-nums text-ink-mute">
         {b.totalSec > 0 ? formatHMShort(b.totalSec) : '—'}
       </span>
     </div>
   );
 
   return (
-    <footer className="flex flex-shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 py-2 text-sm shadow-inner dark:border-slate-800 dark:bg-slate-900">
+    <footer className="flex flex-shrink-0 items-center justify-between border-t border-rule bg-chrome px-6 py-2 text-sm">
       <div className="flex gap-6">
         {cell('今日', stats.today)}
         {cell('今週', stats.week)}

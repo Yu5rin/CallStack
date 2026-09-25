@@ -74,19 +74,19 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
   };
 
   const inputClass =
-    'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
+    'w-full rounded-md border border-rule bg-surface px-3 py-2 text-sm text-ink';
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
       onClick={() => !busy && onClose()}
     >
       <div
-        className="w-[min(94vw,38rem)] max-h-[92vh] overflow-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        className="w-[min(94vw,38rem)] max-h-[92vh] overflow-auto rounded-lg bg-surface p-6 shadow-lg text-ink"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-1 inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100"><FileAudio size={18} className="text-brand-600" />音声ファイルを取り込む</h2>
-        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        <h2 className="mb-1 inline-flex items-center gap-2 text-lg font-medium text-ink"><FileAudio size={18} className="text-accent-ink" />音声ファイルを取り込む</h2>
+        <p className="mb-4 text-xs text-ink-mute">
           録音済みの音声ファイル（会議の録音など）を通話/会議の記録として登録し、文字起こしできます。
           MP3 以外は自動で MP3 に変換されます。
         </p>
@@ -95,30 +95,30 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
           <button
             onClick={pick}
             disabled={busy}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-paper disabled:opacity-50"
           >
             <FolderOpen size={14} className="mr-1.5 inline align-[-2px]" />ファイルを選択…
           </button>
-          <span className="min-w-0 flex-1 truncate text-sm text-slate-600 dark:text-slate-300">
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-mute">
             {file ? file.name : '未選択（ドラッグ&ドロップでも取り込めます）'}
           </span>
         </div>
 
-        <div className="mb-3 flex gap-4 text-sm text-slate-700 dark:text-slate-300">
+        <div className="mb-3 flex gap-4 text-sm text-ink">
           <label className="inline-flex items-center gap-1.5">
             <input type="radio" checked={kind === 'meeting'} onChange={() => setKind('meeting')} />
-            <Users size={14} className="text-violet-500" /> 会議として取り込む
+            <Users size={14} className="text-meeting" /> 会議として取り込む
           </label>
           <label className="inline-flex items-center gap-1.5">
             <input type="radio" checked={kind === 'call'} onChange={() => setKind('call')} />
-            <Phone size={14} className="text-brand-600" /> 通話として取り込む
+            <Phone size={14} className="text-accent-ink" /> 通話として取り込む
           </label>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {kind === 'meeting' ? (
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">会議タイトル</span>
+              <span className="mb-1 block text-xs font-medium text-ink-mute">会議タイトル</span>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -128,7 +128,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
             </label>
           ) : (
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">連絡先名</span>
+              <span className="mb-1 block text-xs font-medium text-ink-mute">連絡先名</span>
               <input
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
@@ -138,7 +138,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
             </label>
           )}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">開始日時</span>
+            <span className="mb-1 block text-xs font-medium text-ink-mute">開始日時</span>
             <input
               type="datetime-local"
               step={1}
@@ -149,7 +149,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
           </label>
         </div>
 
-        <label className="mt-3 flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <label className="mt-3 flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
             checked={autoTranscribe}
@@ -159,7 +159,7 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
         </label>
 
         {error && (
-          <div className="mt-3 whitespace-pre-wrap rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+          <div className="mt-3 whitespace-pre-wrap rounded border border-danger/30 bg-danger-soft p-2 text-xs text-danger">
             {error}
           </div>
         )}
@@ -168,14 +168,14 @@ export function AudioImportDialog({ settings, initialFile, onClose, onImported }
           <button
             onClick={onClose}
             disabled={busy}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper disabled:opacity-50"
           >
             キャンセル
           </button>
           <button
             onClick={runImport}
             disabled={!file || busy}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
             {busy ? '取り込み中…（変換に少し時間がかかります）' : '取り込む'}
           </button>

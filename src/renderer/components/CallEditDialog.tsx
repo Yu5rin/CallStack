@@ -11,9 +11,9 @@ import { deleteCallWithConfirm } from '../hooks/useCalls';
 import { toUserMessage } from '../utils/errorMessage';
 
 const inputClass =
-  'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100';
+  'w-full rounded-md border border-rule bg-surface px-3 py-2 text-sm text-ink';
 const smallBtn =
-  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700';
+  'inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-paper';
 
 export function CallEditDialog({
   call,
@@ -286,13 +286,11 @@ export function CallEditDialog({
   const transcriptBusy = current.transcriptStatus === 'running' || current.transcriptStatus === 'queued';
 
   const kindToggle = (
-    <div className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold dark:border-slate-600">
+    <div className="flex overflow-hidden rounded-lg border border-rule text-xs font-medium">
       <button
         onClick={() => { setKind('call'); markDirty('kind'); }}
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
-          !isMeeting
-            ? 'bg-brand-600 text-white'
-            : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+          !isMeeting ? 'bg-accent text-on-accent' : 'bg-surface text-ink-mute hover:bg-paper'
         }`}
         title="この記録を通話として扱う"
       >
@@ -301,9 +299,7 @@ export function CallEditDialog({
       <button
         onClick={() => { setKind('meeting'); markDirty('kind'); }}
         className={`inline-flex items-center gap-1.5 px-3 py-1.5 transition ${
-          isMeeting
-            ? 'bg-violet-600 text-white'
-            : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+          isMeeting ? 'bg-accent text-on-accent' : 'bg-surface text-ink-mute hover:bg-paper'
         }`}
         title="この記録を会議として扱う"
       >
@@ -314,29 +310,29 @@ export function CallEditDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-3"
       onClick={onClose}
     >
       <div
-        className="flex h-[94vh] w-[96vw] max-w-[110rem] flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        className="flex h-[94vh] w-[96vw] max-w-[110rem] flex-col overflow-hidden rounded-lg bg-surface shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ヘッダー */}
-        <div className="flex flex-none items-center justify-between gap-3 border-b border-slate-200 px-6 py-3 dark:border-slate-800">
-          <h2 className="inline-flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
-            {isMeeting ? <Users size={18} className="text-violet-500" /> : <Phone size={18} className="text-brand-600" />}
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-rule px-6 py-3">
+          <h2 className="inline-flex items-center gap-2 text-lg font-medium text-ink">
+            {isMeeting ? <Users size={18} className="text-meeting" /> : <Phone size={18} className="text-accent-ink" />}
             {isMeeting ? '会議記録の編集' : '通話記録の編集'}
           </h2>
           <div className="flex items-center gap-3">
             {kind !== (current.kind ?? 'call') && (
-              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+              <span className="rounded-md border border-pending/30 bg-pending/10 px-2 py-1 text-xs text-pending">
                 種別を{isMeeting ? '会議' : '通話'}に変更します（保存で確定）
               </span>
             )}
             {kindToggle}
             <button
               onClick={onClose}
-              className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              className="rounded-md p-1.5 text-ink-mute hover:bg-paper hover:text-ink-mute"
               title="閉じる (Esc)"
             >
               <X size={18} />
@@ -347,7 +343,7 @@ export function CallEditDialog({
         {/* 本文 2 カラム */}
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(22rem,28rem)_1fr]">
           {/* 左: 記録情報 */}
-          <div className="min-h-0 overflow-y-auto border-b border-slate-200 px-6 py-4 lg:border-b-0 lg:border-r dark:border-slate-800">
+          <div className="min-h-0 overflow-y-auto border-b border-rule px-6 py-4 lg:border-b-0 lg:border-r">
             {isMeeting ? (
               <div className="grid grid-cols-1 gap-3">
                 <Field label="会議タイトル">
@@ -421,10 +417,10 @@ export function CallEditDialog({
                 />
               </Field>
             </div>
-            <div className="mt-2 inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <Clock3 size={14} className="text-slate-400" />
+            <div className="mt-2 inline-flex items-center gap-2 text-sm text-ink-mute">
+              <Clock3 size={14} className="text-ink-mute" />
               {isMeeting ? '会議時間' : '通話時間'}:
-              <span className="font-mono text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+              <span className="font-mono text-base font-medium tabular-nums text-ink">
                 {computedDuration !== null ? formatHMS(computedDuration) : '—'}
               </span>
             </div>
@@ -440,8 +436,8 @@ export function CallEditDialog({
                         onClick={() => { setTags(on ? tags.filter((x) => x !== t.name) : [...tags, t.name]); markDirty('tags'); }}
                         className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${
                           on
-                            ? 'text-white ring-transparent'
-                            : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:hover:bg-slate-700'
+                            ? 'text-on-accent ring-transparent'
+                            : 'bg-surface text-ink ring-rule hover:bg-paper'
                         }`}
                         style={on ? { backgroundColor: t.color } : {}}
                       >
@@ -454,7 +450,7 @@ export function CallEditDialog({
                     <button
                       key={tn}
                       onClick={() => { setTags(tags.filter((x) => x !== tn)); markDirty('tags'); }}
-                      className="rounded-full bg-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200"
+                      className="rounded-full bg-rule px-2.5 py-1 text-xs text-ink hover:bg-ink/15"
                       title="このタグを外す"
                     >
                       {tn} ×
@@ -478,20 +474,20 @@ export function CallEditDialog({
 
             {/* 保留区間 — 折りたたみ */}
             {current.holds && current.holds.length > 0 && (
-              <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                <summary className="cursor-pointer select-none text-xs font-medium text-slate-700 dark:text-slate-300">
+              <details className="mt-3 rounded-md border border-rule bg-paper px-3 py-2">
+                <summary className="cursor-pointer select-none text-xs font-medium text-ink">
                   保留区間 ({current.holds.length} 件 / 合計 {formatHMS(holdTotal)})
                 </summary>
                 <ul className="mt-2 space-y-1 text-xs">
                   {current.holds.map((h, i) => (
                     <li
                       key={i}
-                      className="flex items-center gap-3 rounded border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+                      className="flex items-center gap-3 rounded border border-rule bg-surface px-2 py-1"
                     >
-                      <span className="font-mono text-slate-600 dark:text-slate-300">{formatDateTime(h.start)}</span>
-                      <span className="text-slate-400">→</span>
-                      <span className="font-mono text-slate-600 dark:text-slate-300">{h.end ? formatDateTime(h.end) : '進行中'}</span>
-                      <span className="ml-auto font-mono text-amber-600 dark:text-amber-400">{formatHMS(h.sec)}</span>
+                      <span className="font-mono text-ink-mute">{formatDateTime(h.start)}</span>
+                      <span className="text-ink-mute">→</span>
+                      <span className="font-mono text-ink-mute">{h.end ? formatDateTime(h.end) : '進行中'}</span>
+                      <span className="ml-auto font-mono text-pending">{formatHMS(h.sec)}</span>
                     </li>
                   ))}
                 </ul>
@@ -500,9 +496,9 @@ export function CallEditDialog({
 
             {/* マーカー */}
             {(current.markers?.length ?? 0) > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-                <div className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  <Bookmark size={14} className="text-brand-600 dark:text-brand-300" />
+              <div className="mt-3 rounded-lg border border-rule bg-paper p-3">
+                <div className="mb-2 inline-flex items-center gap-1.5 text-sm font-medium text-ink">
+                  <Bookmark size={14} className="text-accent-ink" />
                   マーカー ({current.markers!.length})
                 </div>
                 <ul className="space-y-1.5">
@@ -511,7 +507,7 @@ export function CallEditDialog({
                       <button
                         onClick={() => playerRef.current?.seekTo(Math.max(0, m.at - settings.transcriptSeekOffsetSec))}
                         disabled={!audioSrc}
-                        className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs tabular-nums text-brand-700 hover:bg-brand-50 disabled:cursor-default disabled:text-slate-400 disabled:hover:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-brand-300 dark:hover:bg-brand-900/40"
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-rule bg-surface px-2 py-1 font-mono text-xs tabular-nums text-accent-ink hover:bg-accent-soft disabled:cursor-default disabled:text-ink-mute disabled:hover:bg-surface"
                         title={audioSrc ? 'クリックで該当位置を再生' : '録音がないため再生できません'}
                       >
                         <Play size={10} /> {formatHMS(m.at)}
@@ -522,11 +518,11 @@ export function CallEditDialog({
                           if (e.target.value !== (m.label ?? '')) handleMarkerLabel(i, e.target.value.trim());
                         }}
                         placeholder="ラベルを入力（例: 決定事項、宿題）"
-                        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        className="min-w-0 flex-1 rounded-md border border-rule bg-surface px-2 py-1 text-xs"
                       />
                       <button
                         onClick={() => handleMarkerDelete(i)}
-                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                        className="shrink-0 rounded p-1 text-ink-mute hover:bg-danger-soft hover:text-danger"
                         title="このマーカーを削除"
                       >
                         <X size={12} />
@@ -544,10 +540,10 @@ export function CallEditDialog({
               <>
                 <div className="flex-none">
                   <div className="mb-2 flex items-center justify-between">
-                    <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                      <Mic size={14} className="text-slate-400" />
+                    <div className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
+                      <Mic size={14} className="text-ink-mute" />
                       録音 ({current.audio?.source === 'mic+system' ? 'マイク+システム' : current.audio?.source === 'system' ? 'システム音声' : 'マイク'})
-                      <span className="ml-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                      <span className="ml-1 text-xs font-normal text-ink-mute">
                         {formatHMS(current.audio?.durationSec ?? 0)} / {((current.audio?.bytes ?? 0) / 1024 / 1024).toFixed(2)} MB
                       </span>
                     </div>
@@ -558,18 +554,18 @@ export function CallEditDialog({
                   <AudioPlayer ref={playerRef} src={audioSrc} onTimeUpdate={setPlaySec} />
                 </div>
 
-                <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-slate-200 pt-3 dark:border-slate-700">
+                <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-rule pt-3">
                   <div className="mb-2 flex flex-none flex-wrap items-center justify-between gap-2">
-                    <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                      <FileText size={14} className="text-slate-400" />
+                    <div className="inline-flex items-center gap-1.5 text-sm font-medium text-ink">
+                      <FileText size={14} className="text-ink-mute" />
                       文字起こし
                     </div>
                     <div className="flex items-center gap-2">
                       {transcribing && !transcriptBusy && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">開始しています…</span>
+                        <span className="text-xs text-ink-mute">開始しています…</span>
                       )}
                       {current.transcriptStatus === 'running' && (
-                        <span className="text-xs font-medium text-brand-600 dark:text-brand-300">
+                        <span className="text-xs font-medium text-accent-ink">
                           {transcribeProgress === null
                             ? '準備中…'
                             : transcribeProgress.stage === 'convert'
@@ -578,14 +574,14 @@ export function CallEditDialog({
                         </span>
                       )}
                       {current.transcriptStatus === 'queued' && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                        <span className="text-xs text-ink-mute">
                           待機中{queuePos && queuePos > 1 ? `（${queuePos} 番目）` : '（まもなく開始）'}
                         </span>
                       )}
                       {transcriptBusy && (
                         <button
                           onClick={handleCancelTranscribe}
-                          className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+                          className="inline-flex items-center gap-1 rounded-md border border-danger/40 bg-surface px-2 py-1 text-xs font-medium text-danger hover:bg-danger-soft"
                         >
                           <Ban size={12} /> キャンセル
                         </button>
@@ -605,7 +601,7 @@ export function CallEditDialog({
                           <select
                             value={transcribeModel}
                             onChange={(e) => setTranscribeModel(e.target.value as WhisperModel)}
-                            className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                            className="rounded-md border border-rule bg-surface px-1.5 py-1 text-xs text-ink"
                             title="文字起こしに使うモデルを選択（大きいほど高精度・低速）"
                           >
                             {WHISPER_MODELS.map((m) => (
@@ -615,7 +611,7 @@ export function CallEditDialog({
                           <button
                             onClick={handleTranscribe}
                             disabled={transcribing}
-                            className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
                           >
                             <RefreshCw size={12} />
                             {current.transcript ? '再文字起こし' : '文字起こし'}
@@ -625,20 +621,20 @@ export function CallEditDialog({
                     </div>
                   </div>
                   {(current.transcriptStatus === 'running' || current.transcriptStatus === 'queued') && (
-                    <div className="mb-2 h-1.5 w-full flex-none overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                    <div className="mb-2 h-1.5 w-full flex-none overflow-hidden rounded bg-rule">
                       <div
-                        className={`h-full bg-brand-500 transition-all ${current.transcriptStatus === 'queued' ? 'animate-pulse' : ''}`}
+                        className={`h-full bg-accent transition-all ${current.transcriptStatus === 'queued' ? 'animate-pulse' : ''}`}
                         style={{ width: `${current.transcriptStatus === 'queued' ? 100 : (transcribeProgress?.percent ?? 2)}%`, opacity: current.transcriptStatus === 'queued' ? 0.25 : 1 }}
                       />
                     </div>
                   )}
                   {current.transcriptStatus === 'error' && current.transcriptError && (
-                    <div className="mb-2 flex-none rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                    <div className="mb-2 flex-none rounded border border-danger/30 bg-danger-soft p-2 text-xs text-danger whitespace-pre-wrap">
                       {current.transcriptError}
                     </div>
                   )}
                   {transcribeError && (
-                    <div className="mb-2 flex-none rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                    <div className="mb-2 flex-none rounded border border-danger/30 bg-danger-soft p-2 text-xs text-danger whitespace-pre-wrap">
                       {transcribeError}
                     </div>
                   )}
@@ -654,19 +650,19 @@ export function CallEditDialog({
             ) : !current.endTime ? (
               /* 進行中の記録: ライブ文字起こしのフィードを表示 */
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="mb-2 flex flex-none flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  <AudioLines size={14} className="text-sky-500" />
+                <div className="mb-2 flex flex-none flex-wrap items-center gap-1.5 text-sm font-medium text-ink">
+                  <AudioLines size={14} className="text-accent-ink" />
                   ライブ文字起こし（暫定）
-                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                  <span className="text-xs font-normal text-ink-mute">
                     録音終了後に whisper が確定版を生成します
                   </span>
                 </div>
                 <div
                   ref={liveScrollRef}
-                  className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed dark:border-slate-700 dark:bg-slate-900"
+                  className="min-h-0 flex-1 overflow-y-auto rounded-md border border-rule bg-paper p-3 text-sm leading-relaxed"
                 >
                   {liveLines.length === 0 && !livePartial ? (
-                    <div className="text-xs text-slate-400 dark:text-slate-500">
+                    <div className="text-xs text-ink-mute">
                       記録中です。ライブ文字起こしが有効な場合、認識結果がここに順次表示されます。
                       <br />
                       （設定 → 文字起こし → ライブ文字起こし から有効化できます）
@@ -675,16 +671,16 @@ export function CallEditDialog({
                     <>
                       {liveLines.map((l, i) => (
                         <div key={i} className="mb-1.5 flex gap-2">
-                          <span className="flex-none pt-0.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          <span className="flex-none pt-0.5 font-mono text-[10px] text-ink-mute">
                             {formatHMS(Math.floor(l.at))}
                           </span>
-                          <span className="min-w-0 text-slate-700 dark:text-slate-200">{l.text}</span>
+                          <span className="min-w-0 text-ink">{l.text}</span>
                         </div>
                       ))}
                       {livePartial && (
                         <div className="mb-1.5 flex gap-2 opacity-60">
-                          <span className="flex-none pt-0.5 font-mono text-[10px] text-slate-400">…</span>
-                          <span className="min-w-0 text-slate-600 dark:text-slate-300">{livePartial}</span>
+                          <span className="flex-none pt-0.5 font-mono text-[10px] text-ink-mute">…</span>
+                          <span className="min-w-0 text-ink-mute">{livePartial}</span>
                         </div>
                       )}
                     </>
@@ -692,7 +688,7 @@ export function CallEditDialog({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-ink-mute">
                 <Mic size={32} strokeWidth={1.5} />
                 <div className="text-sm">この記録には録音がありません</div>
               </div>
@@ -701,19 +697,19 @@ export function CallEditDialog({
         </div>
 
         {/* フッター */}
-        <div className="flex flex-none items-center justify-between gap-3 border-t border-slate-200 px-6 py-3 dark:border-slate-800">
+        <div className="flex flex-none items-center justify-between gap-3 border-t border-rule px-6 py-3">
           <div className="flex items-center gap-2">
             <button
               onClick={handleDelete}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950"
+              className="inline-flex items-center gap-1.5 rounded-md border border-danger/40 bg-surface px-3 py-2 text-sm font-medium text-danger hover:bg-danger-soft"
             >
               <Trash2 size={14} /> 削除
             </button>
             {isMeeting && (
               <button
                 onClick={handleSaveMinutes}
-                className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300 dark:hover:bg-violet-900"
+                className="inline-flex items-center gap-1.5 rounded-md border border-meeting/30 bg-meeting/10 px-3 py-2 text-sm font-medium text-meeting hover:bg-meeting/15"
                 title="タイトル・参加者・メモ・マーカー・文字起こしをまとめた議事録を Markdown で保存"
               >
                 <FileText size={14} /> 議事録 (MD) を保存
@@ -722,9 +718,7 @@ export function CallEditDialog({
             {exportMessage && (
               <span
                 className={`max-w-md text-xs ${
-                  exportMessage.error
-                    ? 'text-red-600 dark:text-red-400'
-                    : 'truncate text-emerald-700 dark:text-emerald-300'
+                  exportMessage.error ? 'text-danger' : 'truncate text-ok'
                 }`}
                 title={exportMessage.text}
               >
@@ -734,19 +728,19 @@ export function CallEditDialog({
           </div>
           <div className="flex items-center gap-2">
             {saveError && (
-              <span className="max-w-sm text-xs text-red-600 dark:text-red-400">{saveError}</span>
+              <span className="max-w-sm text-xs text-danger">{saveError}</span>
             )}
             <button
               onClick={onClose}
               disabled={saving}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
             >
               キャンセル
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
             >
               {saving ? '保存中…' : '保存'}
             </button>
@@ -760,7 +754,7 @@ export function CallEditDialog({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-ink-mute">{label}</span>
       {children}
     </label>
   );

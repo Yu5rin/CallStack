@@ -21,7 +21,7 @@ export function highlight(text: string | null | undefined, query: string): React
     parts.push(
       <mark
         key={`m-${m.index}`}
-        className="rounded bg-yellow-200 px-0.5 text-inherit dark:bg-yellow-700/60"
+        className="rounded bg-pending/30 px-0.5 text-inherit"
       >
         {m[0]}
       </mark>,

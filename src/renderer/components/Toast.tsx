@@ -26,17 +26,14 @@ export function useToast(): ToastApi {
 }
 
 const ICONS: Record<ToastType, React.ReactNode> = {
-  success: <CircleCheck size={16} className="text-emerald-600 dark:text-emerald-400" />,
-  error: <AlertTriangle size={16} className="text-red-600 dark:text-red-400" />,
-  info: <Info size={16} className="text-slate-500 dark:text-slate-400" />,
+  success: <CircleCheck size={16} className="text-ok" />,
+  error: <AlertTriangle size={16} className="text-danger" />,
+  info: <Info size={16} className="text-ink-mute" />,
 };
 const STYLES: Record<ToastType, string> = {
-  success:
-    'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
-  error:
-    'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200',
-  info:
-    'border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100',
+  success: 'border-ok/30 bg-ok-soft text-ok',
+  error: 'border-danger/30 bg-danger-soft text-danger',
+  info: 'border-rule bg-surface text-ink',
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

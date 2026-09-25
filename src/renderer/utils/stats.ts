@@ -105,7 +105,7 @@ export function computeByTag(calls: CallRecord[], tagColors: Record<string, stri
     const keys = getRecordTags(c);
     const list = keys.length ? keys : ['（タグなし）'];
     for (const k of list) {
-      const cur = map.get(k) ?? { tag: k, totalSec: 0, count: 0, color: tagColors[k] ?? '#94a3b8' };
+      const cur = map.get(k) ?? { tag: k, totalSec: 0, count: 0, color: tagColors[k] ?? '#8A9296' };
       cur.totalSec += c.durationSec;
       cur.count += 1;
       map.set(k, cur);
