@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # タグの push では起動しない。下書きを公開するとタグが作られるため、push でも起動すると
+  # 公開直後にもう一度ビルドが走り、書き入れた変更点を仮の文で上書きしてしまう（v2.8.0〜v2.10.0 で発生）。
+  # リリースは workflow_dispatch で下書きを作り、変更点を書き入れて公開する手順に一本化する。
   workflow_dispatch:
     inputs:
       tag:

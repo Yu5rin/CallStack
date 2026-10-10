@@ -42,6 +42,8 @@ force push・履歴の書き換え（`git filter-branch` 等）・リポジト�
   - 最後に1行「インストールと更新の方法は [README](https://github.com/Yu5rin/CallStack#インストール) をご覧ください。」
   - 題名行（`# CallStack vX.Y.Z` など）は書かない。自動生成の「What's Changed」「Full Changelog」も載せない
 - リリースのタイトルはタグと同じ表記（`vX.Y.Z`）にする
+- release.yml は `workflow_dispatch` だけで起動する。タグの push を起動条件に戻さないこと
+  （下書きを公開するとタグが作られるため、公開直後にもう一度ビルドが走り、書き入れた変更点が仮の文で上書きされる）
 - 自動更新（`src/main/updates.ts`・`src/main/selfUpdate.ts`）はリリース本文を読まない。読むのは
   `releases.atom`（各 entry のリンク末尾のタグ名）と、新しい版があったときだけ `releases/latest` の
   `tag_name`・`html_url`・`assets` の `name`・`browser_download_url`・`digest`。
