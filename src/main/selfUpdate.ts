@@ -1,5 +1,5 @@
 import { app, net, session } from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 // electron のメインプロセスでは node:fs に asar 対応パッチが当たっており、
@@ -18,26 +18,28 @@ import { checkForUpdate } from './updates';
 import { planCarryOver, USER_PLACED_RESOURCE_DIRS } from './updateCarryOver';
 import { isAllowedUpdateUrl, buildDownloadUrl } from './updateCheckLogic';
 import * as updateLeftoverPolicy from './updateLeftoverPolicy';
+import { encodeApplyArg, analyzeApplyLog, isBackupDirName } from './updateApplier';
+import { notify } from './notifications';
 
 const fs = originalFs.promises;
 const { createReadStream, createWriteStream } = originalFs;
 
 /**
- * Windows 向けの自己更新（ダウンロード → SHA256検証 → 展開 → 次回起動時に
- * フォルダごと置き換え）。electron-builder の "zip" 配布（ポータブル形式、
- * インストーラ不使用）を前提にしている。
+ * Windows 向けの自己更新（ダウンロード → SHA256検証 → 展開 → 新しい版の exe 自身による入れ替え）。
+ * electron-builder の "zip" 配布（ポータブル形式、インストーラ不使用）を前提にしている。
  *
- * 実行中の exe・DLL は Windows がロックしているため直接上書きできないが、
- * リネームは可能（Chrome・VS Code 等と同じ手法）。そこで:
- *   1. 新バージョンを、インストール先フォルダの「隣」に展開しておく
- *      （同じドライブにするため rename が高速・確実になる）
- *   2. アプリ終了後、外部の PowerShell スクリプトが
- *      旧フォルダ → .old にリネーム → 新フォルダ → 元の名前にリネーム
- *      → 新 exe を起動、という順で入れ替える
- *   3. 失敗したら .old を元に戻すロールバックを行う
- *   4. 次回起動時に残っている .old を掃除する。その前に、利用者が resources\whisper に
- *      手で置いた whisper.cpp を新しいフォルダへ引き継ぐ（carryOverFromOldInstallDir）。
- *      配布 zip には README.txt しか入っていないので、これをしないと更新のたびに消える
+ * 実行中の exe・DLL は Windows がロックしているため直接上書きできない。そこで:
+ *   1. 新バージョンを、インストール先フォルダの「隣」（<親>/.callstack-update-staging）に展開しておく
+ *   2. 適用時は、展開済みの新しい CallStack.exe を「適用モード」
+ *      （--callstack-apply-update=...）で起動してアプリ自身は終了する。
+ *      適用モードの exe（updateApplier.ts）が旧プロセスの終了を待ち、インストール先の中身を
+ *      フォルダ内の退避フォルダ .callstack-old-* へ移し、新しい版の中身をコピーして入れ替える
+ *      （インストール先フォルダ自体はリネームしない）。失敗したら元に戻す
+ *   3. 次回起動時に、適用結果（update-apply.log）の確認と、退避フォルダ・ステージングの掃除を行う。
+ *      手で置いた whisper.cpp の引き継ぎは適用モード側が行う
+ *
+ * PowerShell は使わない。ウイルス対策ソフトや ASR 規則で隠しウィンドウの PowerShell が
+ * 止められる環境では、入れ替えスクリプトが 1 行も実行されず更新が黙って失敗していたため。
  *
  * 「書き込み権限が無い（例: Program Files 配下）」場合は事前チェックで
  * 検知し、自己更新を諦めて手動更新（リリースページを開く）に倒す。
@@ -71,6 +73,7 @@ function getStagingDir(): string {
   return path.join(path.dirname(getInstallDir()), '.callstack-update-staging');
 }
 
+/** 旧版（〜2.10.0 の PowerShell 方式）が作っていた、インストール先の隣の退避フォルダ */
 function getOldBackupDir(): string {
   const dir = getInstallDir();
   return `${dir}.old`;
@@ -396,54 +399,65 @@ export function hasPreparedUpdate(): boolean {
   return currentStatus === 'ready' && !!preparedStagingDir;
 }
 
-/** 入れ替えスクリプトを起動済みか（終了時の適用と「今すぐ再起動」が二重に走らないため）。 */
+/** 適用モードの exe を起動済みか（終了時の適用と「今すぐ再起動」が二重に走らないため）。 */
 let applyScriptLaunched = false;
 
 export function isApplyScriptLaunched(): boolean {
   return applyScriptLaunched;
 }
 
+function getApplyLogFile(): string {
+  return path.join(app.getPath('userData'), 'logs', 'update-apply.log');
+}
+
 /**
- * 入れ替えスクリプトを同期で書き出して起動する。書き込みと起動だけなので速く、
- * 終了処理（before-quit）の中から呼んでも終了を待たせない。
+ * 展開済みの新しい版の exe を、適用モードで起動する（アプリ自身はこの後に終了する）。
+ * 起動だけなので速く、終了処理（before-quit）の中から呼んでも終了を待たせない。
  * @param relaunch true なら入れ替え後に新しい版を起動する。false（終了時の適用）なら起動しない。
  */
-function launchApplyScript(relaunch: boolean): void {
+function launchApplier(relaunch: boolean): ChildProcess {
   if (applyScriptLaunched) {
     throw new Error('更新の適用は既に開始されています');
   }
   if (currentStatus !== 'ready' || !preparedStagingDir || !preparedVersion) {
     throw new Error('適用可能な更新の準備ができていません（再準備中、または未準備の可能性があります）');
   }
-  const installDir = getInstallDir();
   const stagingDir = preparedStagingDir;
-  const oldBackupDir = getOldBackupDir();
   const exeName = path.basename(process.execPath);
-  const pid = process.pid;
-  const scriptPath = path.join(app.getPath('temp'), `callstack-update-apply-${Date.now()}.ps1`);
-  const logFile = path.join(app.getPath('userData'), 'logs', 'update-apply.log');
+  const applierExe = path.join(stagingDir, exeName);
+  const logFile = getApplyLogFile();
+  try { originalFs.mkdirSync(path.dirname(logFile), { recursive: true }); } catch { /* 適用側でも作る */ }
 
-  const ps1 = buildUpdateScript({ installDir, stagingDir, oldBackupDir, exeName, pid, logFile, relaunch });
-  try { originalFs.mkdirSync(path.dirname(logFile), { recursive: true }); } catch { /* 無くてもスクリプト側で失敗するだけ */ }
-  originalFs.writeFileSync(scriptPath, ps1, 'utf-8');
-
-  const child = spawn(
-    'powershell.exe',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath],
-    { detached: true, stdio: 'ignore', windowsHide: true },
-  );
+  const arg = encodeApplyArg({
+    installDir: getInstallDir(), stagingDir, oldPid: process.pid,
+    relaunch, logFile, version: preparedVersion,
+  });
+  const child = spawn(applierExe, [arg], {
+    detached: true, stdio: 'ignore', windowsHide: true, cwd: stagingDir,
+  });
+  child.on('error', (err) => logInfo('selfupdate', `apply launch error: ${err.message}`));
   child.unref();
   applyScriptLaunched = true;
-  logInfo('selfupdate', `apply script launched (pid=${pid}, target v${preparedVersion}, relaunch=${relaunch})`);
+  logInfo('selfupdate', `apply launched (applier=staging exe, pid=${process.pid}, target v${preparedVersion}, relaunch=${relaunch})`);
+  return child;
 }
 
 /**
- * 準備済みの更新を適用する。PowerShell の入れ替えスクリプトを書き出して
- * 検知プロセス（このアプリ）とは別に起動し、その直後にアプリを終了する。
- * 実際のフォルダ入れ替えはアプリが完全終了した後にスクリプトが行う。
+ * 準備済みの更新を適用する。新しい版の exe を適用モードで起動し、その直後にアプリを終了する
+ * （呼び出し側）。実際の入れ替えは、アプリが完全終了した後に適用モードの exe が行う。
+ * exe を起動できなかった場合は例外にして、アプリを終了させない。
  */
 export async function applyPreparedUpdate(): Promise<void> {
-  launchApplyScript(true);
+  const child = launchApplier(true);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, 3000); // 'spawn' が来なくても待ち続けない
+    child.once('spawn', () => { clearTimeout(timer); resolve(); });
+    child.once('error', (err) => {
+      clearTimeout(timer);
+      applyScriptLaunched = false;
+      reject(new Error(`更新用のプログラムを起動できませんでした: ${err.message}`));
+    });
+  });
 }
 
 /**
@@ -453,7 +467,7 @@ export async function applyPreparedUpdate(): Promise<void> {
  */
 export function applyPreparedUpdateOnQuit(): boolean {
   try {
-    launchApplyScript(false);
+    launchApplier(false);
     return true;
   } catch (err) {
     logInfo('selfupdate', `apply on quit failed: ${(err as Error).message}`);
@@ -461,114 +475,12 @@ export function applyPreparedUpdateOnQuit(): boolean {
   }
 }
 
-function buildUpdateScript(opts: {
-  installDir: string; stagingDir: string; oldBackupDir: string; exeName: string; pid: number; logFile: string; relaunch: boolean;
-}): string {
-  const { installDir, stagingDir, oldBackupDir, exeName, pid, logFile, relaunch } = opts;
-  // PowerShell 側の文字列内に紛れ込まないよう、パスはシングルクォートでリテラル化する。
-  // シングルクォート文字列内でのエスケープは ' を '' に倍にするだけでよいが、
-  // 全角引用符の類（' ' ‚ ‛ 等）はシングルクォートとしては解釈されないため本来は
-  // エスケープ不要である。ただし将来 esc() の呼び出し方が変わっても崩れないよう、
-  // PowerShell がクォート文字として扱いうるものはまとめて倍にしておく。
-  const esc = (s: string) => s.replace(/['‘’‚‛]/g, (c) => c + c);
-  return `
-$ErrorActionPreference = 'Stop'
-$InstallDir = '${esc(installDir)}'
-$StagingDir = '${esc(stagingDir)}'
-$OldBackupDir = '${esc(oldBackupDir)}'
-$ExeName = '${esc(exeName)}'
-$ParentPid = ${pid}
-$LogFile = '${esc(logFile)}'
-$Relaunch = ${relaunch ? '$true' : '$false'}
-$MarkerFileName = '${esc(updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME)}'
-
-function Write-Log($msg) {
-  $line = "$(Get-Date -Format o) $msg"
-  Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
-}
-
-Write-Log "update apply: waiting for pid $ParentPid to exit"
-
-# 旧プロセスの終了を待つ（最大30秒）。安全のため待ちきれなくても続行はする。
-$waited = 0
-while ((Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) -and ($waited -lt 30)) {
-  Start-Sleep -Milliseconds 1000
-  $waited += 1
-}
-Start-Sleep -Milliseconds 1500
-
-# 前回の残骸があれば片付ける（使用中で消せなくても続行）
-if (Test-Path -LiteralPath $OldBackupDir) {
-  Remove-Item -LiteralPath $OldBackupDir -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-$renamedOld = $false
-$swapped = $false
-try {
-  Write-Log "renaming '$InstallDir' -> '$OldBackupDir'"
-  Rename-Item -LiteralPath $InstallDir -NewName (Split-Path -Leaf $OldBackupDir) -ErrorAction Stop
-  $renamedOld = $true
-
-  Write-Log "moving '$StagingDir' -> '$InstallDir'"
-  Move-Item -LiteralPath $StagingDir -Destination $InstallDir -ErrorAction Stop
-  $swapped = $true
-
-  # 入れ替えを最後までやり遂げた合図。次回起動時にこのマーカーが無ければ「入れ替えが
-  # 途中で終わった」とみなし、.old を消さずに残す（updateLeftoverPolicy.ts 参照）。
-  try {
-    New-Item -ItemType File -Path (Join-Path $InstallDir $MarkerFileName) -Force | Out-Null
-    Write-Log 'wrote completion marker'
-  } catch {
-    Write-Log "failed to write completion marker: $($_.Exception.Message)"
-  }
-
-  Write-Log 'swap succeeded'
-}
-catch {
-  Write-Log "ERROR during swap: $($_.Exception.Message)"
-}
-
-# スワップが失敗し、かつ旧フォルダを退避済みの場合だけロールバックする
-# （起動そのものの失敗は下のブロックで扱い、ここでは判定しない）
-if ($renamedOld -and -not $swapped) {
-  Write-Log 'rolling back: restoring original install dir'
-  try {
-    Rename-Item -LiteralPath $OldBackupDir -NewName (Split-Path -Leaf $InstallDir) -ErrorAction Stop
-    Write-Log 'rollback succeeded'
-  } catch {
-    Write-Log "ROLLBACK FAILED: $($_.Exception.Message)"
-  }
-}
-
-# 終了時の適用（再起動しない）では、入れ替え（またはロールバック）だけして終わる
-if (-not $Relaunch) {
-  Write-Log 'relaunch skipped (apply on quit)'
-  exit 0
-}
-
-# 起動はスワップ成否に関わらずベストエフォートで試みる
-# （成功時は新版、ロールバック成功時は旧版が $InstallDir に実在する）
-# 旧フォルダ(.old)の削除は次回起動時のアプリ本体に任せる（ここで長時間粘らない）
-if (Test-Path -LiteralPath (Join-Path $InstallDir $ExeName)) {
-  try {
-    Start-Process -FilePath (Join-Path $InstallDir $ExeName) -WorkingDirectory $InstallDir
-    Write-Log 'relaunched app'
-  } catch {
-    Write-Log "relaunch failed: $($_.Exception.Message)"
-  }
-} else {
-  Write-Log 'no executable found to relaunch (manual restart required)'
-}
-`.trimStart();
-}
-
 /**
  * 更新で入れ替えた旧フォルダ(.old)から、利用者が resources\whisper に手で置いた
  * whisper.cpp（exe・DLL）などを新しいフォルダへ移す。理由は updateCarryOver.ts を参照。
  *
- * 入れ替えスクリプト（PowerShell）ではなく新しい版の起動時に行うのは、スクリプトは
- * 更新「前」の版が書き出すため、そちらを直しても次の更新からしか効かないから。
- * 起動時に行えば、この修正が入る前の版（v2.7.0）からの更新でも引き継げる。
+ * 現在の方式では入れ替え（updateApplier.ts）の中で引き継ぐため、これが働くのは
+ * 旧方式（〜2.10.0 の PowerShell スクリプト）で入れ替えた直後の初回起動だけ（互換のために残している）。
  *
  * 戻り値: 引き継ぐべきものを取りこぼしていなければ true（.old を消してよい）。
  */
@@ -607,53 +519,105 @@ export async function carryOverFromOldInstallDir(): Promise<boolean> {
   return ok;
 }
 
-/**
- * 前回の更新で残った .old フォルダがあれば、起動時に片付ける（ベストエフォート）。
- *
- * 入れ替え（PowerShell スクリプト）が完了する前に電源断・強制終了が起きると、.old だけが
- * 残った状態になりうる。完了マーカー（updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME）の
- * 有無・経過時間から、消してよいかを updateLeftoverPolicy.decide に判断させる
- * （2.7.x 以前は PowerShell スクリプトを自分で書き出すがマーカーは書かないため、
- * マーカーが無くても消してよいケースがある。同モジュールのコメント参照）。
- */
-export async function cleanupOldInstallDir(): Promise<void> {
-  if (!isSelfUpdateSupported()) return;
-  const oldDir = getOldBackupDir();
-  let oldInstallDirExists = true;
-  try {
-    await fs.access(oldDir);
-  } catch {
-    oldInstallDirExists = false;
-  }
-  if (!oldInstallDirExists) return;
-
-  // 手で置いた whisper.cpp を引き継げていないうちは消さない（消すと取り戻せない）
-  if (!(await carryOverFromOldInstallDir())) {
-    logInfo('selfupdate', `keep ${oldDir}: some user-placed files could not be carried over (will retry next launch)`);
-    return;
-  }
-
-  const markerPath = path.join(getInstallDir(), updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME);
-  const markerExists = await fs.access(markerPath).then(() => true).catch(() => false);
+/** 退避フォルダ1つを、完了マーカー・経過時間の方針（updateLeftoverPolicy）に従って片付ける。 */
+async function cleanupBackupDir(dir: string, markerExists: boolean): Promise<void> {
   let backupAgeMs: number | null = null;
   let currentExeIsNewerThanBackup = false;
   try {
-    const [backupStat, exeStat] = await Promise.all([fs.stat(oldDir), fs.stat(process.execPath)]);
+    const [backupStat, exeStat] = await Promise.all([fs.stat(dir), fs.stat(process.execPath)]);
     backupAgeMs = Date.now() - backupStat.mtimeMs;
     currentExeIsNewerThanBackup = exeStat.mtimeMs >= backupStat.mtimeMs;
   } catch { /* 読めなければ null のまま（KeepBackups 側に倒れる） */ }
 
-  const action = updateLeftoverPolicy.decide({ oldInstallDirExists, markerExists, backupAgeMs, currentExeIsNewerThanBackup });
+  const action = updateLeftoverPolicy.decide({ oldInstallDirExists: true, markerExists, backupAgeMs, currentExeIsNewerThanBackup });
   if (action === 'KeepBackups') {
-    logInfo('selfupdate', `keep ${oldDir}: 入れ替えが完了したか確認できないため残す（次回また確認する）`);
+    logInfo('selfupdate', `keep ${dir}: 入れ替えが完了したか確認できないため残す（次回また確認する）`);
     return;
   }
   if (action === 'None') return;
+  await fs.rm(dir, { recursive: true, force: true })
+    .then(() => logInfo('selfupdate', `cleaned up leftover ${dir} (${action})`))
+    .catch((err) => logInfo('selfupdate', `cleanup of ${dir} failed (will retry next launch): ${(err as Error).message}`));
+}
 
-  await fs.unlink(markerPath).catch(() => {});
-  await fs.rm(oldDir, { recursive: true, force: true })
-    .then(() => logInfo('selfupdate', `cleaned up leftover ${oldDir} (${action})`))
-    .catch((err) => logInfo('selfupdate', `cleanup of ${oldDir} failed (will retry next launch): ${(err as Error).message}`));
+/**
+ * 前回の適用結果（update-apply.log）を確認し、失敗していたら app.log に要約を残して
+ * 利用者に一度だけ知らせる。適用モードの exe は画面を持たないため、失敗はここでしか伝えられない。
+ */
+async function reportLastApplyResult(): Promise<void> {
+  const logFile = getApplyLogFile();
+  let text: string;
+  try {
+    const buf = await fs.readFile(logFile);
+    text = buf.subarray(Math.max(0, buf.length - 64 * 1024)).toString('utf-8'); // 末尾だけ読む
+  } catch {
+    return; // ログが無い＝更新したことが無い
+  }
+  const summary = analyzeApplyLog(text);
+  if (summary.outcome !== 'failed' && summary.outcome !== 'incomplete') return;
+  logInfo('selfupdate', `前回の更新の適用は完了しなかった(${summary.outcome}, 開始 ${summary.startedAt ?? '不明'}): ${summary.error ?? '失敗の記録なし'} — 詳細は update-apply.log`);
+
+  // 同じ失敗を毎回知らせないよう、知らせた試行を記録しておく
+  const notifiedFile = path.join(path.dirname(logFile), 'update-apply.notified');
+  const already = await fs.readFile(notifiedFile, 'utf-8').catch(() => '');
+  if (summary.startedAt && already.trim() === summary.startedAt) return;
+  notify('更新を適用できませんでした', '更新を適用できませんでした。詳しくはログフォルダの update-apply.log をご覧ください。');
+  await fs.writeFile(notifiedFile, summary.startedAt ?? '', 'utf-8').catch(() => {});
+}
+
+/**
+ * 更新の後始末を起動時に行う（ベストエフォート）。
+ *   1. 前回の適用が失敗していたら知らせる
+ *   2. インストール先の中の退避フォルダ .callstack-old-* を、完了マーカー（callstack-update.ok）の
+ *      有無・経過時間から updateLeftoverPolicy.decide に判断させて削除する。
+ *      マーカーが無く古くもない場合は、復旧の材料として残す
+ *   3. ステージング（<親>/.callstack-update-staging）を削除する（適用モードの exe が終了済みのため）
+ *   4. 旧方式（〜2.10.0）が作っていた隣の <インストール先>.old も同じ方針で片付ける
+ */
+export async function cleanupOldInstallDir(): Promise<void> {
+  if (!isSelfUpdateSupported()) return;
+  await reportLastApplyResult().catch((err) => logInfo('selfupdate', `適用結果の確認に失敗: ${(err as Error).message}`));
+
+  const installDir = getInstallDir();
+  const markerPath = path.join(installDir, updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME);
+  const markerExists = await fs.access(markerPath).then(() => true).catch(() => false);
+
+  // 2. インストール先の中の退避フォルダ
+  const entries = await fs.readdir(installDir, { withFileTypes: true }).catch(() => []);
+  const backups = entries.filter((e) => e.isDirectory() && isBackupDirName(e.name));
+  for (const e of backups) {
+    await cleanupBackupDir(path.join(installDir, e.name), markerExists);
+  }
+
+  // 3. ステージング。準備中・準備済みのもの、いま動いている exe が入っているものは消さない
+  const stagingDir = getStagingDir();
+  const runningFromStaging = path.resolve(process.execPath).toLowerCase().startsWith(path.resolve(stagingDir).toLowerCase() + path.sep);
+  if ((currentStatus === 'idle' || currentStatus === 'error') && !runningFromStaging) {
+    const hasStaging = await fs.access(stagingDir).then(() => true).catch(() => false);
+    if (hasStaging) {
+      await fs.rm(stagingDir, { recursive: true, force: true })
+        .then(() => logInfo('selfupdate', `cleaned up staging ${stagingDir}`))
+        .catch((err) => logInfo('selfupdate', `cleanup of staging failed (will retry next launch): ${(err as Error).message}`));
+    }
+  }
+
+  // 4. 旧方式の <インストール先>.old
+  const oldDir = getOldBackupDir();
+  if (await fs.access(oldDir).then(() => true).catch(() => false)) {
+    // 手で置いた whisper.cpp を引き継げていないうちは消さない（消すと取り戻せない）
+    if (await carryOverFromOldInstallDir()) {
+      await cleanupBackupDir(oldDir, markerExists);
+    } else {
+      logInfo('selfupdate', `keep ${oldDir}: some user-placed files could not be carried over (will retry next launch)`);
+    }
+  }
+
+  // 退避フォルダがすべて片付いたら、完了マーカーも消す（次回以降のために残さない）
+  if (markerExists) {
+    const left = (await fs.readdir(installDir).catch(() => [] as string[])).some(isBackupDirName)
+      || (await fs.access(oldDir).then(() => true).catch(() => false));
+    if (!left) await fs.unlink(markerPath).catch(() => {});
+  }
 }
 
 /** 「通信を確かめる」で受け取ってみるバイト数。繋がるかどうかを見るのが目的なので、

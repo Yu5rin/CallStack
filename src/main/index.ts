@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, session, shell, powerSaveBlocker, WebContents, desktopCapturer, nativeTheme } from 'electron';
 import { promises as fs, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+// 更新の適用モードでは .asar を素のファイルとして扱う必要があるため original-fs を使う（selfUpdate.ts 参照）
+import originalFs from 'original-fs';
 import { nanoid } from 'nanoid';
 import { Store } from './store';
 import {
@@ -66,6 +69,7 @@ import {
   isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir, carryOverFromOldInstallDir,
   getSelfUpdateStatus, checkConnection, applyPreparedUpdateOnQuit, isApplyScriptLaunched, hasPreparedUpdate,
 } from './selfUpdate';
+import { parseApplyArg, runApplyUpdate, waitForPidExit, type ApplyUpdateArgs, type ApplierFs } from './updateApplier';
 import {
   canAutoApply, waitingTargetLabel, shouldApplyOnQuit, AUTO_RESTART_COUNTDOWN_SEC, AutoApplyBlockReason,
 } from './autoUpdatePolicy';
@@ -2529,7 +2533,42 @@ app.on('before-quit', () => {
   }
 });
 
-main().catch((err) => {
-  console.error('[main] fatal:', err);
-  app.exit(1);
-});
+/**
+ * 更新の適用モード（--callstack-apply-update=...）。展開済みの新しい版の exe が、旧プロセスの終了を
+ * 待ってインストール先の中身を入れ替える（updateApplier.ts）。
+ *
+ * 通常の起動とはまったく別の経路にする: 単一起動ロック（requestSingleInstanceLock）を取らない
+ * （取ると、動いている別のインスタンスに 'second-instance' を飛ばしてしまう）、store を初期化しない
+ * （data.json に触れない）、ウィンドウ・トレイ・ショートカットを作らない。終わったら app.exit する。
+ */
+async function runApplyMode(args: ApplyUpdateArgs): Promise<void> {
+  let code = 1;
+  try {
+    const result = await runApplyUpdate(args, {
+      fs: originalFs.promises as unknown as ApplierFs,
+      waitForPidExit: async (pid) => { await waitForPidExit(pid); },
+      sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+      spawnApp: (exePath, cwd) => {
+        const child = spawn(exePath, [], { detached: true, stdio: 'ignore', cwd });
+        child.on('error', () => {});
+        child.unref();
+      },
+      exeName: path.basename(process.execPath),
+    });
+    code = result.ok ? 0 : 1;
+  } catch (err) {
+    try { originalFs.appendFileSync(args.logFile, `${new Date().toISOString()} apply FAILED: 想定外のエラー: ${(err as Error).message}\n`, 'utf-8'); } catch { /* noop */ }
+  }
+  // app.quit ではなく app.exit: ウィンドウも store も無く、終了イベント経由の後片付けは不要
+  app.exit(code);
+}
+
+const applyModeArgs = parseApplyArg(process.argv);
+if (applyModeArgs) {
+  void runApplyMode(applyModeArgs);
+} else {
+  main().catch((err) => {
+    console.error('[main] fatal:', err);
+    app.exit(1);
+  });
+}

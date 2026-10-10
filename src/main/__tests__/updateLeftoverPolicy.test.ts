@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decide, COMPLETION_MARKER_FILE_NAME, STALE_BACKUP_AGE_MS } from '../updateLeftoverPolicy.ts';
 
-// 入れ替え（PowerShell スクリプト）が完了する前に電源断・強制終了が起きると、.old だけが
+// 入れ替え（新しい版の exe による適用。updateApplier.ts）が完了する前に電源断・強制終了が起きると、.old だけが
 // 残った状態になりうる。無条件に削除すると「復旧の唯一の材料」を消してしまうため、
 // 完了マーカーの有無・経過時間から安全に削除してよいかを決める。Pane の
 // UpdateLeftoverPolicyTests.cs と同じ観点を CallStack 側の名前で固定する。
