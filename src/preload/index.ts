@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, IpcRendererEvent } from 'electron';
 import type {
-  CallRecord, Settings, CsvExportOptions, AppEvent, CsvImportResult, WhisperModel, HudSize, RecordKind,
+  CallRecord, Settings, CsvExportOptions, AppEvent, SelfUpdateAutoState, CsvImportResult, WhisperModel, HudSize, RecordKind,
   AudioSourceLabel, RecordingSourceConfig, VoskLiveModel,
 } from '../shared/types';
 import type { EffectiveTheme } from '../shared/titlebarTheme';
@@ -57,6 +57,12 @@ const api = {
     applyNow: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('update:applyNow'),
     /** 自己更新の現在の進行状況 */
     selfStatus: (): Promise<{ status: string; version: string | null }> => ipcRenderer.invoke('update:selfStatus'),
+    /** 自動入れ替えの現在の状態（待機中・カウントダウン中など） */
+    autoState: (): Promise<SelfUpdateAutoState> => ipcRenderer.invoke('update:autoState'),
+    /** 予告された再起動を今すぐ行う（記録中などで適用できない場合は ok:false） */
+    restartNow: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('update:restartNow'),
+    /** 予告を取り消し、アプリを終了するときに更新する */
+    postpone: (): Promise<boolean> => ipcRenderer.invoke('update:postpone'),
     /** 配布物の置き場まで実際に接続できるか確かめる（うまく更新できないときの切り分け用） */
     checkConnection: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('update:checkConnection'),
   },

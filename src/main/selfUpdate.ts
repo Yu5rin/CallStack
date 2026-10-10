@@ -396,12 +396,22 @@ export function hasPreparedUpdate(): boolean {
   return currentStatus === 'ready' && !!preparedStagingDir;
 }
 
+/** 入れ替えスクリプトを起動済みか（終了時の適用と「今すぐ再起動」が二重に走らないため）。 */
+let applyScriptLaunched = false;
+
+export function isApplyScriptLaunched(): boolean {
+  return applyScriptLaunched;
+}
+
 /**
- * 準備済みの更新を適用する。PowerShell の入れ替えスクリプトを書き出して
- * 検知プロセス（このアプリ）とは別に起動し、その直後にアプリを終了する。
- * 実際のフォルダ入れ替えはアプリが完全終了した後にスクリプトが行う。
+ * 入れ替えスクリプトを同期で書き出して起動する。書き込みと起動だけなので速く、
+ * 終了処理（before-quit）の中から呼んでも終了を待たせない。
+ * @param relaunch true なら入れ替え後に新しい版を起動する。false（終了時の適用）なら起動しない。
  */
-export async function applyPreparedUpdate(): Promise<void> {
+function launchApplyScript(relaunch: boolean): void {
+  if (applyScriptLaunched) {
+    throw new Error('更新の適用は既に開始されています');
+  }
   if (currentStatus !== 'ready' || !preparedStagingDir || !preparedVersion) {
     throw new Error('適用可能な更新の準備ができていません（再準備中、または未準備の可能性があります）');
   }
@@ -413,9 +423,9 @@ export async function applyPreparedUpdate(): Promise<void> {
   const scriptPath = path.join(app.getPath('temp'), `callstack-update-apply-${Date.now()}.ps1`);
   const logFile = path.join(app.getPath('userData'), 'logs', 'update-apply.log');
 
-  const ps1 = buildUpdateScript({ installDir, stagingDir, oldBackupDir, exeName, pid, logFile });
-  await fs.mkdir(path.dirname(logFile), { recursive: true }).catch(() => {});
-  await fs.writeFile(scriptPath, ps1, 'utf-8');
+  const ps1 = buildUpdateScript({ installDir, stagingDir, oldBackupDir, exeName, pid, logFile, relaunch });
+  try { originalFs.mkdirSync(path.dirname(logFile), { recursive: true }); } catch { /* 無くてもスクリプト側で失敗するだけ */ }
+  originalFs.writeFileSync(scriptPath, ps1, 'utf-8');
 
   const child = spawn(
     'powershell.exe',
@@ -423,13 +433,38 @@ export async function applyPreparedUpdate(): Promise<void> {
     { detached: true, stdio: 'ignore', windowsHide: true },
   );
   child.unref();
-  logInfo('selfupdate', `apply script launched (pid=${pid}, target v${preparedVersion})`);
+  applyScriptLaunched = true;
+  logInfo('selfupdate', `apply script launched (pid=${pid}, target v${preparedVersion}, relaunch=${relaunch})`);
+}
+
+/**
+ * 準備済みの更新を適用する。PowerShell の入れ替えスクリプトを書き出して
+ * 検知プロセス（このアプリ）とは別に起動し、その直後にアプリを終了する。
+ * 実際のフォルダ入れ替えはアプリが完全終了した後にスクリプトが行う。
+ */
+export async function applyPreparedUpdate(): Promise<void> {
+  launchApplyScript(true);
+}
+
+/**
+ * 終了処理の中から呼ぶ版。入れ替えだけを行い、アプリは再起動しない
+ * （「あとで（終了時に更新）」と、自動入れ替えONで普通に終了したとき）。
+ * 失敗しても終了は妨げない。戻り値は起動できたか。
+ */
+export function applyPreparedUpdateOnQuit(): boolean {
+  try {
+    launchApplyScript(false);
+    return true;
+  } catch (err) {
+    logInfo('selfupdate', `apply on quit failed: ${(err as Error).message}`);
+    return false;
+  }
 }
 
 function buildUpdateScript(opts: {
-  installDir: string; stagingDir: string; oldBackupDir: string; exeName: string; pid: number; logFile: string;
+  installDir: string; stagingDir: string; oldBackupDir: string; exeName: string; pid: number; logFile: string; relaunch: boolean;
 }): string {
-  const { installDir, stagingDir, oldBackupDir, exeName, pid, logFile } = opts;
+  const { installDir, stagingDir, oldBackupDir, exeName, pid, logFile, relaunch } = opts;
   // PowerShell 側の文字列内に紛れ込まないよう、パスはシングルクォートでリテラル化する。
   // シングルクォート文字列内でのエスケープは ' を '' に倍にするだけでよいが、
   // 全角引用符の類（' ' ‚ ‛ 等）はシングルクォートとしては解釈されないため本来は
@@ -444,6 +479,7 @@ $OldBackupDir = '${esc(oldBackupDir)}'
 $ExeName = '${esc(exeName)}'
 $ParentPid = ${pid}
 $LogFile = '${esc(logFile)}'
+$Relaunch = ${relaunch ? '$true' : '$false'}
 $MarkerFileName = '${esc(updateLeftoverPolicy.COMPLETION_MARKER_FILE_NAME)}'
 
 function Write-Log($msg) {
@@ -502,6 +538,12 @@ if ($renamedOld -and -not $swapped) {
   } catch {
     Write-Log "ROLLBACK FAILED: $($_.Exception.Message)"
   }
+}
+
+# 終了時の適用（再起動しない）では、入れ替え（またはロールバック）だけして終わる
+if (-not $Relaunch) {
+  Write-Log 'relaunch skipped (apply on quit)'
+  exit 0
 }
 
 # 起動はスワップ成否に関わらずベストエフォートで試みる

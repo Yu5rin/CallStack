@@ -102,6 +102,54 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 自動入れ替えの予告（カウントダウン）。残り秒数は受信時刻を基準に画面側で数える。
+  const [restartNotice, setRestartNotice] = useState<{ version: string; deadline: number } | null>(null);
+  const [restartSecLeft, setRestartSecLeft] = useState(0);
+  const [restartBusy, setRestartBusy] = useState(false);
+
+  useEffect(() => {
+    window.api.update.autoState().then((st) => {
+      if (st.phase === 'countdown' && st.version && st.secondsLeft != null) {
+        setRestartNotice({ version: st.version, deadline: Date.now() + st.secondsLeft * 1000 });
+      }
+    }).catch(() => {});
+    const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type === 'selfupdate:restart-scheduled') {
+        setRestartNotice({ version: e.version, deadline: Date.now() + e.seconds * 1000 });
+      } else if (e.type === 'selfupdate:restart-cancelled') {
+        setRestartNotice(null);
+        setRestartBusy(false);
+      }
+    });
+    return () => off();
+  }, []);
+
+  useEffect(() => {
+    if (!restartNotice) return;
+    const tick = () => setRestartSecLeft(Math.max(0, Math.ceil((restartNotice.deadline - Date.now()) / 1000)));
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [restartNotice]);
+
+  const restartNow = async () => {
+    setRestartBusy(true);
+    // 入力中の編集内容を先に保存させる（編集欄は blur で保存する）。保存の送信が終わるのを少し待つ。
+    window.dispatchEvent(new Event('blur'));
+    await new Promise((r) => setTimeout(r, 150));
+    const r = await window.api.update.restartNow();
+    if (!r.ok) {
+      setRestartBusy(false);
+      toast.info(r.error ?? 'いま再起動できません');
+    }
+    // 成功時はアプリが終了する
+  };
+
+  const postponeRestart = () => {
+    void window.api.update.postpone();
+    setRestartNotice(null);
+  };
+
   /** 直近に使った種別で、既定の録音ソース設定のまま即座に記録を開始する（ショートカットと同じ挙動）。 */
   const startImmediately = (kind: RecordKind) => {
     localStorage.setItem(LAST_KIND_KEY, kind);
@@ -313,6 +361,31 @@ function AppContent() {
           </button>
         </div>
       </header>
+
+      {restartNotice && (
+        <div
+          role="status"
+          className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule bg-accent-soft px-4 py-1.5 text-[13px] text-ink"
+        >
+          <span className="min-w-0 flex-1">
+            v{restartNotice.version} に更新します。{restartSecLeft}秒後に再起動します
+          </span>
+          <button
+            onClick={() => void restartNow()}
+            disabled={restartBusy}
+            className="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
+          >
+            今すぐ再起動
+          </button>
+          <button
+            onClick={postponeRestart}
+            disabled={restartBusy}
+            className="rounded-md border border-rule bg-surface px-2.5 py-1 text-xs text-ink hover:bg-paper disabled:opacity-50"
+          >
+            あとで（終了時に更新）
+          </button>
+        </div>
+      )}
 
       {active && (
         <LiveStrip

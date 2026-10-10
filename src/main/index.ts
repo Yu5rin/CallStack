@@ -8,6 +8,7 @@ import {
   CallTranscript, WhisperModel, RecordKind, AudioSourceLabel, Marker,
   RecordingSourceConfig, VoskLiveModel, TranscriptSegment,
   getRecordTags, tagsPatch,
+  SelfUpdateAutoState,
 } from '../shared/types';
 import { registerShortcuts, unregisterAll } from './shortcuts';
 import {
@@ -63,8 +64,11 @@ import { checkForUpdate, checkOnStartup, getLastCheckAt, UpdateCheckResult } fro
 import { isAllowedUpdateUrl, buildLatestReleasePageUrl } from './updateCheckLogic';
 import {
   isSelfUpdateSupported, prepareUpdate, applyPreparedUpdate, cleanupOldInstallDir, carryOverFromOldInstallDir,
-  getSelfUpdateStatus, checkConnection,
+  getSelfUpdateStatus, checkConnection, applyPreparedUpdateOnQuit, isApplyScriptLaunched, hasPreparedUpdate,
 } from './selfUpdate';
+import {
+  canAutoApply, waitingTargetLabel, shouldApplyOnQuit, AUTO_RESTART_COUNTDOWN_SEC, AutoApplyBlockReason,
+} from './autoUpdatePolicy';
 
 registerAppProtocolPrivilege();
 
@@ -114,6 +118,9 @@ function updatePowerBlocker(): void {
     powerBlockerId = null;
     logInfo('power', 'sleep blocker OFF');
   }
+  // 記録の開始・終了、録音の保存、文字起こしの開始・終了のたびにここを通るので、
+  // 自動入れ替えの待ち・カウントダウンの判定もここで更新する（準備済みでなければ即戻る）。
+  evaluateAutoApply();
 }
 
 // ============ クラッシュ復旧用ハートビート（F15） ============
@@ -690,6 +697,12 @@ function applySettingsSideEffects(prev: Settings, next: Settings): void {
     || prev.transcription.liveEnabled !== next.transcription.liveEnabled) {
     updateLiveWindow();
   }
+  // 自動入れ替えの ON/OFF に追随（OFF なら予告を取り消し、ON なら準備済みの更新を判定し直す）
+  if (prev.autoInstallUpdates !== next.autoInstallUpdates) {
+    cancelAutoApplyCountdown(true);
+    postponedToQuit = false;
+    evaluateAutoApply();
+  }
   // Teams 検知の ON/OFF に追随
   if (prev.teamsDetectEnabled !== next.teamsDetectEnabled) {
     if (next.teamsDetectEnabled) startTeamsPolling();
@@ -858,6 +871,15 @@ function setupIpc(): void {
   });
 
   ipcMain.handle('update:applyNow', () => applyUpdateNow());
+  ipcMain.handle('update:autoState', () => getAutoUpdateState());
+  // 「今すぐ再起動」: 自動入れ替えと同じ条件（文字起こし中も含む）を満たすときだけ適用する
+  ipcMain.handle('update:restartNow', () => {
+    const gate = currentAutoApplyGate();
+    if (!gate.ok) return { ok: false, error: `${gate.message}のため、いま再起動できません。終わると自動で再起動します。` };
+    return applyUpdateNow();
+  });
+  // 「あとで（終了時に更新）」
+  ipcMain.handle('update:postpone', () => postponeAutoUpdate());
   ipcMain.handle('update:selfStatus', () => getSelfUpdateStatus());
   ipcMain.handle('update:checkConnection', () => checkConnection());
 
@@ -1063,6 +1085,7 @@ function setupIpc(): void {
   ipcMain.handle('recording:report-state', (_e, recording: boolean, paused: boolean) => {
     lastRecordingState = { recording, paused };
     broadcast('app-event', { type: 'recording:state', recording, paused });
+    evaluateAutoApply();
     return true;
   });
 
@@ -1836,6 +1859,9 @@ function buildWeeklyReport(calls: CallRecord[]): string {
  *   準備ができたことは呼び出し元が改めて通知する）。
  */
 async function prepareUpdateFlow(result: UpdateCheckResult, silent = false): Promise<void> {
+  // 新しい準備を始めるので、以前の「あとで」や予告は無効にする
+  postponedToQuit = false;
+  cancelAutoApplyCountdown(true);
   broadcast('app-event', { type: 'selfupdate:status', status: 'downloading', version: result.latest });
   const ok = await prepareUpdate(result, (s) => {
     broadcast('app-event', {
@@ -1847,13 +1873,145 @@ async function prepareUpdateFlow(result: UpdateCheckResult, silent = false): Pro
       error: s.error,
     });
   });
-  if (ok && !silent) {
+  if (!ok) return;
+  if (isAutoInstallActive()) {
+    // 自動入れ替えONなら、準備ができたことの通知ではなく待ち・予告の判定へ進む
+    evaluateAutoApply();
+  } else if (!silent) {
     notify(
       `v${result.latest} への更新の準備ができました`,
       'クリックで再起動して適用します',
       () => { void offerApplyUpdate(result.latest ?? ''); },
     );
   }
+}
+
+// ============ 自動入れ替え（準備ができたら、確認なしで再起動して入れ替える） ============
+// 流れ: 準備完了 → 記録・録音の保存・文字起こしが終わるのを待つ → 30秒の予告（取り消せる）
+//       → 再起動して入れ替え。「あとで」を選ぶと、終了するときに入れ替える（再起動はしない）。
+
+/** 自動入れ替えが有効か（自己更新に対応した環境で、設定がONのとき）。 */
+function isAutoInstallActive(): boolean {
+  return isSelfUpdateSupported() && store.getSettings().autoInstallUpdates !== false;
+}
+
+/** 「あとで（終了時に更新）」を選んだ。準備済みの更新を終了時に入れ替える。 */
+let postponedToQuit = false;
+/** 更新の適用を開始した（再起動するための終了。終了時の適用をもう一度走らせない）。 */
+let updateApplying = false;
+let countdownTimer: NodeJS.Timeout | null = null;
+let countdownVersion: string | null = null;
+let countdownDeadline = 0;
+/** 待ちの状態を定期的に見直すタイマー（イベントの取りこぼし対策。30秒おき）。 */
+let waitPollTimer: NodeJS.Timeout | null = null;
+let waitingReason: AutoApplyBlockReason | null = null;
+
+function currentAutoApplyGate() {
+  return canAutoApply({
+    activeCall: !!getActive(),
+    recording: lastRecordingState.recording,
+    finalizing: finalizingCount > 0,
+    transcriptionBusy: transcriptionQueueLength() > 0,
+  });
+}
+
+function setWaiting(version: string, reason: AutoApplyBlockReason | null): void {
+  if (reason === waitingReason) return;
+  waitingReason = reason;
+  if (reason) {
+    // 理由が変わったときだけ1回ログに残す（30秒ごとの見直しで同じ行が増えないように）
+    logInfo('selfupdate', `v${version} の準備ができたが、${waitingTargetLabel(reason)}が終わるまで再起動を待つ（理由: ${reason}）`);
+  }
+  broadcast('app-event', { type: 'selfupdate:waiting', version, reason });
+}
+
+/** 予告（カウントダウン）を取り消す。broadcastCancel=false は何も予告していないときの空打ち用。 */
+function cancelAutoApplyCountdown(broadcastCancel: boolean): void {
+  if (countdownTimer === null) return;
+  clearTimeout(countdownTimer);
+  countdownTimer = null;
+  countdownVersion = null;
+  logInfo('selfupdate', '再起動の予告を取り消した');
+  if (broadcastCancel) broadcast('app-event', { type: 'selfupdate:restart-cancelled' });
+}
+
+function startAutoApplyCountdown(version: string): void {
+  countdownVersion = version;
+  countdownDeadline = Date.now() + AUTO_RESTART_COUNTDOWN_SEC * 1000;
+  logInfo('selfupdate', `v${version} への更新: ${AUTO_RESTART_COUNTDOWN_SEC}秒後に再起動する`);
+  broadcast('app-event', { type: 'selfupdate:restart-scheduled', version, seconds: AUTO_RESTART_COUNTDOWN_SEC });
+  notify(
+    `v${version} に更新します`,
+    `${AUTO_RESTART_COUNTDOWN_SEC}秒後に再起動します。あとにする場合はウィンドウのお知らせから選べます`,
+    () => showMainWindow(),
+  );
+  countdownTimer = setTimeout(() => {
+    countdownTimer = null;
+    countdownVersion = null;
+    // 満了の瞬間にもう一度確認する（予告中に条件が変わっていたら取り消して待ちに戻る）
+    const gate = currentAutoApplyGate();
+    if (!gate.ok) {
+      broadcast('app-event', { type: 'selfupdate:restart-cancelled' });
+      evaluateAutoApply();
+      return;
+    }
+    void applyUpdateNow().then((r) => {
+      if (!r.ok) {
+        logInfo('selfupdate', `自動入れ替えに失敗: ${r.error ?? ''}`);
+        broadcast('app-event', { type: 'selfupdate:restart-cancelled' });
+      }
+    });
+  }, AUTO_RESTART_COUNTDOWN_SEC * 1000);
+}
+
+/**
+ * 自動入れ替えの状態を見直す。準備ができたとき・記録や文字起こしの状態が変わったとき・
+ * 30秒おきに呼ばれる。準備済みの更新が無い、OFF、「あとで」選択済み、適用中なら何もしない。
+ */
+function evaluateAutoApply(): void {
+  if (updateApplying) return;
+  const self = getSelfUpdateStatus();
+  const active = isAutoInstallActive() && !postponedToQuit && self.status === 'ready' && !!self.version;
+  if (!active) {
+    cancelAutoApplyCountdown(true);
+    if (waitPollTimer !== null) { clearInterval(waitPollTimer); waitPollTimer = null; }
+    if (waitingReason !== null) { waitingReason = null; broadcast('app-event', { type: 'selfupdate:waiting', version: self.version ?? '', reason: null }); }
+    return;
+  }
+  const version = self.version!;
+  if (waitPollTimer === null) waitPollTimer = setInterval(evaluateAutoApply, 30_000);
+
+  const gate = currentAutoApplyGate();
+  if (!gate.ok) {
+    // 予告中に記録が始まった等: 取り消して待ちに戻る
+    cancelAutoApplyCountdown(true);
+    setWaiting(version, gate.reason);
+    return;
+  }
+  setWaiting(version, null);
+  if (countdownTimer === null) startAutoApplyCountdown(version);
+}
+
+/** 「あとで（終了時に更新）」: 予告を取り消し、終了するときに入れ替える。 */
+function postponeAutoUpdate(): boolean {
+  postponedToQuit = true;
+  cancelAutoApplyCountdown(true);
+  if (waitPollTimer !== null) { clearInterval(waitPollTimer); waitPollTimer = null; }
+  logInfo('selfupdate', '「あとで」が選ばれた: アプリの終了時に更新する');
+  broadcast('app-event', { type: 'selfupdate:waiting', version: getSelfUpdateStatus().version ?? '', reason: null });
+  return true;
+}
+
+/** 画面を開いた時点の状態（バナー・設定画面の復元用）。 */
+function getAutoUpdateState(): SelfUpdateAutoState {
+  const version = getSelfUpdateStatus().version;
+  if (countdownTimer !== null) {
+    return { phase: 'countdown', version: countdownVersion, reason: null,
+      secondsLeft: Math.max(0, Math.ceil((countdownDeadline - Date.now()) / 1000)) };
+  }
+  if (postponedToQuit && hasPreparedUpdate()) return { phase: 'postponed', version, reason: null, secondsLeft: null };
+  if (waitingReason !== null) return { phase: 'waiting', version, reason: waitingReason, secondsLeft: null };
+  return { phase: 'idle', version, reason: null, secondsLeft: null };
 }
 
 /**
@@ -1889,7 +2047,12 @@ let lastNotifiedUpdateVersion: string | null = null;
  * 起動時のチェックと、常駐中の定期的な再チェック（24時間おき）の両方から呼ぶ。
  */
 async function handleUpdateAvailable(result: UpdateCheckResult): Promise<void> {
-  if (!result.latest || result.latest === lastNotifiedUpdateVersion) return;
+  if (!result.latest) return;
+  if (result.latest === lastNotifiedUpdateVersion) {
+    // 自動入れ替えONでは、前回の準備が失敗して止まっているときだけ再チェックのたびにやり直す
+    const st = getSelfUpdateStatus().status;
+    if (!(isAutoInstallActive() && (st === 'error' || st === 'idle'))) return;
+  }
   lastNotifiedUpdateVersion = result.latest;
 
   // リリースページの URL は配布元の応答（html_url）から来るため、使う前に検証する。
@@ -1903,6 +2066,13 @@ async function handleUpdateAvailable(result: UpdateCheckResult): Promise<void> {
       `現在 v${result.current} — クリックでダウンロードページを開く`,
       () => { void shell.openExternal(releaseUrl); },
     );
+    return;
+  }
+
+  if (isAutoInstallActive()) {
+    // 自動入れ替え: 通知はせず、すぐ準備を始める。準備ができたら待ち・予告（30秒）へ進み、
+    // 通知は予告の開始時にだけ出す（evaluateAutoApply → startAutoApplyCountdown）。
+    void prepareUpdateFlow(result, true);
     return;
   }
 
@@ -1957,7 +2127,12 @@ async function applyUpdateNow(): Promise<{ ok: boolean; error?: string }> {
     return { ok: false, error: (err as Error).message };
   }
   logInfo('app', 'applying self-update — quitting');
+  updateApplying = true;
+  cancelAutoApplyCountdown(false);
+  if (waitPollTimer !== null) { clearInterval(waitPollTimer); waitPollTimer = null; }
   markForceQuit();
+  // app.exit ではなく app.quit を使う: before-quit で store.flushSync() が走り、
+  // 各ウィンドウの close/beforeunload でレンダラの自動保存も走る。
   app.quit();
   return { ok: true };
 }
@@ -2339,6 +2514,19 @@ app.on('before-quit', () => {
   // 記録中に終了する場合は、次回起動時に終了時刻として使えるよう最終時刻を残す（F15）
   const active = getActive();
   if (active) writeHeartbeat(active.id);
+
+  // 準備済みの更新があれば、終了時に入れ替える（再起動はしない）。書き出しと起動だけで
+  // 終了は待たせない。更新のための終了（applyUpdateNow）ではスクリプトを起動済みなので除く。
+  // 記録中・録音の保存中は終了が中断されうる（確認ダイアログ）ため見送り、次の終了時に回す。
+  if (shouldApplyOnQuit({
+    hasPreparedUpdate: hasPreparedUpdate(),
+    autoInstallActive: isAutoInstallActive(),
+    postponed: postponedToQuit,
+    alreadyApplying: updateApplying || isApplyScriptLaunched(),
+    quietNow: !active && !lastRecordingState.recording && finalizingCount === 0,
+  })) {
+    if (applyPreparedUpdateOnQuit()) updateApplying = true;
+  }
 });
 
 main().catch((err) => {

@@ -597,11 +597,15 @@ function UpdateVersionSection({
   onToggleCheckOnStartup,
   autoUpdateEnabled,
   onToggleAutoUpdate,
+  autoInstallUpdates,
+  onToggleAutoInstall,
 }: {
   checkOnStartup: boolean;
   onToggleCheckOnStartup: (v: boolean) => void;
   autoUpdateEnabled: boolean;
   onToggleAutoUpdate: (v: boolean) => void;
+  autoInstallUpdates: boolean;
+  onToggleAutoInstall: (v: boolean) => void;
 }) {
   const [info, setInfo] = useState<{ version: string; logPath: string; dataDir: string } | null>(null);
   const [checking, setChecking] = useState(false);
@@ -613,6 +617,13 @@ function UpdateVersionSection({
   // 自己更新（ダウンロード→検証→展開→適用）の進行状況
   const [selfStatus, setSelfStatus] = useState<{ status: string; version?: string; pct?: number | null; error?: string }>({ status: 'idle' });
   const [applyError, setApplyError] = useState<string | null>(null);
+  // 自動入れ替えの待ち・予告の状態（記録中は待つ／30秒の予告中）
+  const [autoPhase, setAutoPhase] = useState<{
+    phase: 'idle' | 'waiting' | 'countdown' | 'postponed';
+    reason: 'call' | 'recording' | 'finalizing' | 'transcription' | null;
+    deadline?: number;
+  }>({ phase: 'idle', reason: null });
+  const [autoSecLeft, setAutoSecLeft] = useState(0);
   const [connChecking, setConnChecking] = useState(false);
   const [connResult, setConnResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -620,13 +631,43 @@ function UpdateVersionSection({
     window.api.app.info().then(setInfo).catch(() => {});
     // 画面を開き直した場合に、進行中/準備済みの更新状態を復元する
     window.api.update.selfStatus().then((s) => setSelfStatus({ status: s.status, version: s.version ?? undefined })).catch(() => {});
+    window.api.update.autoState().then((st) => {
+      setAutoPhase({
+        phase: st.phase,
+        reason: st.reason,
+        deadline: st.secondsLeft != null ? Date.now() + st.secondsLeft * 1000 : undefined,
+      });
+    }).catch(() => {});
     const off = window.api.onEvent((e: AppEvent) => {
+      if (e.type === 'selfupdate:restart-scheduled') {
+        setAutoPhase({ phase: 'countdown', reason: null, deadline: Date.now() + e.seconds * 1000 });
+        return;
+      }
+      if (e.type === 'selfupdate:restart-cancelled') {
+        setAutoPhase((p) => (p.phase === 'countdown' ? { phase: 'idle', reason: null } : p));
+        return;
+      }
+      if (e.type === 'selfupdate:waiting') {
+        setAutoPhase((p) => (e.reason
+          ? { phase: 'waiting', reason: e.reason }
+          : p.phase === 'waiting' ? { phase: 'idle', reason: null } : p));
+        return;
+      }
       if (e.type !== 'selfupdate:status') return;
       const pct = e.totalBytes ? Math.round(((e.receivedBytes ?? 0) / e.totalBytes) * 100) : null;
       setSelfStatus({ status: e.status, version: e.version, pct, error: e.error ? toUserMessage(e.error, '更新に失敗しました') : e.error });
     });
     return () => off();
   }, []);
+
+  useEffect(() => {
+    if (autoPhase.phase !== 'countdown' || !autoPhase.deadline) return;
+    const deadline = autoPhase.deadline;
+    const tick = () => setAutoSecLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [autoPhase]);
 
   const check = async () => {
     setChecking(true);
@@ -716,7 +757,7 @@ function UpdateVersionSection({
         >
           {checking ? '確認中…' : <><RefreshCw size={12} className="mr-1 inline align-[-1px]" />更新を確認</>}
         </button>
-        {latestCheck?.hasUpdate && selfStatus.status !== 'ready' && (
+        {latestCheck?.hasUpdate && selfStatus.status !== 'ready' && !(autoInstallUpdates && preparing) && (
           <button
             onClick={updateNow}
             disabled={preparing}
@@ -754,6 +795,21 @@ function UpdateVersionSection({
           配布元が混み合っていたため、ダウンロード内容の照合（SHA256）は省いて更新します（HTTPS通信のため転送中の破損は防げます）。
         </div>
       )}
+      {selfStatus.status === 'ready' && autoInstallUpdates && autoPhase.phase === 'waiting' && (
+        <div className="text-xs text-ink-mute">
+          v{selfStatus.version} の準備ができました。{autoPhase.reason === 'transcription' ? '文字起こし' : '記録'}が終わったら自動で再起動します
+        </div>
+      )}
+      {selfStatus.status === 'ready' && autoInstallUpdates && autoPhase.phase === 'countdown' && (
+        <div className="text-xs text-ink">
+          v{selfStatus.version} に更新します。{autoSecLeft}秒後に再起動します（メイン画面上部のお知らせから「あとで」を選べます）
+        </div>
+      )}
+      {selfStatus.status === 'ready' && autoPhase.phase === 'postponed' && (
+        <div className="text-xs text-ink-mute">
+          v{selfStatus.version} は、アプリを終了するときに更新します
+        </div>
+      )}
       {selfStatus.status === 'error' && selfStatus.error && (
         <div className="text-xs text-danger">{selfStatus.error}</div>
       )}
@@ -786,16 +842,27 @@ function UpdateVersionSection({
       </div>
       <div>
         <div className="flex items-center gap-2 text-sm text-ink">
-          <Switch id="swAutoUpdate" checked={autoUpdateEnabled} disabled={!checkOnStartup} onChange={onToggleAutoUpdate} />
-          <label htmlFor="swAutoUpdate" className="cursor-pointer">新しい版を見つけたら、ダウンロードまで自動で済ませておく</label>
+          <Switch id="swAutoInstall" checked={autoInstallUpdates} disabled={!checkOnStartup} onChange={onToggleAutoInstall} />
+          <label htmlFor="swAutoInstall" className="cursor-pointer">新しい版を自動で入れ替える</label>
         </div>
         <p className="mt-1 text-xs text-ink-mute">
-          OFF でも「今すぐ更新」自体は変わらず使えます。ON にすると、通知をクリックしたときに
-          待たされないよう、ダウンロード・検証・展開までを先に済ませておきます。
-          実際にアプリを再起動して適用するのは、通知をクリックするか上のボタンを押したときだけです
-          （記録中は適用されません）。
+          新しい版が見つかると、ダウンロードと確認のあと自動で再起動して入れ替えます。記録中・文字起こし中は終わるまで待ちます
         </p>
       </div>
+      {!autoInstallUpdates && (
+        <div>
+          <div className="flex items-center gap-2 text-sm text-ink">
+            <Switch id="swAutoUpdate" checked={autoUpdateEnabled} disabled={!checkOnStartup} onChange={onToggleAutoUpdate} />
+            <label htmlFor="swAutoUpdate" className="cursor-pointer">新しい版を見つけたら、ダウンロードまで自動で済ませておく</label>
+          </div>
+          <p className="mt-1 text-xs text-ink-mute">
+            OFF でも「今すぐ更新」自体は変わらず使えます。ON にすると、通知をクリックしたときに
+            待たされないよう、ダウンロード・検証・展開までを先に済ませておきます。
+            実際にアプリを再起動して適用するのは、通知をクリックするか上のボタンを押したときだけです
+            （記録中は適用されません）。
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1773,7 +1840,7 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               id: 'updateVersion',
               label: 'バージョン情報と更新',
               description: '更新の確認・自動更新の設定・通信の診断',
-              keywords: ['更新', 'バージョン', '通信を確かめる', 'アップデート'],
+              keywords: ['更新', 'バージョン', '通信を確かめる', 'アップデート', '自動で入れ替える', '再起動'],
               full: true,
               render: () => (
                 <UpdateVersionSection
@@ -1781,6 +1848,8 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
                   onToggleCheckOnStartup={(v) => update({ checkUpdatesOnStartup: v })}
                   autoUpdateEnabled={draft.autoUpdateEnabled ?? false}
                   onToggleAutoUpdate={(v) => update({ autoUpdateEnabled: v })}
+                  autoInstallUpdates={draft.autoInstallUpdates !== false}
+                  onToggleAutoInstall={(v) => update({ autoInstallUpdates: v })}
                 />
               ),
             },

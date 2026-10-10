@@ -187,6 +187,13 @@ export interface Settings {
    * （更新できるかどうかはこのトグルに左右されない。opt-in はダウンロードのタイミングのみ）。
    */
   autoUpdateEnabled?: boolean;
+  /**
+   * 新しい版が準備できたら、ユーザー操作なしで自動的に再起動して入れ替える（Windows限定。既定ON）。
+   * ON のあいだは、見つけた版を autoUpdateEnabled に関係なく自動でダウンロード・検証・展開する。
+   * 記録中・録音の保存中・文字起こし中は終わるまで待ち、再起動の30秒前に知らせる。
+   * OFF なら従来どおり（通知＋「今すぐ更新」）。
+   */
+  autoInstallUpdates: boolean;
   /** 初回セットアップウィザードを完了したか */
   onboardingDone: boolean;
   confirmCallDelete: boolean;
@@ -324,6 +331,27 @@ export type SelfUpdateStatusEvent = {
   error?: string;
 };
 
+/** 自動入れ替えの再起動を予告する（カウントダウン開始）。seconds 秒後に再起動する。 */
+export type SelfUpdateRestartScheduledEvent = { type: 'selfupdate:restart-scheduled'; version: string; seconds: number };
+/** 予告した再起動を取り消した（記録の開始・文字起こしの開始・「あとで」など）。 */
+export type SelfUpdateRestartCancelledEvent = { type: 'selfupdate:restart-cancelled' };
+/**
+ * 準備はできたが、記録・文字起こしが終わるのを待っている。reason が null なら待ちが解けた
+ * （カウントダウンへ進む、または適用済み・取り消し）。
+ */
+export type SelfUpdateWaitingEvent = {
+  type: 'selfupdate:waiting';
+  version: string;
+  reason: 'call' | 'recording' | 'finalizing' | 'transcription' | null;
+};
+/** 自動入れ替えの現在の状態（画面を開いた時点の復元用） */
+export interface SelfUpdateAutoState {
+  phase: 'idle' | 'waiting' | 'countdown' | 'postponed';
+  version: string | null;
+  reason: 'call' | 'recording' | 'finalizing' | 'transcription' | null;
+  secondsLeft: number | null;
+}
+
 export type NavigateEvent = { type: 'navigate'; page: 'list' | 'stats' | 'settings' };
 /** 指定した記録の編集ダイアログを開く（HUD の編集ボタンなどから） */
 export type EditRecordEvent = { type: 'edit:record'; callId: string };
@@ -352,6 +380,9 @@ export type AppEvent =
   | HudHoverEvent
   | ModelDownloadEvent
   | SelfUpdateStatusEvent
+  | SelfUpdateRestartScheduledEvent
+  | SelfUpdateRestartCancelledEvent
+  | SelfUpdateWaitingEvent
   | WhisperBinDownloadEvent
   | NavigateEvent
   | EditRecordEvent
@@ -417,6 +448,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
   checkUpdatesOnStartup: true,
   autoUpdateEnabled: false,
+  autoInstallUpdates: true,
   onboardingDone: false,
   confirmCallDelete: true,
   theme: 'system',
