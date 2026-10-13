@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   runApplyUpdate, encodeApplyArg, parseApplyArg, analyzeApplyLog, waitForPidExit,
-  isBackupDirName, type ApplierFs, type ApplyUpdateArgs,
+  isBackupDirName, isPreservedEntryName, type ApplierFs, type ApplyUpdateArgs,
 } from '../updateApplier.ts';
 
 // 自動更新の入れ替え(新しい版の exe 自身が行う)を、実ファイルシステムの一時フォルダで検証する。
@@ -252,4 +252,100 @@ test('analyzeApplyLog: 最後の試行だけを見る。開始のみなら incom
   const f = analyzeApplyLog(`${t} apply start: v1\n${t} apply FAILED: EBUSY x\n`);
   assert.equal(f.outcome, 'failed');
   assert.equal(f.startedAt, t);
+});
+
+// ---- データフォルダ（exe の隣の data）は入れ替えで絶対に動かさない ----
+
+const DATA_JSON = '{"version":1,"calls":[{"id":"a"}],"settings":{}}';
+const APP_LOG = '2026-10-10T00:00:00.000Z [app] hello\n';
+
+async function putData(installDir: string): Promise<void> {
+  await write(path.join(installDir, 'data', 'data.json'), DATA_JSON);
+  await write(path.join(installDir, 'data', 'logs', 'app.log'), APP_LOG);
+  await write(path.join(installDir, 'data', 'recordings', 'x.mp3'), 'mp3-bytes');
+}
+
+async function assertDataIntact(installDir: string): Promise<void> {
+  assert.equal(await nodeFs.readFile(path.join(installDir, 'data', 'data.json'), 'utf-8'), DATA_JSON);
+  assert.equal(await nodeFs.readFile(path.join(installDir, 'data', 'logs', 'app.log'), 'utf-8'), APP_LOG);
+  assert.equal(await nodeFs.readFile(path.join(installDir, 'data', 'recordings', 'x.mp3'), 'utf-8'), 'mp3-bytes');
+  assert.deepEqual(await listFiles(path.join(installDir, 'data')), ['data.json', 'logs/app.log', 'recordings/x.mp3']);
+}
+
+test('データ保護: 入れ替えに成功しても data は元の場所に同じ中身で残り、退避フォルダに入らない', async () => {
+  const { root, installDir, args } = await setup();
+  try {
+    await putData(installDir);
+    const res = await runApplyUpdate(args, makeDeps(nodeFs));
+    assert.equal(res.ok, true);
+    await assertDataIntact(installDir);
+    assert.equal(await nodeFs.readFile(path.join(installDir, 'CallStack.exe'), 'utf-8'), 'new-exe');
+    const backups = (await nodeFs.readdir(installDir)).filter(isBackupDirName);
+    assert.equal(backups.length, 1);
+    assert.equal((await nodeFs.readdir(path.join(installDir, backups[0]))).includes('data'), false);
+  } finally {
+    await nodeFs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('データ保護: ロールバックしても data は同じ中身で残る', async () => {
+  const { root, installDir, args } = await setup();
+  try {
+    await putData(installDir);
+    const failingFs: ApplierFs = {
+      ...nodeFs,
+      copyFile: async (src, dst, ...rest) => {
+        if (String(src).endsWith('app.asar')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+        return (nodeFs.copyFile as (...a: unknown[]) => Promise<void>)(src, dst, ...rest);
+      },
+    };
+    const res = await runApplyUpdate(args, makeDeps(failingFs));
+    assert.equal(res.ok, false);
+    assert.equal(res.rolledBack, true);
+    await assertDataIntact(installDir);
+    assert.equal(await nodeFs.readFile(path.join(installDir, 'CallStack.exe'), 'utf-8'), 'old-exe');
+  } finally {
+    await nodeFs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('データ保護: ステージングに（想定外に）data があっても上書きしない', async () => {
+  const { root, installDir, stagingDir, args } = await setup();
+  try {
+    await putData(installDir);
+    await write(path.join(stagingDir, 'data', 'data.json'), '{"calls":[]}');
+    await write(path.join(stagingDir, 'data', 'extra.txt'), 'should-not-appear');
+    const res = await runApplyUpdate(args, makeDeps(nodeFs));
+    assert.equal(res.ok, true);
+    await assertDataIntact(installDir);
+  } finally {
+    await nodeFs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('データ保護: ステージングに data があっても、ロールバックで消えない', async () => {
+  const { root, installDir, stagingDir, args } = await setup();
+  try {
+    await putData(installDir);
+    await write(path.join(stagingDir, 'data', 'data.json'), '{"calls":[]}');
+    const failingFs: ApplierFs = {
+      ...nodeFs,
+      copyFile: async (src, dst, ...rest) => {
+        if (String(src).endsWith('app.asar')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+        return (nodeFs.copyFile as (...a: unknown[]) => Promise<void>)(src, dst, ...rest);
+      },
+    };
+    const res = await runApplyUpdate(args, makeDeps(failingFs));
+    assert.equal(res.rolledBack, true);
+    await assertDataIntact(installDir);
+  } finally {
+    await nodeFs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('isPreservedEntryName: data だけ（大文字小文字は区別しない）', () => {
+  assert.equal(isPreservedEntryName('data'), true);
+  assert.equal(isPreservedEntryName('Data'), true);
+  assert.equal(isPreservedEntryName('data.json'), false);
+  assert.equal(isPreservedEntryName('resources'), false);
 });

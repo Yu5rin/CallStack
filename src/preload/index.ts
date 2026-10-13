@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, IpcRendererEvent } from 'electron';
 import type {
   CallRecord, Settings, CsvExportOptions, AppEvent, SelfUpdateAutoState, CsvImportResult, WhisperModel, HudSize, RecordKind,
-  AudioSourceLabel, RecordingSourceConfig, VoskLiveModel,
+  AudioSourceLabel, RecordingSourceConfig, VoskLiveModel, AppInfo,
 } from '../shared/types';
 import type { EffectiveTheme } from '../shared/titlebarTheme';
 
@@ -37,7 +37,7 @@ const api = {
       ipcRenderer.invoke('calls:add-marker', callId, label),
   },
   app: {
-    info: (): Promise<{ version: string; logPath: string; dataDir: string }> =>
+    info: (): Promise<AppInfo> =>
       ipcRenderer.invoke('app:info'),
     openPath: (target: 'logs' | 'data' | 'recordings'): Promise<boolean> =>
       ipcRenderer.invoke('app:open-path', target),

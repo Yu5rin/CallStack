@@ -56,6 +56,7 @@ import { downloadModel, isModelDownloaded, getModelPath } from './whisperModels'
 import { scheduleDailyCleanup, stopDailyCleanup, cleanupExpiredRecordings } from './retention';
 import { localDate } from './localTime';
 import { getLogPath, logInfo } from './log';
+import { initDataLocation, getDataLocationInfo, migrateToDataLocation } from './dataLocationRunner';
 import { migrateLegacyUserData } from './legacyDataMigrationRunner';
 import { downloadWhisperBinary, isBinaryInstalled } from './whisperBinary';
 import {
@@ -73,6 +74,12 @@ import { parseApplyArg, runApplyUpdate, waitForPidExit, type ApplyUpdateArgs, ty
 import {
   canAutoApply, waitingTargetLabel, shouldApplyOnQuit, AUTO_RESTART_COUNTDOWN_SEC, AutoApplyBlockReason,
 } from './autoUpdatePolicy';
+
+// データフォルダ（userData / sessionData）の決定。store・ログ・単一起動ロック・Chromium の
+// セッションなど、userData を使うものより前に行う（dataLocation.ts / dataLocationRunner.ts）。
+// 更新の適用モードでは exe の隣（＝ステージング）に data を作らないよう、一時フォルダを使う。
+const applyModeArgs = parseApplyArg(process.argv);
+initDataLocation(!!applyModeArgs);
 
 registerAppProtocolPrivilege();
 
@@ -842,6 +849,12 @@ function setupIpc(): void {
     version: app.getVersion(),
     logPath: getLogPath(),
     dataDir: app.getPath('userData'),
+    // 'portable'（exe の隣の data）／'fallback'（書き込めず %APPDATA% を使用）／'default'（開発時など）
+    dataLocation: {
+      mode: getDataLocationInfo().mode,
+      reason: getDataLocationInfo().reason,
+      defaultDir: getDataLocationInfo().defaultDir,
+    },
   }));
 
   ipcMain.handle('app:open-path', async (_e, target: 'logs' | 'data' | 'recordings') => {
@@ -2357,6 +2370,10 @@ async function main() {
     app.setAppUserModelId('com.callstack.app');
   }
 
+  // 従来の保存先（%APPDATA%\callstack）から exe の隣の data フォルダへ引き継ぐ。
+  // 単一起動ロック（Windows では userData 直下に lockfile を作る）より前、store 初期化より前に行う。
+  await migrateToDataLocation();
+
   // 二重起動の防止。ロックを取得できない＝既に起動中なので、
   // このプロセスは終了し、既存インスタンスを最前面へ出す。
   const gotTheLock = app.requestSingleInstanceLock();
@@ -2563,7 +2580,6 @@ async function runApplyMode(args: ApplyUpdateArgs): Promise<void> {
   app.exit(code);
 }
 
-const applyModeArgs = parseApplyArg(process.argv);
 if (applyModeArgs) {
   void runApplyMode(applyModeArgs);
 } else {

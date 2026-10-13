@@ -1,7 +1,7 @@
 import { ComponentType, ReactNode, useEffect, useRef, useState } from 'react';
 import {
   AppEvent, RecordingSourceConfig, Settings, TagDef, ThemePref, WhisperModel,
-  VoskLiveModel, VOSK_MODELS, TranscriptionSettings, TermReplacement,
+  VoskLiveModel, VOSK_MODELS, TranscriptionSettings, TermReplacement, AppInfo,
 } from '../../shared/types';
 import {
   SlidersHorizontal, Mic, FileText, Video, Keyboard, Tag, Database, Info,
@@ -435,6 +435,48 @@ function TeamsWindowProbe() {
   );
 }
 
+/** 現在のデータフォルダの場所と、引っ越し・更新時の注意 */
+function DataLocationRow() {
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  useEffect(() => {
+    window.api.app.info().then(setInfo).catch(() => {});
+  }, []);
+  if (!info) return <span className="text-xs text-ink-mute">読み込み中…</span>;
+  const mode = info.dataLocation.mode;
+  return (
+    <div className="w-full space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="min-w-0 max-w-full flex-1 select-text truncate rounded-md border border-rule bg-paper px-2 py-1 text-xs text-ink-mute"
+          title={info.dataDir}
+        >
+          {info.dataDir}
+        </span>
+        <button
+          onClick={() => void window.api.app.openPath('data')}
+          className="rounded-md border border-rule bg-surface px-3 py-1 text-xs text-ink hover:bg-paper"
+        >
+          <FolderOpen size={12} className="mr-1 inline align-[-1px]" />フォルダを開く
+        </button>
+      </div>
+      {mode === 'portable' && (
+        <div className="text-xs text-ink-mute">
+          このフォルダごとコピーすれば、別の PC へ記録と設定を引っ越せます。手動で新しい版に入れ替えるときは data フォルダを消さないでください
+        </div>
+      )}
+      {mode === 'fallback' && (
+        <div className="flex items-start gap-1 text-xs text-pending">
+          <AlertTriangle size={13} className="mt-0.5 flex-none" />
+          <span>
+            exe の置き場所に書き込めないため、%APPDATA% に保存しています
+            {info.dataLocation.reason ? `（${info.dataLocation.reason}）` : ''}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** データ・録音・ログの各フォルダを開くボタン列 */
 function AppFoldersRow() {
   return (
@@ -607,7 +649,7 @@ function UpdateVersionSection({
   autoInstallUpdates: boolean;
   onToggleAutoInstall: (v: boolean) => void;
 }) {
-  const [info, setInfo] = useState<{ version: string; logPath: string; dataDir: string } | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [updateUrl, setUpdateUrl] = useState<string | null>(null);
@@ -1817,6 +1859,14 @@ export function SettingsPage({ settings, onSave }: { settings: Settings; onSave:
               keywords: ['バックアップ', '復元', 'JSON', '書き出す', '取り込む'],
               full: true,
               render: () => <BackupRestoreRow />,
+            },
+            {
+              id: 'dataLocation',
+              label: 'データの保存場所',
+              description: '設定・記録・録音・ログを保存しているフォルダです',
+              keywords: ['データフォルダ', '保存場所', '引っ越し', '移行', 'ポータブル', 'data'],
+              full: true,
+              render: () => <DataLocationRow />,
             },
             {
               id: 'appFolders',

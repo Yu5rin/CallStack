@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { promises as NodeFsPromises } from 'node:fs';
 import { planCarryOver, USER_PLACED_RESOURCE_DIRS } from './updateCarryOver.ts';
 import { COMPLETION_MARKER_FILE_NAME } from './updateLeftoverPolicy.ts';
+import { PORTABLE_DATA_DIR_NAME } from './dataLocation.ts';
 
 /**
  * 自動更新の最後の「入れ替え」を行う処理。
@@ -18,6 +19,11 @@ import { COMPLETION_MARKER_FILE_NAME } from './updateLeftoverPolicy.ts';
  * その中に退避フォルダ `.callstack-old-<日時>` を作り、既存の直下の項目をすべてそこへ移し、
  * ステージング（展開済みの新しい版）の中身をインストール先へ「コピー」する
  * （ステージングの exe は実行中のため移動できない）。失敗したら元に戻す。
+ *
+ * 【データフォルダ `data` は絶対に動かさない】
+ * 設定・記録・録音・ログは exe の隣の `data` フォルダにある（dataLocation.ts）。入れ替えでは、
+ * インストール先の `data` を退避にも移さず、ステージングに（万一）`data` があっても
+ * 上書きせず、ロールバックでも消さない。入れ替えの対象はアプリ本体のファイルだけ。
  *
  * このモジュールは electron に依存せず、ファイル操作は注入された fs（本番は original-fs）で行う。
  * そのため node:test で素の node:fs を渡して検証できる。
@@ -127,6 +133,14 @@ export function makeBackupDirName(now: Date): string {
 
 export function isBackupDirName(name: string): boolean {
   return name.startsWith(BACKUP_DIR_PREFIX);
+}
+
+/**
+ * 入れ替えの対象外にする項目か（データフォルダ `data`）。
+ * Windows ではフォルダ名の大文字小文字を区別しないので、小文字にそろえて比べる。
+ */
+export function isPreservedEntryName(name: string): boolean {
+  return name.toLowerCase() === PORTABLE_DATA_DIR_NAME;
 }
 
 /**
@@ -241,6 +255,7 @@ export async function runApplyUpdate(args: ApplyUpdateArgs, deps: ApplierDeps): 
     const existing = await fs.readdir(installDir);
     for (const name of existing) {
       if (isBackupDirName(name)) continue; // 自分の退避先と、以前の退避フォルダには触れない
+      if (isPreservedEntryName(name)) continue; // データフォルダは退避にも移さない
       await retry(`move ${name}`, () => fs.rename(path.join(installDir, name), path.join(backupDir, name)));
       movedNames.push(name);
     }
@@ -250,6 +265,10 @@ export async function runApplyUpdate(args: ApplyUpdateArgs, deps: ApplierDeps): 
     const staged = await fs.readdir(stagingDir, { withFileTypes: true });
     for (const e of staged) {
       if (isBackupDirName(e.name)) continue;
+      if (isPreservedEntryName(e.name)) {
+        await log(`skip '${e.name}' in staging (データフォルダは上書きしない)`);
+        continue;
+      }
       const src = path.join(stagingDir, e.name);
       const dst = path.join(installDir, e.name);
       copiedNames.push(e.name); // 途中で失敗しても巻き戻せるよう、先に記録する

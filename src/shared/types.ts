@@ -479,3 +479,18 @@ export const WHISPER_MODELS: Array<{ id: WhisperModel; sizeMb: number; label: st
   { id: 'medium', sizeMb: 1500, label: 'medium (約 1.5GB, 高精度)' },
   { id: 'large-v3-turbo', sizeMb: 1620, label: 'large-v3-turbo (約 1.6GB, 最高精度・medium より高速。会議向け)' },
 ];
+
+/** アプリ情報（設定画面の「バージョン情報」「データとバックアップ」用） */
+export interface AppInfo {
+  version: string;
+  logPath: string;
+  /** 実際に使っているデータフォルダ */
+  dataDir: string;
+  dataLocation: {
+    /** 'portable'=exe の隣の data／'fallback'=書き込めず %APPDATA% を使用／'default'=開発時など／'applier'=更新の適用 */
+    mode: 'portable' | 'fallback' | 'default' | 'applier';
+    reason: string | null;
+    /** 従来の保存先（%APPDATA%\callstack） */
+    defaultDir: string;
+  };
+}

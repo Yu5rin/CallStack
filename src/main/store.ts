@@ -67,8 +67,10 @@ export interface RecoveryInfo {
 }
 
 export class Store {
-  private dataFile: string;
-  private backupDir: string;
+  // 保存先は init() で決める（データフォルダの引き継ぎが失敗して従来の場所に戻る場合があるため、
+  // コンストラクタの時点では userData を読まない）
+  private dataFile = '';
+  private backupDir = '';
   private data: DataFile;
   private writeTimer: NodeJS.Timeout | null = null;
   /** 直列化された flush の Promise チェーン（同じ tmp ファイルへの書き込み競合を防ぐ） */
@@ -80,9 +82,6 @@ export class Store {
   recoveryInfo: RecoveryInfo | null = null;
 
   constructor() {
-    const userData = app.getPath('userData');
-    this.dataFile = path.join(userData, 'data.json');
-    this.backupDir = path.join(userData, 'backups');
     this.data = {
       version: FILE_VERSION,
       calls: [],
@@ -120,6 +119,9 @@ export class Store {
   }
 
   async init(): Promise<void> {
+    const userData = app.getPath('userData');
+    this.dataFile = path.join(userData, 'data.json');
+    this.backupDir = path.join(userData, 'backups');
     try {
       const buf = await fs.readFile(this.dataFile, 'utf-8');
       const parsed = JSON.parse(buf) as Partial<DataFile>;

@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { logInfo } from './log';
+import { getDataLocationInfo } from './dataLocationRunner';
 import {
   classifyCurrentData,
   type CurrentDataState,
@@ -25,6 +26,17 @@ import {
 export async function migrateLegacyUserData(): Promise<void> {
   try {
     const userData = app.getPath('userData');
+    // データフォルダを exe の隣へ移した版では、従来の保存先（%APPDATA%\callstack）に記録が
+    // 残っている場合（引き継ぎ前・引き継ぎに失敗した場合）は、そちらを優先して旧製品名の
+    // フォルダからは引き継がない（古い記録で上書きしないため）
+    const { defaultDir } = getDataLocationInfo();
+    if (defaultDir !== userData) {
+      const state = await readCurrentDataState(path.join(defaultDir, DATA_FILE));
+      if (state === 'has-calls' || state === 'unreadable') {
+        logInfo('migrate', `skip: ${defaultDir} has records; legacy data is not imported`);
+        return;
+      }
+    }
     const candidates = legacyDirCandidates(
       app.getPath('appData'),
       userData,
